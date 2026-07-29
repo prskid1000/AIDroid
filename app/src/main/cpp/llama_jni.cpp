@@ -585,6 +585,15 @@ Java_ai_ondevice_engine_LlamaBridge_nativeFormatPrompt(
         common_chat_templates_inputs inputs;
         inputs.use_jinja             = true;
         inputs.add_generation_prompt = addGenerationPrompt == JNI_TRUE;
+        // Must match what the parser is given, and it was not: this defaults to
+        // NONE, so the applied template resolved to a format with no notion of
+        // reasoning. Setting it only on the parser was not enough — the format
+        // is decided here, at template-apply time, and a format that does not
+        // know about thinking cannot split it out however the parser is
+        // configured. The visible symptom was <think> sitting raw in the
+        // streamed reply instead of collapsing into its own block.
+        inputs.reasoning_format      = COMMON_REASONING_FORMAT_DEEPSEEK;
+        inputs.enable_thinking       = true;
 
         for (const auto & item : json::parse(jni_to_string(env, jmessages))) {
             inputs.messages.push_back(to_chat_msg(item));
