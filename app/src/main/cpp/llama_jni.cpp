@@ -666,6 +666,7 @@ Java_ai_ondevice_engine_LlamaBridge_nativeStartGeneration(
     const auto prompt = jni_to_string(env, jprompt);
     const auto tokens = common_tokenize(e->vocab, prompt, true, true);
 
+
     const uint32_t n_ctx = llama_n_ctx(e->ctx);
     if (tokens.size() >= n_ctx) {
         return jni_from_string(env, json{
@@ -769,6 +770,14 @@ Java_ai_ondevice_engine_LlamaBridge_nativeNextToken(JNIEnv * env, jobject, jlong
         // SPEC §1.3 forbids.
         common_chat_parser_params pparams(e->chat_params);
         pparams.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
+        // The parser is built to read a whole assistant turn, header included,
+        // so that a prefilled reply can be continued. `e->generated` holds only
+        // the completion — the header was consumed as prompt tokens and never
+        // enters this string. Leaving generation_prompt set made the parser
+        // supply the prefix it expected but did not find, so every reply began
+        // with a literal "<|im_start|>assistant", and that stray prefix also
+        // pushed <think> off the front and stopped reasoning being split out.
+        pparams.generation_prompt.clear();
         common_chat_msg msg;
         try {
             msg = common_chat_parse(e->generated, true, pparams);
@@ -845,6 +854,7 @@ Java_ai_ondevice_engine_LlamaBridge_nativeNextToken(JNIEnv * env, jobject, jlong
         // written is now either complete or was never one.
         common_chat_parser_params pparams(e->chat_params);
         pparams.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
+        pparams.generation_prompt.clear(); // same reason as the streaming parse
         try {
             const auto msg = common_chat_parse(e->generated, false, pparams);
             out["content"]   = msg.content;
