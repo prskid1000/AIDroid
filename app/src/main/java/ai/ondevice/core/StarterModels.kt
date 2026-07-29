@@ -15,10 +15,9 @@ package ai.ondevice.core
  * suggestion that 404s wastes the user's time; a suggestion that downloads 400
  * MB and then cannot speak wastes their storage as well.
  *
- * OmniVoice is the current example of the second case, and is deliberately
- * absent. Its ONNX build resolves and would download happily, but nothing in
- * this app can run its 32-step decoder — and on a phone it would need roughly
- * twenty seconds of compute per second of speech even if it could.
+ * OmniVoice is listed now that there is an engine for it, with its cost stated
+ * rather than buried: it is genuinely six to seven times slower than Kokoro, so
+ * the summary says so before the download starts rather than after.
  */
 data class StarterModel(
     /** What goes in the paste field, verbatim. */
@@ -79,6 +78,17 @@ object StarterModels {
             modality = Modality.TEXT_TO_SPEECH,
             summary = "The neural voice. Its 55 voice packs come with it.",
             sizeHint = "~116 MB with voices",
+        ),
+        StarterModel(
+            repoId = "onnx-community/OmniVoice-Onnx",
+            modality = Modality.TEXT_TO_SPEECH,
+            summary = "Any language, [laughter] and [sigh], several speakers — but " +
+                "six to seven times slower than Kokoro.",
+            // Not the int4 figure. The backbone quantises to int4 fine, but the
+            // audio embedding table and codebook heads must stay fp16 or the
+            // output is noise rather than a worse voice, so the honest number
+            // includes them.
+            sizeHint = "~683 MB",
         ),
 
         // — images —

@@ -573,23 +573,59 @@ class VoiceViewModel @Inject constructor(
         // Point the synthesiser at the installed weights *before* asking what
         // it can do — `kokoroReady` is a statement about this device right now,
         // not a capability the build declares.
-        val modelDirectory = _state.value.ttsModel
-            ?.let { java.io.File(it.localPath) }
-            ?.let { if (it.isDirectory) it else it.parentFile }
-        synthesizer.useKokoroModel(modelDirectory)
+        //
+        // Both neural engines are text-to-speech models, so the library can hold
+        // either or both. Each directory is offered to each engine and the
+        // engine decides: Kokoro wants a graph plus voice packs, OmniVoice wants
+        // its four graphs and a tokenizer, and neither is identified by name.
+        val ttsModels = db.models().observeByModality(Modality.TEXT_TO_SPEECH).first()
+        val directories = ttsModels.mapNotNull { model ->
+            java.io.File(model.localPath).let { if (it.isDirectory) it else it.parentFile }
+        }
+        synthesizer.useKokoroModel(directories.firstOrNull { java.io.File(it, "voices").exists() || it.walkTopDown().any { f -> f.extension == "bin" } })
+        synthesizer.useOmniVoiceModel(directories.firstOrNull { synthesizer.omniVoiceLooksInstalled(it) })
 
         val system = synthesizer.systemVoices()
         val kokoro = synthesizer.kokoroVoices()
-        val kokoroInstalled = synthesizer.kokoroReady
+        val omni = synthesizer.omniVoiceVoices()
+        val all = kokoro + omni + system
         _state.value = _state.value.copy(
-            voices = kokoro + system,
+            voices = all,
             systemEngineAvailable = system.isNotEmpty(),
-            kokoroAvailable = kokoroInstalled,
+            kokoroAvailable = synthesizer.kokoroReady,
+            omniVoiceAvailable = synthesizer.omniVoiceReady,
             // Default to something that can actually speak right now.
-            voice = _state.value.voice.takeIf { id -> (kokoro + system).any { it.id == id && it.available } }
-                ?: (kokoro + system).firstOrNull { it.available }?.id
+            voice = _state.value.voice.takeIf { id -> all.any { it.id == id && it.available } }
+                ?: all.firstOrNull { it.available }?.id
                 ?: _state.value.voice,
         )
+    }
+
+    /**
+     * Switch engine explicitly.
+     *
+     * Kokoro and OmniVoice are not interchangeable and the app never picks
+     * between them on the user's behalf: one is fast and fixed-voice, the other
+     * is slow and can do things the first cannot. Choosing moves the selected
+     * voice to that engine's first usable one, so the two controls never
+     * disagree about which engine is about to speak.
+     */
+    fun selectProvider(provider: ai.ondevice.speech.SynthProvider) {
+        val first = _state.value.voices.firstOrNull { it.provider == provider && it.available }
+        if (first == null) {
+            _state.value = _state.value.copy(
+                speakError = when (provider) {
+                    ai.ondevice.speech.SynthProvider.OMNIVOICE ->
+                        "OmniVoice is not installed. Models → Add a model, then " +
+                            "onnx-community/OmniVoice-Onnx — about 683 MB."
+                    ai.ondevice.speech.SynthProvider.KOKORO ->
+                        "Kokoro is not installed. Models → Add a model, and search for Kokoro."
+                    else -> "This device has no system speech engine."
+                },
+            )
+            return
+        }
+        _state.value = _state.value.copy(voice = first.id, speakError = null)
     }
 
     fun setScript(value: String) {
@@ -1091,6 +1127,7 @@ data class VoiceState(
     val lastAudioPath: String? = null,
     val speakError: String? = null,
     val kokoroAvailable: Boolean = false,
+    val omniVoiceAvailable: Boolean = false,
     val systemEngineAvailable: Boolean = false,
     val loading: Boolean = false,
     val error: String? = null,

@@ -153,10 +153,15 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideOmniVoiceEngine() = ai.ondevice.speech.OmniVoiceEngine()
+
+    @Provides
+    @Singleton
     fun provideSpeechSynthesizer(
         @ApplicationContext context: Context,
         kokoro: ai.ondevice.speech.KokoroEngine,
-    ) = ai.ondevice.speech.SpeechSynthesizer(context, kokoro)
+        omniVoice: ai.ondevice.speech.OmniVoiceEngine,
+    ) = ai.ondevice.speech.SpeechSynthesizer(context, kokoro, omniVoice)
 
     @Provides
     @Singleton

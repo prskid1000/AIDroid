@@ -37,6 +37,7 @@ import java.util.UUID
 class SpeechSynthesizer(
     private val context: Context,
     private val kokoro: KokoroEngine,
+    private val omniVoice: OmniVoiceEngine,
 ) {
 
     private var tts: TextToSpeech? = null
@@ -44,6 +45,9 @@ class SpeechSynthesizer(
 
     @Volatile
     private var kokoroDirectory: File? = null
+
+    @Volatile
+    private var omniVoiceDirectory: File? = null
 
     @Volatile
     private var player: android.media.AudioTrack? = null
@@ -56,10 +60,43 @@ class SpeechSynthesizer(
         kokoroDirectory = directory
     }
 
+    /**
+     * Point the synthesiser at an installed OmniVoice model, or null if none is.
+     * Checked by contents rather than by name — the install is four graphs and a
+     * tokenizer, and any directory holding them will do.
+     */
+    fun useOmniVoiceModel(directory: File?) {
+        omniVoiceDirectory = directory?.takeIf { omniVoice.looksInstalled(it) }
+    }
+
+    /** So the caller can sort several installed models into the right engine. */
+    fun omniVoiceLooksInstalled(directory: File): Boolean = omniVoice.looksInstalled(directory)
+
     val kokoroReady: Boolean get() = kokoro.runtimeAvailable && kokoroDirectory != null
+
+    val omniVoiceReady: Boolean get() = omniVoice.runtimeAvailable && omniVoiceDirectory != null
 
     /** Kokoro's voices, marked available only if this build can speak them. */
     fun kokoroVoices(): List<SynthVoice> = KokoroVoices.catalogue(available = kokoroReady)
+
+    /**
+     * OmniVoice's single entry.
+     *
+     * It has no voice *catalogue* — the voice comes from a written description
+     * or a reference clip, not from a fixed list — so offering one row is the
+     * honest shape rather than inventing names for it.
+     */
+    fun omniVoiceVoices(): List<SynthVoice> = listOf(
+        SynthVoice(
+            id = OMNIVOICE_VOICE_ID,
+            displayName = "OmniVoice",
+            locale = "mul",
+            localeLabel = "Any language · emotion tags",
+            quality = 400,
+            provider = SynthProvider.OMNIVOICE,
+            available = omniVoiceReady,
+        ),
+    )
 
     suspend fun initialise(): Boolean {
         if (ready) return true
@@ -98,8 +135,11 @@ class SpeechSynthesizer(
      * Speak now. Emits progress so the screen can show which utterance is live
      * and offer a stop that actually stops.
      */
-    fun speak(request: SpeechRequest): Flow<SpeechEvent> =
-        if (request.isKokoro) speakWithKokoro(request) else speakWithSystem(request)
+    fun speak(request: SpeechRequest): Flow<SpeechEvent> = when (request.provider) {
+        SynthProvider.KOKORO -> speakWithKokoro(request)
+        SynthProvider.OMNIVOICE -> speakWithNeural(request) { renderOmniVoice(it) }
+        SynthProvider.SYSTEM -> speakWithSystem(request)
+    }
 
     /**
      * Kokoro: synthesise the whole passage, then play it.
@@ -109,9 +149,16 @@ class SpeechSynthesizer(
      * mean a gap whose length depends on the load — audibly worse than a
      * slightly later start. The screen shows the wait for what it is.
      */
-    private fun speakWithKokoro(request: SpeechRequest): Flow<SpeechEvent> = flow {
-        val audio = renderKokoro(request).getOrElse { failure ->
-            emit(SpeechEvent.Failed(failure.message ?: "Kokoro could not speak that."))
+    private fun speakWithKokoro(request: SpeechRequest): Flow<SpeechEvent> =
+        speakWithNeural(request) { renderKokoro(it) }
+
+    /** Both neural engines share this: synthesise the whole passage, then play it. */
+    private fun speakWithNeural(
+        request: SpeechRequest,
+        render: suspend (SpeechRequest) -> Result<KokoroAudio>,
+    ): Flow<SpeechEvent> = flow {
+        val audio = render(request).getOrElse { failure ->
+            emit(SpeechEvent.Failed(failure.message ?: "That could not be spoken."))
             return@flow
         }
         emit(SpeechEvent.Started)
@@ -171,8 +218,13 @@ class SpeechSynthesizer(
      */
     suspend fun synthesizeToFile(request: SpeechRequest, destination: File): Result<File> =
         withContext(Dispatchers.IO) {
-            if (request.isKokoro) {
-                return@withContext renderKokoro(request).map { audio ->
+            val neural = when (request.provider) {
+                SynthProvider.KOKORO -> renderKokoro(request)
+                SynthProvider.OMNIVOICE -> renderOmniVoice(request)
+                SynthProvider.SYSTEM -> null
+            }
+            if (neural != null) {
+                return@withContext neural.map { audio ->
                     WavFile.write(destination, audio.samples, audio.sampleRate)
                 }
             }
@@ -219,7 +271,16 @@ class SpeechSynthesizer(
         tts = null
         ready = false
         stopPlayback()
-        runCatching { kotlinx.coroutines.runBlocking { kokoro.unload() } }
+        runCatching {
+            kotlinx.coroutines.runBlocking {
+                kokoro.unload()
+                omniVoice.unload()
+            }
+        }
+    }
+
+    companion object {
+        const val OMNIVOICE_VOICE_ID = "omnivoice"
     }
 
     // — Kokoro —
@@ -275,6 +336,39 @@ class SpeechSynthesizer(
                 languageOverride = request.languageCode,
             ),
         )
+    }
+
+    /**
+     * OmniVoice needs no phonemiser and has no voice packs, so there is far less
+     * to refuse over than with Kokoro — either the four graphs are installed or
+     * they are not.
+     */
+    private suspend fun renderOmniVoice(request: SpeechRequest): Result<KokoroAudio> {
+        val directory = omniVoiceDirectory ?: return Result.failure(
+            IllegalStateException(
+                "No OmniVoice model is installed. Models → Add a model, then " +
+                    "onnx-community/OmniVoice-Onnx.",
+            ),
+        )
+        omniVoice.load(directory).onFailure { return Result.failure(it) }
+        return omniVoice.synthesize(
+            OmniVoiceRequest(
+                text = request.text,
+                speed = request.speed,
+                trimSilence = request.trimSilence,
+            ),
+        ).map { audio ->
+            // OmniVoice has no gain input either, so volume is applied here for
+            // the same reason it is for Kokoro.
+            if (request.volume == 1f) {
+                audio
+            } else {
+                val gain = request.volume.coerceIn(0f, 2f)
+                audio.copy(samples = FloatArray(audio.samples.size) {
+                    (audio.samples[it] * gain).coerceIn(-1f, 1f)
+                })
+            }
+        }
     }
 
     private fun voicePack(directory: File, voiceId: String): File? {
@@ -411,6 +505,13 @@ data class SynthVoice(
 
 enum class SynthProvider(val label: String) {
     KOKORO("Kokoro"),
+
+    /**
+     * Slower than Kokoro by six or seven times, and worth it only for what
+     * Kokoro cannot do at all — emotion tags, cloning, and languages this build
+     * has no phonemiser for. Never selected automatically.
+     */
+    OMNIVOICE("OmniVoice"),
     SYSTEM("System engine"),
 }
 

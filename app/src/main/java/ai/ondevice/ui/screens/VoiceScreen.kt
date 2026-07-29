@@ -416,7 +416,15 @@ private fun SpeakPanel(
     onOpenAdvanced: () -> Unit,
 ) {
     // — which engine is actually speaking —
-    NCard(ring = if (state.kokoroAvailable) NocturneColors.Accent700 else NocturneColors.Divider) {
+    //
+    // A switch rather than an automatic choice. The two neural engines are not
+    // interchangeable: Kokoro is six or seven times faster, OmniVoice can do
+    // things Kokoro cannot do at all. Picking on the user's behalf would mean
+    // either surprising them with a minute of compute or silently dropping the
+    // feature they came for.
+    val provider = state.selectedVoice?.provider ?: ai.ondevice.speech.SynthProvider.SYSTEM
+    val engines = ai.ondevice.speech.SynthProvider.entries
+    NCard(ring = if (provider != ai.ondevice.speech.SynthProvider.SYSTEM) NocturneColors.Accent700 else NocturneColors.Divider) {
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -429,22 +437,46 @@ private fun SpeakPanel(
                 modifier = Modifier.size(16.dp),
             )
             Text(
-                if (state.kokoroAvailable) "Kokoro · on-device neural" else "System engine",
+                when (provider) {
+                    ai.ondevice.speech.SynthProvider.KOKORO -> "Kokoro · on-device neural"
+                    ai.ondevice.speech.SynthProvider.OMNIVOICE -> "OmniVoice · expressive, slow"
+                    ai.ondevice.speech.SynthProvider.SYSTEM -> "System engine"
+                },
                 style = NocturneType.CardTitleSm,
                 modifier = Modifier.weight(1f),
             )
             NTag(
-                if (state.kokoroAvailable) "neural" else "fallback",
-                style = if (state.kokoroAvailable) NTagStyle.Accent else NTagStyle.Outline,
+                if (provider == ai.ondevice.speech.SynthProvider.SYSTEM) "fallback" else "neural",
+                style = if (provider == ai.ondevice.speech.SynthProvider.SYSTEM) NTagStyle.Outline else NTagStyle.Accent,
             )
         }
-        if (!state.kokoroAvailable) {
-            Text(
-                "Kokoro is not installed, so this uses Android's own synthesiser. It is a different " +
-                    "voice with different prosody — the app says so rather than passing it off as Kokoro.",
-                style = NocturneType.CardBody,
-                color = NocturneColors.Text.copy(alpha = 0.8f),
-            )
+
+        NSeg(
+            options = engines.map { it.label },
+            selectedIndex = engines.indexOf(provider).coerceAtLeast(0),
+            onSelect = { viewModel.selectProvider(engines[it]) },
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        )
+
+        Text(
+            when (provider) {
+                ai.ondevice.speech.SynthProvider.KOKORO ->
+                    "Fast enough to use for anything: about half a second of work per second of " +
+                        "speech. Fifty voices, six languages, no emotion tags."
+                ai.ondevice.speech.SynthProvider.OMNIVOICE ->
+                    "Reads any language with no phonemiser, takes [laughter] and [sigh], and can " +
+                        "voice several speakers. It is six to seven times slower than Kokoro — " +
+                        "expect around a minute of work for a short sentence on a phone."
+                ai.ondevice.speech.SynthProvider.SYSTEM ->
+                    "Android's own synthesiser. A different voice with different prosody — the app " +
+                        "says so rather than passing it off as one of the neural engines."
+            },
+            style = NocturneType.CardBody,
+            color = NocturneColors.Text.copy(alpha = 0.8f),
+        )
+
+        if (!state.omniVoiceAvailable && provider != ai.ondevice.speech.SynthProvider.OMNIVOICE) {
+            NHelp("OmniVoice is not installed — Add model lists it under Voice, about 683 MB.")
         }
     }
 
