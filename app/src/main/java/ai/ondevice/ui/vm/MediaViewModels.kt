@@ -618,6 +618,58 @@ class VoiceViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Pull back what the Advanced screen changed — the same round trip the
+     * Image screen makes, and for the same reason: both screens edit one row,
+     * so the surfaced handful has to reflect it rather than being a second copy
+     * of the truth that silently disagrees.
+     *
+     * Without this, every Kokoro parameter below Basic was inert: the Advanced
+     * screen wrote `split_pattern` and `trim_silence` into the model row and
+     * nothing ever read them back out.
+     */
+    fun refreshFromOverrides() {
+        viewModelScope.launch {
+            val model = db.models().observeByModality(Modality.TEXT_TO_SPEECH).first().firstOrNull()
+            val tts = SparseParams.parse(model?.paramOverridesJson)
+            val stt = SparseParams.parse(
+                db.models().observeByModality(Modality.SPEECH_TO_TEXT).first().firstOrNull()
+                    ?.paramOverridesJson,
+            )
+            _state.value = _state.value.copy(
+                ttsModel = model ?: _state.value.ttsModel,
+                speed = tts.float("speed") ?: _state.value.speed,
+                volume = tts.float("volume") ?: _state.value.volume,
+                splitPattern = tts.string("split_pattern") ?: _state.value.splitPattern,
+                trimSilence = tts.bool("trim_silence") ?: _state.value.trimSilence,
+                languageCode = tts.string("lang_code") ?: _state.value.languageCode,
+                // The capture readout used to print these from hardcoded
+                // defaults, so setting them in Advanced changed neither the
+                // capture nor the line claiming to describe it.
+                stepMs = stt.int("step_ms") ?: _state.value.stepMs,
+                vadEnabled = stt.bool("vad") ?: _state.value.vadEnabled,
+            )
+            // A blend written as "af_heart:bm_george:0.4" in Advanced and one
+            // set with the Blend control are the same setting, so they share
+            // storage rather than each having their own.
+            tts.string("voice_blend")?.let(::applyBlendSpec)
+        }
+    }
+
+    private fun applyBlendSpec(spec: String) {
+        val parts = spec.split(':')
+        if (parts.size < 2 || parts.any { it.isBlank() }) {
+            if (spec.isBlank()) _state.value = _state.value.copy(blendVoice = null)
+            return
+        }
+        _state.value = _state.value.copy(
+            voice = parts[0].trim(),
+            blendVoice = parts[1].trim(),
+            blendRatio = parts.getOrNull(2)?.trim()?.toFloatOrNull()?.coerceIn(0f, 1f)
+                ?: _state.value.blendRatio,
+        )
+    }
+
     fun setPitch(value: Float) = update { copy(pitch = value) }
     fun setVolume(value: Float) = update { copy(volume = value) }
     fun setVoiceQuery(value: String) = update { copy(voiceQuery = value) }
@@ -728,6 +780,9 @@ class VoiceViewModel @Inject constructor(
             blendVoiceId = _state.value.blendVoice
                 ?.takeIf { voice?.provider == ai.ondevice.speech.SynthProvider.KOKORO },
             blendRatio = _state.value.blendRatio,
+            splitPattern = _state.value.splitPattern,
+            trimSilence = _state.value.trimSilence,
+            languageCode = _state.value.languageCode,
         )
     }
 
@@ -786,7 +841,16 @@ class VoiceViewModel @Inject constructor(
             }
 
             val levels = ArrayDeque<Float>()
-            transcriber.listen(stepMillis = _state.value.stepMs).collect { event ->
+            // From the model's overrides via refreshFromOverrides, so the
+            // "step N ms" readout above the waveform describes the capture that
+            // is actually running rather than a constant.
+            val overrides = SparseParams.parse(model.paramOverridesJson)
+            val stepMs = overrides.int("step_ms") ?: _state.value.stepMs
+            _state.value = _state.value.copy(
+                stepMs = stepMs,
+                vadEnabled = overrides.bool("vad") ?: _state.value.vadEnabled,
+            )
+            transcriber.listen(stepMillis = stepMs).collect { event ->
                 when (event) {
                     is CaptureEvent.Level -> {
                         levels.addLast(event.peak)
@@ -1016,6 +1080,10 @@ data class VoiceState(
     val speed: Float = 1.0f,
     val pitch: Float = 1.0f,
     val volume: Float = 1.0f,
+    /** Expert parameters, mirrored from the TTS model's overrides. */
+    val splitPattern: String = ai.ondevice.speech.KokoroRequest.DEFAULT_SPLIT_PATTERN,
+    val trimSilence: Boolean = true,
+    val languageCode: String? = null,
     val speaking: Boolean = false,
     val rendering: Boolean = false,
     /** Word being spoken right now, as character offsets into the script. */

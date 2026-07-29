@@ -56,11 +56,48 @@ class Phonemizer(private val context: Context) {
         else -> null
     }
 
-    suspend fun phonemize(text: String, kokoroVoiceId: String): Result<String> =
+    /**
+     * [languageOverride] is the `lang_code` parameter: an espeak voice to use
+     * instead of the one the Kokoro voice id implies. It is a real thing to
+     * want — an American-trained voice reading British spellings pronounces
+     * "schedule" the American way, and forcing en-gb fixes it — but it is also
+     * a way to hand the model phonemes it was never trained on, so it stays an
+     * Advanced control with the default doing the sensible thing.
+     */
+    /**
+     * A `lang_code` value to an espeak voice, or null if this build has no data
+     * staged for it. `ja` and `zh` are in the manifest's list because Kokoro
+     * has voices for them; they resolve to null here because
+     * tools/stage-espeak-data.py deliberately does not ship their tables.
+     */
+    private fun espeakVoiceForCode(code: String): String? = when (code.lowercase()) {
+        "en-us" -> "en-us"
+        "en-gb" -> "en-gb"
+        "es" -> "es"
+        "fr" -> "fr-fr"
+        "hi" -> "hi"
+        "it" -> "it"
+        "pt-br" -> "pt-br"
+        else -> null
+    }
+
+    suspend fun phonemize(
+        text: String,
+        kokoroVoiceId: String,
+        languageOverride: String? = null,
+    ): Result<String> =
         withContext(Dispatchers.Default) {
             runCatching {
                 check(available) { unavailableReason!! }
-                val voice = espeakVoiceFor(kokoroVoiceId)
+                val derived = espeakVoiceFor(kokoroVoiceId)
+                val voice = languageOverride?.takeIf { it.isNotBlank() && it != "auto" }
+                    ?.let { requested ->
+                        espeakVoiceForCode(requested) ?: error(
+                            "This build has no espeak data for \"$requested\". " +
+                                "Language must be auto, en-us, en-gb, es, fr, hi, it or pt-br.",
+                        )
+                    }
+                    ?: derived
                     ?: error(
                         "This build cannot pronounce ${KokoroVoices.languageOf(kokoroVoiceId)} text. " +
                             "Kokoro uses a different front end for it than espeak-ng.",

@@ -311,6 +311,10 @@ fun AddModelScreen(
 
             if (state.resolved == null && state.refusal == null && !state.resolving) {
                 EmptyResolveHint()
+                StarterTable(onPick = { repoId ->
+                    viewModel.onQueryChange(repoId)
+                    viewModel.resolve()
+                })
             }
         }
     }
@@ -327,6 +331,91 @@ private fun EmptyResolveHint() {
             style = NocturneType.CardBody,
             color = NocturneColors.Text.copy(alpha = 0.8f),
         )
+    }
+}
+
+/**
+ * Somewhere to start.
+ *
+ * "Paste a Hugging Face ID" assumes you already know one, and for two of the
+ * four runtimes that is a genuinely unfair assumption: whisper's weights live
+ * in a repo named after the runtime rather than the model, and Kokoro's ONNX
+ * export is published by a different owner than the original. Neither is
+ * guessable.
+ *
+ * Tapping a row fills the paste field and resolves it — the same path a typed
+ * ID takes, with the same verdict and the same refusals. Nothing here is a
+ * shortcut around the fit arithmetic; it only saves the typing.
+ */
+@Composable
+private fun StarterTable(onPick: (String) -> Unit) {
+    ai.ondevice.core.StarterModels.BY_MODALITY.forEach { (modality, entries) ->
+        if (entries.isEmpty()) return@forEach
+        SectionKicker(modality.label, Modifier.padding(top = 18.dp, bottom = 7.dp))
+        StarterRows(entries, onPick)
+    }
+
+    // Add-ons last: they attach to a diffusion model, so installing one before
+    // you have a base model gives you nothing to attach it to.
+    SectionKicker("Image add-ons", Modifier.padding(top = 18.dp, bottom = 7.dp))
+    StarterRows(ai.ondevice.core.StarterModels.ADDONS, onPick)
+    NHelp(
+        "These appear in the Image screen's Attachments section once installed — the app files " +
+            "them by role from their filenames, so it never needs to know the model by name.",
+        Modifier.padding(top = 7.dp),
+    )
+
+    NHelp(
+        "Tapping one fills the field above and resolves it — the same path a pasted ID takes, " +
+            "with the same fit check. These are known to work in this build; they are not the " +
+            "only things that do.",
+        Modifier.padding(top = 10.dp),
+    )
+}
+
+@Composable
+private fun StarterRows(
+    entries: List<ai.ondevice.core.StarterModel>,
+    onPick: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        entries.forEach { entry ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(NocturneColors.Surface, Radius.Md)
+                    .ring(NocturneColors.Divider, Radius.Md)
+                    .nClickableFlat { onPick(entry.repoId) }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        entry.role?.let { NTag(it.label, style = NTagStyle.Outline) }
+                        // The id is the thing being copied into the field, so it
+                        // leads and it is monospaced — it is a value, not prose.
+                        Text(entry.repoId, style = NocturneType.MonoValue)
+                    }
+                    Text(
+                        entry.summary,
+                        style = NocturneType.CardBody,
+                        color = NocturneColors.Text.copy(alpha = 0.75f),
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+                // Stated before the tap, because the download is the part that
+                // costs something.
+                Text(
+                    entry.sizeHint,
+                    style = NocturneType.MonoXs,
+                    color = NocturneColors.TextMuted,
+                )
+            }
+        }
     }
 }
 

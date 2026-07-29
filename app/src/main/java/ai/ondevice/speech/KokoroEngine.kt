@@ -142,7 +142,7 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
                 val active = session ?: error("No Kokoro model is loaded.")
                 val names = inputNames!!
 
-                val chunks = splitForContext(request.text, request.voiceId)
+                val chunks = splitForContext(request.text, request)
                 check(chunks.isNotEmpty()) { "There is nothing to say." }
 
                 val pieces = mutableListOf<FloatArray>()
@@ -157,12 +157,17 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
                         // the length of the tokens about to be fed in, and the
                         // chunks deliberately differ in length.
                         val style = styleFor(request, chunk.tokens.size)
-                        pieces += runGraph(active, names, chunk.tokens, style, request.speed)
+                        val piece = runGraph(active, names, chunk.tokens, style, request.speed)
+                        // Trimmed per chunk rather than once at the end: the
+                        // silence that matters is the padding *between* two
+                        // separately-synthesised sentences, and trimming the
+                        // join afterwards cannot reach it.
+                        pieces += if (request.trimSilence) trimSilence(piece) else piece
                     }
                 }
 
                 KokoroAudio(
-                    samples = join(pieces),
+                    samples = amplify(join(pieces), request.volume),
                     sampleRate = SAMPLE_RATE,
                     phonemes = phonemesUsed.toString(),
                     chunks = chunks.size,
@@ -274,9 +279,9 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
      * sentence that is *itself* too long falls back to splitting on any space,
      * which is audible but still better than truncation.
      */
-    private suspend fun splitForContext(text: String, voiceId: String): List<Chunk> {
+    private suspend fun splitForContext(text: String, request: KokoroRequest): List<Chunk> {
         val sentences = text
-            .split(Regex("(?<=[.!?…])\\s+"))
+            .split(splitRegex(request.splitPattern))
             .map(String::trim)
             .filter(String::isNotEmpty)
             .ifEmpty { listOf(text.trim()) }
@@ -286,55 +291,115 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
 
         suspend fun flush() {
             if (pending.isEmpty()) return
-            out += chunkOf(pending.toString(), voiceId)
+            out += chunkOf(pending.toString(), request)
             pending.clear()
         }
 
         for (sentence in sentences) {
             val candidate = if (pending.isEmpty()) sentence else "$pending $sentence"
-            val tokens = tokenize(phonemize(candidate, voiceId))
+            val tokens = tokenize(phonemize(candidate, request))
             if (tokens.size <= MAX_TOKENS) {
                 pending.clear()
                 pending.append(candidate)
                 continue
             }
             flush()
-            val alone = tokenize(phonemize(sentence, voiceId))
+            val alone = tokenize(phonemize(sentence, request))
             if (alone.size <= MAX_TOKENS) {
                 pending.append(sentence)
             } else {
-                out += splitLongSentence(sentence, voiceId)
+                out += splitLongSentence(sentence, request)
             }
         }
         flush()
         return out
     }
 
-    private suspend fun splitLongSentence(sentence: String, voiceId: String): List<Chunk> {
+    /**
+     * The user's pattern, or the default if theirs does not compile.
+     *
+     * `split_pattern` is a free-text Expert parameter, so a half-typed regex is
+     * an ordinary state to be in rather than an exceptional one. Falling back
+     * keeps the passage speakable; throwing would turn a typo in a field the
+     * user may not even remember setting into "Kokoro could not speak that".
+     */
+    private fun splitRegex(pattern: String): Regex =
+        runCatching { Regex(pattern) }.getOrElse {
+            lastError = "Chunk pattern is not a valid regular expression; using the default."
+            Regex(KokoroRequest.DEFAULT_SPLIT_PATTERN)
+        }
+
+    private suspend fun splitLongSentence(sentence: String, request: KokoroRequest): List<Chunk> {
         val out = mutableListOf<Chunk>()
         val pending = StringBuilder()
         for (word in sentence.split(' ').filter(String::isNotEmpty)) {
             val candidate = if (pending.isEmpty()) word else "$pending $word"
-            if (tokenize(phonemize(candidate, voiceId)).size <= MAX_TOKENS) {
+            if (tokenize(phonemize(candidate, request)).size <= MAX_TOKENS) {
                 pending.clear()
                 pending.append(candidate)
             } else {
-                if (pending.isNotEmpty()) out += chunkOf(pending.toString(), voiceId)
+                if (pending.isNotEmpty()) out += chunkOf(pending.toString(), request)
                 pending.clear()
                 pending.append(word)
             }
         }
-        if (pending.isNotEmpty()) out += chunkOf(pending.toString(), voiceId)
+        if (pending.isNotEmpty()) out += chunkOf(pending.toString(), request)
         return out
     }
 
-    private suspend fun chunkOf(text: String, voiceId: String): Chunk {
-        val phonemes = phonemize(text, voiceId)
+    private suspend fun chunkOf(text: String, request: KokoroRequest): Chunk {
+        val phonemes = phonemize(text, request)
         return Chunk(phonemes = phonemes, tokens = tokenize(phonemes))
     }
 
-    private suspend fun phonemize(text: String, voiceId: String): String =
-        phonemizer.phonemize(text, voiceId).getOrThrow()
+    private suspend fun phonemize(text: String, request: KokoroRequest): String =
+        phonemizer.phonemize(text, request.voiceId, request.languageOverride).getOrThrow()
+
+    // — output shaping —
+
+    /**
+     * Drop leading and trailing near-silence.
+     *
+     * The threshold is relative to the chunk's own peak rather than absolute,
+     * because a quiet voice at 1.0 gain and a loud one are both legitimate and
+     * a fixed floor would eat the start of the first. Everything between the
+     * first and last loud-enough sample is kept, including internal pauses —
+     * those are the sentence's own rhythm, not padding.
+     */
+    private fun trimSilence(samples: FloatArray): FloatArray {
+        if (samples.isEmpty()) return samples
+        var peak = 0f
+        for (sample in samples) {
+            val magnitude = kotlin.math.abs(sample)
+            if (magnitude > peak) peak = magnitude
+        }
+        if (peak <= 0f) return FloatArray(0)
+        val floor = peak * SILENCE_FRACTION
+
+        var start = 0
+        while (start < samples.size && kotlin.math.abs(samples[start]) < floor) start++
+        var end = samples.size
+        while (end > start && kotlin.math.abs(samples[end - 1]) < floor) end--
+        if (start >= end) return FloatArray(0)
+
+        // Leave a few milliseconds either side. Cutting exactly at the first
+        // sample above the floor clips the attack of a plosive and makes the
+        // word start with a click.
+        val pad = SAMPLE_RATE / 200 // 5 ms
+        val from = (start - pad).coerceAtLeast(0)
+        val to = (end + pad).coerceAtMost(samples.size)
+        return samples.copyOfRange(from, to)
+    }
+
+    /** Gain, hard-limited. Above 1.0 the user asked for clipping; give them clipping, not wrap-around. */
+    private fun amplify(samples: FloatArray, volume: Float): FloatArray {
+        if (volume == 1.0f) return samples
+        val gain = volume.coerceIn(0f, 2f)
+        for (i in samples.indices) {
+            samples[i] = (samples[i] * gain).coerceIn(-1f, 1f)
+        }
+        return samples
+    }
 
     /**
      * IPA to ids, one symbol at a time.
@@ -405,6 +470,9 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
         /** The model's positional limit, less the two pad tokens. */
         const val MAX_TOKENS = STYLE_ROWS - 2
 
+        /** What counts as silence, as a fraction of the chunk's own peak. */
+        const val SILENCE_FRACTION = 0.02f
+
         /** Whether the ORT classes are actually in the APK. */
         private val ONNX_AVAILABLE: Boolean = runCatching {
             Class.forName("ai.onnxruntime.OrtEnvironment")
@@ -457,7 +525,26 @@ data class KokoroRequest(
     val speed: Float = 1.0f,
     val blendPack: File? = null,
     val blendRatio: Float = 0f,
-)
+    /**
+     * Where long text is cut. Kokoro stops at 510 tokens and returns clipped
+     * audio rather than an error, so this is what keeps a long passage whole.
+     */
+    val splitPattern: String = DEFAULT_SPLIT_PATTERN,
+    /** Trim near-silence from each chunk before the pieces are joined. */
+    val trimSilence: Boolean = true,
+    /** Gain on the finished waveform. Hard-limited, so >1 clips rather than wraps. */
+    val volume: Float = 1.0f,
+    /**
+     * Force a particular espeak voice instead of deriving it from [voiceId].
+     * Null means derive — which is right almost always, and wrong exactly when
+     * you want an American-trained voice reading British spellings.
+     */
+    val languageOverride: String? = null,
+) {
+    companion object {
+        const val DEFAULT_SPLIT_PATTERN = "(?<=[.!?…])\\s+"
+    }
+}
 
 data class KokoroAudio(
     val samples: FloatArray,

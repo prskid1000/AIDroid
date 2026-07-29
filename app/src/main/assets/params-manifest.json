@@ -210,8 +210,8 @@
     },
 
     "kokoro": {
-      "sourceCommit": "sherpa-onnx",
-      "buildTag": "v0.19",
+      "sourceCommit": "4870adf",
+      "buildTag": "1.52.0",
       "jniContract": 3,
       "params": [
         { "key": "voice", "group": "voice", "type": "enum", "values": ["af_heart", "af_bella", "af_nicole", "af_sarah", "af_sky", "am_adam", "am_michael", "am_echo", "bf_emma", "bf_isabella", "bm_george", "bm_lewis", "jf_alpha", "jm_kumo", "zf_xiaobei", "zm_yunjian", "ef_dora", "em_alex", "ff_siwis", "hf_alpha", "hm_omega", "if_sara", "im_nicola", "pf_dora", "pm_alex"], "default": "af_heart", "tier": "BASIC", "label": "Voice", "help": "Named {lang}{gender}_{name}: af/am US, bf/bm UK, plus ja, zh, es, fr, hi, it and pt-BR.", "requiresReload": false },
@@ -220,12 +220,10 @@
         { "key": "lang_code", "group": "voice", "type": "enum", "values": ["auto", "en-us", "en-gb", "ja", "zh", "es", "fr", "hi", "it", "pt-br"], "default": "auto", "tier": "ADVANCED", "label": "Language", "help": "Drives the phonemizer. Auto follows the voice.", "requiresReload": false },
         { "key": "voice_blend", "group": "voice", "type": "string", "default": "", "tier": "ADVANCED", "label": "Voice blend", "help": "Interpolate two style vectors, e.g. af_heart:bm_george:0.4.", "requiresReload": false },
 
-        { "key": "phonemizer", "group": "synthesis", "type": "enum", "values": ["espeak-ng", "misaki"], "default": "espeak-ng", "tier": "EXPERT", "label": "Phonemizer", "help": "Grapheme-to-phoneme backend.", "requiresReload": true },
-        { "key": "split_pattern", "group": "synthesis", "type": "string", "default": "(?<=[.!?])\\s+", "tier": "EXPERT", "label": "Chunk pattern", "help": "Long text is split on this. Kokoro has a short effective context.", "requiresReload": false },
-        { "key": "trim_silence", "group": "synthesis", "type": "bool", "default": true, "tier": "EXPERT", "label": "Trim silence", "help": "Trim leading and trailing silence from each chunk.", "requiresReload": false },
-        { "key": "sample_rate", "group": "synthesis", "type": "int", "default": 24000, "min": 8000, "max": 48000, "step": 1000, "tier": "EXPERT", "label": "Sample rate", "help": "Fixed by the model at 24 kHz; exposed for completeness.", "requiresReload": true },
-        { "key": "pitch", "group": "synthesis", "type": "float", "default": 1.0, "min": 0.5, "max": 2.0, "step": 0.05, "tier": "EXPERT", "label": "Pitch", "help": "Applied post-synthesis where the pipeline does not support it natively.", "requiresReload": false },
-        { "key": "volume", "group": "synthesis", "type": "float", "default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05, "tier": "EXPERT", "label": "Volume", "help": "Output gain.", "requiresReload": false }
+        { "key": "phonemizer", "group": "synthesis", "type": "enum", "values": ["espeak-ng"], "default": "espeak-ng", "tier": "EXPERT", "label": "Phonemizer", "help": "Grapheme-to-phoneme backend. Only espeak-ng is built into this APK; misaki is a Python package with no Android build, which is also why Kokoro's Japanese and Mandarin voices are unavailable here.", "requiresReload": true },
+        { "key": "split_pattern", "group": "synthesis", "type": "string", "default": "(?<=[.!?…])\\s+", "tier": "EXPERT", "label": "Chunk pattern", "help": "Long text is split on this. Kokoro stops at 510 tokens and clips rather than failing, so the split is what keeps a long passage whole.", "requiresReload": false },
+        { "key": "trim_silence", "group": "synthesis", "type": "bool", "default": true, "tier": "EXPERT", "label": "Trim silence", "help": "Trim leading and trailing silence from each chunk before the pieces are joined.", "requiresReload": false },
+        { "key": "volume", "group": "synthesis", "type": "float", "default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05, "tier": "EXPERT", "label": "Volume", "help": "Gain applied to the waveform. Above 1.0 can clip; the output is hard-limited to [-1, 1].", "requiresReload": false }
       ]
     }
   }

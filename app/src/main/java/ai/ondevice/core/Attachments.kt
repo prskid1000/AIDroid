@@ -72,8 +72,15 @@ enum class AttachmentRole(
             val tagSet = tags.map { it.lowercase() }.toSet()
 
             return when {
-                "lora" in tagSet || name.contains("lora") -> LORA
+                // ControlNet is tested *before* LoRA on purpose. The most widely
+                // used ControlNet pack ships its weights as
+                // `control_lora_rank128_v11p_sd15_canny_fp16.safetensors` — a
+                // ControlNet distilled into LoRA form — and matching "lora"
+                // first files the whole pack under the wrong role, so sd.cpp is
+                // handed it as `loras` and the structural guidance silently
+                // does nothing.
                 "controlnet" in tagSet || name.contains("control") && !name.contains("uncond") -> CONTROLNET
+                "lora" in tagSet || name.contains("lora") -> LORA
                 name.contains("ip-adapter") || name.contains("ip_adapter") -> IP_ADAPTER
                 name.startsWith("taesd") || name.contains("taesd") -> TAESD
                 name.contains("vae") -> VAE

@@ -200,7 +200,10 @@ class SpeechSynthesizer(
                 })
 
                 destination.parentFile?.mkdirs()
-                val queued = engine.synthesizeToFile(request.text, Bundle(), destination, utteranceId)
+                val volume = Bundle().apply {
+                    putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, request.volume.coerceIn(0f, 1f))
+                }
+                val queued = engine.synthesizeToFile(request.text, volume, destination, utteranceId)
                 check(queued == TextToSpeech.SUCCESS) { "The engine refused the request." }
                 done.await().getOrThrow()
             }
@@ -263,6 +266,13 @@ class SpeechSynthesizer(
                 speed = request.speed.coerceIn(0.5f, 2.0f),
                 blendPack = request.blendVoiceId?.let { voicePack(directory, it) },
                 blendRatio = request.blendRatio,
+                splitPattern = request.splitPattern,
+                trimSilence = request.trimSilence,
+                // Kokoro has no volume input, so gain is applied to the
+                // waveform. The system engine takes it as a playback parameter
+                // instead — same slider, two honest implementations.
+                volume = request.volume,
+                languageOverride = request.languageCode,
             ),
         )
     }
@@ -365,6 +375,12 @@ data class SpeechRequest(
     val text: String,
     val voiceId: String? = null,
     val speed: Float = 1.0f,
+    /**
+     * System engine only. Kokoro has no pitch input — the graph takes token
+     * ids, a style vector and a speed, and nothing else — so a pitch control
+     * for it would either do nothing or resample, and resampling is the
+     * chipmunk effect the screen promises not to produce.
+     */
     val pitch: Float = 1.0f,
     val volume: Float = 1.0f,
     /** Which engine the user asked for — routing never infers this. */
@@ -372,6 +388,11 @@ data class SpeechRequest(
     /** Kokoro only: a second voice to interpolate towards. */
     val blendVoiceId: String? = null,
     val blendRatio: Float = 0f,
+    /** Kokoro only, from the Advanced parameters. */
+    val splitPattern: String = KokoroRequest.DEFAULT_SPLIT_PATTERN,
+    val trimSilence: Boolean = true,
+    /** Kokoro only: an espeak voice to override the one the voice id implies. */
+    val languageCode: String? = null,
 ) {
     val isKokoro: Boolean get() = provider == SynthProvider.KOKORO
 }

@@ -130,6 +130,41 @@ class ChatViewModel @Inject constructor(
         return conversation
     }
 
+    /**
+     * Start a fresh conversation.
+     *
+     * A *new* one, not a cleared one. Wiping the current thread's messages in
+     * place would destroy work the user might want back and would leave the
+     * export they were about to take pointing at an empty conversation; a new
+     * row costs nothing and leaves the old thread whole in the library. The KV
+     * cache is dropped because it holds the previous thread's tokens, and
+     * carrying those into a conversation the user thinks is empty is the kind
+     * of invisible context that produces baffling replies.
+     */
+    fun startNewConversation() {
+        if (_state.value.generating) stop()
+        viewModelScope.launch {
+            // Dropping the KV is llama-specific, so it is asked for by type
+            // rather than added to the engine interface — no other runtime has
+            // a conversation-shaped cache to drop.
+            (engines.llama as? ai.ondevice.engine.LlamaEngine)?.clearCache()
+            val conversation = newConversation()
+            _state.value = _state.value.copy(
+                conversation = conversation,
+                messages = emptyList(),
+                streaming = null,
+                input = "",
+                pendingAttachments = emptyList(),
+                contextUsed = 0,
+                cachedTokens = 0,
+                error = null,
+                errorSuggestion = null,
+                lastExport = null,
+                importSummary = null,
+            )
+        }
+    }
+
     fun onInputChange(value: String) {
         _state.value = _state.value.copy(input = value)
     }

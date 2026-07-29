@@ -119,7 +119,14 @@ fun ChatScreen(
 
     Box(Modifier.fillMaxWidth()) {
         PhoneScaffold(
-            toolbar = { ChatToolbar(state, onOpenMenu = { sheetOpen = true }, onOpenSettings = { sheetOpen = true }) },
+            toolbar = {
+                ChatToolbar(
+                    state,
+                    onOpenMenu = { sheetOpen = true },
+                    onOpenSettings = { sheetOpen = true },
+                    onNewConversation = viewModel::startNewConversation,
+                )
+            },
             bottomBar = {
                 Column {
                     ChatComposer(
@@ -245,7 +252,12 @@ fun ChatScreen(
 
 /** Model name, preset, and the live backend/context readout. */
 @Composable
-private fun ChatToolbar(state: ChatState, onOpenMenu: () -> Unit, onOpenSettings: () -> Unit) {
+private fun ChatToolbar(
+    state: ChatState,
+    onOpenMenu: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onNewConversation: () -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -282,6 +294,14 @@ private fun ChatToolbar(state: ChatState, onOpenMenu: () -> Unit, onOpenSettings
                 )
             }
         }
+        // A new conversation, not a wiped one — the old thread stays whole in
+        // the library, which is why this is a plus rather than a bin.
+        Icon(
+            NIcons.Plus,
+            contentDescription = "New conversation",
+            tint = NocturneColors.Text,
+            modifier = Modifier.size(20.dp).nClickableFlat(onClick = onNewConversation),
+        )
         Icon(
             NIcons.Settings,
             contentDescription = "Chat settings",

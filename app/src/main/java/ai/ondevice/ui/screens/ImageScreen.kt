@@ -531,12 +531,23 @@ private fun AttachmentsSection(
     viewModel: ImageViewModel,
 ) {
     if (state.availableAttachments.isEmpty()) {
-        NHelp(
-            "No LoRAs or ControlNets installed. Add one on the Models screen and it appears here — " +
-                "the app pairs it with a role rather than a model family, so anything the runtime " +
-                "can load will work.",
-            Modifier.padding(top = 14.dp),
-        )
+        SectionKicker("Attachments", Modifier.padding(top = 20.dp, bottom = 8.dp))
+        NCard {
+            Text("Nothing installed to attach", style = NocturneType.CardTitleSm)
+            Text(
+                "LoRA, ControlNet, IP-Adapter, VAE and TAESD all work here — a LoRA gets a weight " +
+                    "dial, a ControlNet pairs with the reference image above. The app files each " +
+                    "one by role rather than by model family, so anything the runtime can load " +
+                    "shows up without an app update.",
+                style = NocturneType.CardBody,
+                color = NocturneColors.Text.copy(alpha = 0.8f),
+            )
+            Text(
+                "Add model lists a few that are known to work — look under Image add-ons.",
+                style = NocturneType.CardBody,
+                color = NocturneColors.Text.copy(alpha = 0.8f),
+            )
+        }
         return
     }
 

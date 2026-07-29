@@ -97,6 +97,11 @@ fun VoiceScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
+    // The Advanced screen edits the same model rows this screen surfaces, so
+    // pick its changes up on the way back — otherwise "Chunk pattern" and
+    // "Trim silence" are written and never read.
+    androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.refreshFromOverrides() }
+
     // Scripts are documents, so this is the document picker rather than the
     // photo picker — the same choice the chat composer makes.
     val scriptLauncher = rememberLauncherForActivityResult(
@@ -127,7 +132,17 @@ fun VoiceScreen(
     PhoneScaffold(
         toolbar = {
             RootToolbar("Voice") {
-                state.sttModel?.let { NTag(it.displayName, style = NTagStyle.Neutral) }
+                // Name the model that is about to do the work, which is a
+                // different model per tab. Showing "whisper.cpp" while the
+                // Speak tab is open credits the transcriber for synthesis it
+                // has nothing to do with — and the Speak panel already names
+                // its own engine, so the tag would also contradict the card
+                // directly below it.
+                when (state.mode) {
+                    VoiceMode.TRANSCRIBE ->
+                        state.sttModel?.let { NTag(it.displayName, style = NTagStyle.Neutral) }
+                    VoiceMode.SPEAK -> Unit
+                }
             }
         },
         bottomBar = { NBottomBar(BottomDestinations, currentRoute) { onNavigate(it.route) } },
@@ -542,14 +557,28 @@ private fun SpeakPanel(
     }
 
     // — expression —
+    //
+    // Which dials exist depends on the engine, because the two engines genuinely
+    // differ. Kokoro's graph takes token ids, a style vector and a speed — there
+    // is no pitch input at all. Showing a Pitch slider for it would leave the
+    // user adjusting something inert, so it is absent rather than ignored.
+    val kokoroSelected = state.selectedVoice?.provider == ai.ondevice.speech.SynthProvider.KOKORO
     SectionKicker("Expression", Modifier.padding(top = 20.dp, bottom = 8.dp))
     NCard(gap = 4.dp) {
         SpeakSlider("Speed", String.format("%.2f×", state.speed), state.speed, 0.5f..2f, viewModel::setSpeed)
-        SpeakSlider("Pitch", String.format("%.2f", state.pitch), state.pitch, 0.5f..2f, viewModel::setPitch)
+        if (!kokoroSelected) {
+            SpeakSlider("Pitch", String.format("%.2f", state.pitch), state.pitch, 0.5f..2f, viewModel::setPitch)
+        }
         SpeakSlider("Volume", Fmt.percent(state.volume), state.volume, 0f..1f, viewModel::setVolume)
         Text(
-            "Speed and pitch are applied by the engine, not by resampling, so the voice does not " +
-                "turn chipmunk when you raise it.",
+            if (kokoroSelected) {
+                "Speed is applied during synthesis, not by resampling, so the voice does not turn " +
+                    "chipmunk when you raise it. Kokoro has no pitch input, so there is no pitch " +
+                    "dial here — the system engine does, and shows one."
+            } else {
+                "Speed and pitch are applied by the engine, not by resampling, so the voice does " +
+                    "not turn chipmunk when you raise it."
+            },
             style = NocturneType.CardBody,
             color = NocturneColors.Text.copy(alpha = 0.8f),
         )
@@ -630,7 +659,7 @@ private fun SpeakPanel(
     }
 
     NButton(
-        "Advanced · phonemizer, split, sample rate",
+        "Advanced · language, chunking, trim, gain",
         onClick = onOpenAdvanced,
         style = NButtonStyle.Secondary,
         block = true,
@@ -657,7 +686,16 @@ private fun SpeakSlider(
     NSlider(value = value, onValueChange = onChange, valueRange = range)
 }
 
-private const val VOICE_ROWS = 14
+/**
+ * Five.
+ *
+ * The catalogue is 338 voices and the list is not the point of the screen — the
+ * script above it is. Fourteen rows pushed Expression and the read-aloud button
+ * off the bottom of a phone, which made the voice picker look like the whole
+ * feature. Five is enough to browse and short enough that searching is the
+ * obvious next move, which for a list this long it should be.
+ */
+private const val VOICE_ROWS = 5
 
 /** Per-token confidence expressed as opacity — value, not hue. */
 private fun buildAnnotatedTranscript(

@@ -14,6 +14,7 @@ import ai.ondevice.params.ParamRepository
 import ai.ondevice.params.ParamSpec
 import ai.ondevice.params.VisibleParams
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,8 +41,25 @@ class ParamsViewModel @Inject constructor(
     private val _state = MutableStateFlow(ParamsState())
     val state: StateFlow<ParamsState> = _state.asStateFlow()
 
+    /**
+     * The load in flight, so a newer one can cancel it.
+     *
+     * This screen is activity-scoped and its default load races the runtime the
+     * caller actually asked for: the Voice screen's "Advanced" would open, ask
+     * for kokoro, and then have llama.cpp's 74 parameters land on top of
+     * Kokoro's eight because the default load started first and finished last.
+     * The symptom was a screen titled "llama.cpp" full of samplers, reached
+     * from a button that promised the phonemiser.
+     */
+    private var loadJob: Job? = null
+
     init {
-        viewModelScope.launch { load(RuntimeRegistry.LLAMA) }
+        startLoad(RuntimeRegistry.LLAMA)
+    }
+
+    private fun startLoad(runtimeId: String) {
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch { load(runtimeId) }
     }
 
     /**
@@ -53,7 +71,7 @@ class ParamsViewModel @Inject constructor(
      */
     fun setRuntime(runtimeId: String) {
         if (_state.value.runtimeId == runtimeId && _state.value.allSpecs.isNotEmpty()) return
-        viewModelScope.launch { load(runtimeId) }
+        startLoad(runtimeId)
     }
 
     private suspend fun load(runtimeId: String) {
