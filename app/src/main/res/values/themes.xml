@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Nocturne is a dark-only system. The bg token #161826 is the window
+         background so there is no white flash before Compose draws. -->
+    <style name="Theme.OnDeviceAI" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/nocturne_bg</item>
+        <item name="android:navigationBarColor">@color/nocturne_bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

@@ -1,0 +1,73 @@
+package ai.ondevice.data.db
+
+import androidx.room.Database
+import androidx.room.RoomDatabase
+import androidx.room.TypeConverter
+import androidx.room.TypeConverters
+import ai.ondevice.core.BackendId
+import ai.ondevice.core.DownloadState
+import ai.ondevice.core.MessageRole
+import ai.ondevice.core.Modality
+import ai.ondevice.core.ModelFormat
+import ai.ondevice.core.RuntimeState
+
+/**
+ * Enums are stored by name, not ordinal. An ordinal column silently
+ * reinterprets itself the moment someone inserts a value into the middle of an
+ * enum; the name survives that.
+ */
+class Converters {
+    @TypeConverter fun modalityTo(v: Modality?): String? = v?.name
+    @TypeConverter fun modalityFrom(v: String?): Modality? = v?.let { runCatching { Modality.valueOf(it) }.getOrNull() }
+
+    @TypeConverter fun formatTo(v: ModelFormat?): String? = v?.name
+    @TypeConverter fun formatFrom(v: String?): ModelFormat? = v?.let { runCatching { ModelFormat.valueOf(it) }.getOrNull() }
+
+    @TypeConverter fun backendTo(v: BackendId?): String? = v?.name
+    @TypeConverter fun backendFrom(v: String?): BackendId? = v?.let { runCatching { BackendId.valueOf(it) }.getOrNull() }
+
+    @TypeConverter fun roleTo(v: MessageRole?): String? = v?.name
+    @TypeConverter fun roleFrom(v: String?): MessageRole? = v?.let { runCatching { MessageRole.valueOf(it) }.getOrNull() }
+
+    @TypeConverter fun dlStateTo(v: DownloadState?): String? = v?.name
+    @TypeConverter fun dlStateFrom(v: String?): DownloadState? = v?.let { runCatching { DownloadState.valueOf(it) }.getOrNull() }
+
+    @TypeConverter fun rtStateTo(v: RuntimeState?): String? = v?.name
+    @TypeConverter fun rtStateFrom(v: String?): RuntimeState? = v?.let { runCatching { RuntimeState.valueOf(it) }.getOrNull() }
+}
+
+@Database(
+    entities = [
+        ModelEntity::class,
+        BenchmarkEntity::class,
+        PresetEntity::class,
+        PersonaEntity::class,
+        ConversationEntity::class,
+        MessageEntity::class,
+        GeneratedImageEntity::class,
+        TranscriptEntity::class,
+        DownloadJobEntity::class,
+        RuntimeBundleEntity::class,
+        ParamManifestEntity::class,
+    ],
+    version = 1,
+    exportSchema = true,
+)
+@TypeConverters(Converters::class)
+abstract class OnDeviceDatabase : RoomDatabase() {
+    abstract fun models(): ModelDao
+    abstract fun benchmarks(): BenchmarkDao
+    abstract fun presets(): PresetDao
+    abstract fun personas(): PersonaDao
+    abstract fun conversations(): ConversationDao
+    abstract fun messages(): MessageDao
+    abstract fun images(): GeneratedImageDao
+    abstract fun transcripts(): TranscriptDao
+    abstract fun downloads(): DownloadDao
+    abstract fun runtimes(): RuntimeDao
+    abstract fun manifests(): ParamManifestDao
+
+    companion object {
+        const val NAME = "ondevice.db"
+    }
+}

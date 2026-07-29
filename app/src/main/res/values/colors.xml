@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Mirrors _ds/nocturne/styles.css :root. Kept in sync with
+         ui/theme/NocturneColors.kt — that file is the source used by Compose;
+         these exist only for the pre-Compose window background. -->
+    <color name="nocturne_bg">#FF161826</color>
+    <color name="nocturne_surface">#FF232532</color>
+    <color name="nocturne_accent">#FF9184D9</color>
+</resources>

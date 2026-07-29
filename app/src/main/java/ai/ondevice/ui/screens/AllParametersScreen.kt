@@ -1,0 +1,253 @@
+package ai.ondevice.ui.screens
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ai.ondevice.core.Tier
+import ai.ondevice.params.ParamRow
+import ai.ondevice.params.ParamType
+import ai.ondevice.ui.components.NButton
+import ai.ondevice.ui.components.NButtonStyle
+import ai.ondevice.ui.components.NCard
+import ai.ondevice.ui.components.NCardKicker
+import ai.ondevice.ui.components.NHelp
+import ai.ondevice.ui.components.NInput
+import ai.ondevice.ui.components.NPills
+import ai.ondevice.ui.components.PhoneScaffold
+import ai.ondevice.ui.components.PushToolbar
+import ai.ondevice.ui.components.SectionKicker
+import ai.ondevice.ui.components.nClickableFlat
+import ai.ondevice.ui.theme.NIcons
+import ai.ondevice.ui.theme.NocturneColors
+import ai.ondevice.ui.theme.NocturneType
+import ai.ondevice.ui.theme.Radius
+import ai.ondevice.ui.theme.ring
+import ai.ondevice.ui.vm.ParamsViewModel
+
+/**
+ * **S8 — All parameters.**
+ *
+ * The proof of SPEC §1.5. Every row on this screen is generated from the
+ * manifest; there is not one hand-written parameter widget in the file. Switch
+ * tiers, search, flip `rope_scaling_type` and watch the YaRN rows appear —
+ * all of that is `dependsOn` and `tier` metadata doing the work.
+ *
+ * At the bottom sits §16.6's escape hatch, which guarantees that anything the
+ * loaded `.so` supports stays reachable even if manifest generation missed it.
+ */
+@Composable
+fun AllParametersScreen(
+    onBack: () -> Unit,
+    onOpenSamplerChain: () -> Unit,
+    initialTier: Tier = Tier.BASIC,
+    // Activity-scoped: the sampler-chain screen edits the same parameter set, so
+    // the two must see one instance rather than each loading its own copy.
+    viewModel: ParamsViewModel = activityParamsViewModel(),
+) {
+    LaunchedEffect(initialTier) { viewModel.setTier(initialTier) }
+
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    val tiers = listOf("Basic", "Advanced", "Expert", "All")
+    val tierIndex = when {
+        state.showAll -> 3
+        state.tier == Tier.BASIC -> 0
+        state.tier == Tier.ADVANCED -> 1
+        else -> 2
+    }
+
+    PhoneScaffold(
+        toolbar = {
+            PushToolbar(
+                title = "Parameters",
+                subtitle = "${state.runtimeId} ${state.buildTag} · manifest v${state.manifestVersion}",
+                onBack = onBack,
+                trailing = {
+                    Icon(
+                        NIcons.Rotate,
+                        contentDescription = "Reset all",
+                        tint = NocturneColors.Text,
+                        modifier = Modifier.size(19.dp).nClickableFlat { viewModel.resetAll() },
+                    )
+                },
+            )
+        },
+        contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 20.dp),
+    ) {
+        Column(
+            Modifier.padding(bottom = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            NInput(
+                value = state.query,
+                onValueChange = viewModel::setQuery,
+                placeholder = "Search ${state.totalCount} parameters",
+                minHeight = 40.dp,
+            )
+            NPills(
+                options = tiers,
+                selectedIndex = tierIndex,
+                onSelect = { index ->
+                    when (index) {
+                        0 -> { viewModel.setShowAll(false); viewModel.setTier(Tier.BASIC) }
+                        1 -> { viewModel.setShowAll(false); viewModel.setTier(Tier.ADVANCED) }
+                        2 -> { viewModel.setShowAll(false); viewModel.setTier(Tier.EXPERT) }
+                        else -> viewModel.setShowAll(true)
+                    }
+                },
+            )
+        }
+
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+
+            NHelp(
+                "${state.visible.shownCount} shown · ${state.visible.hiddenCount} hidden by dependsOn " +
+                    "or build gate",
+                Modifier.padding(bottom = 4.dp),
+            )
+
+            // Reload-required edits are batched and applied once, not per-edit.
+            if (state.needsReload) {
+                NCard(
+                    Modifier.padding(vertical = 8.dp),
+                    ring = NocturneColors.Accent700,
+                ) {
+                    Text(
+                        "${state.pendingReloadKeys.size} change(s) need a model reload",
+                        style = NocturneType.CardTitleSm,
+                    )
+                    Text(
+                        state.pendingReloadKeys.joinToString(", "),
+                        style = NocturneType.MonoXs,
+                        color = NocturneColors.Accent300,
+                    )
+                    NButton(
+                        "Apply and reload",
+                        onClick = viewModel::applyPendingReload,
+                        style = NButtonStyle.Primary,
+                        block = true,
+                    )
+                }
+            }
+
+            // Mirostat replaces the chain entirely — say so rather than
+            // silently ignoring the user's ordering.
+            if (viewModel.mirostatActive()) {
+                NCard(Modifier.padding(bottom = 10.dp), ring = NocturneColors.Neutral700) {
+                    Text("Mirostat is active", style = NocturneType.CardTitleSm)
+                    Text(
+                        "It replaces the sampler chain entirely, so top-k, top-p, min-p and the chain " +
+                            "ordering have no effect until you set it back to 0.",
+                        style = NocturneType.CardBody,
+                        color = NocturneColors.Text.copy(alpha = 0.8f),
+                    )
+                }
+            }
+
+            var lastGroup: String? = null
+            state.visible.specs.forEach { spec ->
+                if (spec.group != lastGroup) {
+                    SectionKicker(spec.group, Modifier.padding(top = 16.dp, bottom = 4.dp))
+                    lastGroup = spec.group
+                }
+
+                if (spec.type == ParamType.ORDERED_LIST) {
+                    // The sampler chain needs a drag handle per row, so it gets
+                    // its own screen; the manifest row is the way in.
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 11.dp)
+                            .nClickableFlat(onClick = onOpenSamplerChain),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(spec.label, style = NocturneType.Row)
+                            Text(
+                                viewModel.samplerOrder().joinToString(" → "),
+                                style = NocturneType.MonoXs,
+                                color = NocturneColors.Accent300,
+                            )
+                        }
+                        Text("→", style = NocturneType.Row, color = NocturneColors.Accent)
+                    }
+                } else {
+                    ParamRow(
+                        spec = spec,
+                        values = state.values,
+                        onChange = viewModel::setValue,
+                    )
+                }
+            }
+
+            // §16.6 — the escape hatch.
+            NCard(
+                Modifier.padding(top = 16.dp),
+                ring = NocturneColors.Accent800,
+            ) {
+                NCardKicker("Escape hatch · §16.6")
+                Text("Raw parameters", style = NocturneType.CardTitleSm)
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .ring(NocturneColors.Divider, Radius.Sm)
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                ) {
+                    NInput(
+                        value = state.rawJson,
+                        onValueChange = viewModel::setRawJson,
+                        textStyle = NocturneType.MonoCode,
+                    )
+                }
+                Text(
+                    "Passed straight through to the runtime. Unknown keys are reported, never fatal — " +
+                        "so anything the loaded .so supports is always reachable.",
+                    style = NocturneType.CardBody,
+                    color = NocturneColors.Text.copy(alpha = 0.8f),
+                )
+                state.rawError?.let {
+                    Text(it, style = NocturneType.Help, color = NocturneColors.Neutral300)
+                }
+                state.lastReport?.takeIf { it.hasRejections }?.let { report ->
+                    Text(
+                        "Runtime rejected: ${report.rejected.joinToString(", ")} — kept in your preset " +
+                            "anyway, inert, in case a later build supports them.",
+                        style = NocturneType.Help,
+                        color = NocturneColors.Accent300,
+                    )
+                }
+                NButton(
+                    "Apply raw JSON",
+                    onClick = viewModel::applyRawJson,
+                    style = NButtonStyle.Secondary,
+                    block = true,
+                )
+            }
+
+            NHelp(
+                "Manifest v${state.manifestVersion} (bundled v${state.bundledVersion}). It can retier, " +
+                    "relabel and reveal parameters the installed engine already supports — it cannot " +
+                    "add capability the engine lacks.",
+                Modifier.padding(top = 14.dp),
+            )
+        }
+    }
+}

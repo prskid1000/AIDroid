@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">On-Device AI</string>
+    <string name="download_channel_name">Model downloads</string>
+    <string name="inference_channel_name">Inference</string>
+</resources>

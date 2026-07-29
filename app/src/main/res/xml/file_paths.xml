@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- SPEC 13 — all model files and generated artifacts are user-accessible.
+         Nothing lives in a private opaque store. -->
+    <external-files-path name="models" path="models/" />
+    <external-files-path name="gallery" path="gallery/" />
+    <external-files-path name="transcripts" path="transcripts/" />
+    <cache-path name="downloads" path="downloads/" />
+</paths>

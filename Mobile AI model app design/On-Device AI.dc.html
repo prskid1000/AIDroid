@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/nocturne-6f1e3ee2-fbd5-4e24-8875-bd2da8907777/styles.css">
+<script src="_ds/nocturne-6f1e3ee2-fbd5-4e24-8875-bd2da8907777/_ds_bundle.js"></script>
+<style>
+body{margin:0;background:#101220}
+@keyframes caret{0%,49%{opacity:1}50%,100%{opacity:0}}
+@keyframes sweep{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-thumb{background:#3f424d;border-radius:4px}
+::-webkit-scrollbar-track{background:transparent}
+input[type=range]{accent-color:#9184d9}
+</style>
+</helmet>
+
+<div style="padding:44px 48px 64px;font-family:var(--font-body);color:var(--color-text)">
+
+<div style="max-width:760px;margin:0 0 40px">
+<div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.12em;color:var(--color-accent);margin-bottom:14px">ON-DEVICE AI · ANDROID · SPEC §12 SCREEN SET</div>
+<h2 style="margin:0 0 14px;font-size:34px">Fifteen screens for a runtime-locked local inference app</h2>
+<p style="font-size:14px;line-height:1.6;opacity:.78;margin:0 0 18px">Nocturne on a 392×824 Android viewport. Five bottom destinations — Chat, Image, Voice, Models, Settings — because §12's ten screens collapse into four modalities plus system config; everything else is a push or a sheet inside one of them.</p>
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:22px">
+<div class="card elev-sm"><div class="card-kicker">Principle §1.5</div><p class="card-body" style="opacity:.85">Zero parameter widgets. The Expert screen is one generic renderer over the manifest — rows carry their own type, tier, help and <code style="font-size:11px">dependsOn</code>. S8 shows four widget types from the same code path.</p></div>
+<div class="card elev-sm"><div class="card-kicker">Principle §1.2</div><p class="card-body" style="opacity:.85">Refusal is a designed state, not an error toast. S2 shows the fit arithmetic recomputing live under the context slider; S5 shows the four ways a repo can be turned down, each with a remedy.</p></div>
+<div class="card elev-sm"><div class="card-kicker">Colour discipline</div><p class="card-body" style="opacity:.85">Verdicts don't use red or green — the palette is mono. Accent means <em>runnable</em>, an accent outline means <em>caveat</em>, and neutral-800 with a slash mark means <em>no</em>. Weight comes from the mark, not the hue.</p></div>
+</div>
+</div>
+
+<div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.12em;color:var(--color-neutral-500);margin:0 0 18px">GET A MODEL ONTO THE DEVICE</div>
+<div style="display:flex;flex-wrap:wrap;gap:34px;align-items:flex-start;margin-bottom:52px">
+
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:var(--color-accent-900);color:var(--color-accent-300);border-radius:5px">S1</span><span style="font-size:12.5px">Add model</span><span class="text-muted" style="font-size:11px">paste field is the primary affordance</span></div>
+<div style="width:392px;height:824px;border-radius:32px;background:var(--color-bg);box-shadow:var(--shadow-md);overflow:hidden;display:flex;flex-direction:column">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 18px 2px;font:500 11px var(--font-body);opacity:.7"><span>22:14</span><span style="display:flex;gap:6px;align-items:center"><svg width="13" height="10" viewBox="0 0 13 10" fill="currentColor"><rect x="0" y="7" width="2" height="3" rx="1"/><rect x="3.5" y="5" width="2" height="5" rx="1"/><rect x="7" y="2.5" width="2" height="7.5" rx="1"/><rect x="10.5" y="0" width="2" height="10" rx="1"/></svg><svg width="14" height="10" viewBox="0 0 14 10" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M1 3.4a8 8 0 0 1 12 0M3.4 6a5 5 0 0 1 7.2 0"/><circle cx="7" cy="8.6" r=".8" fill="currentColor" stroke="none"/></svg><svg width="20" height="10" viewBox="0 0 20 10" fill="none" stroke="currentColor" stroke-width="1.1"><rect x=".5" y=".5" width="16" height="9" rx="2.4"/><rect x="2" y="2" width="11" height="6" rx="1.4" fill="currentColor" stroke="none"/><path d="M18.4 3.6v2.8" stroke-linecap="round"/></svg></span></div>
+  <div style="display:flex;align-items:center;gap:10px;padding:12px 18px 10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg><span style="font:500 17px var(--font-heading)">Add model</span></div>
+  <div style="flex:1;overflow-y:auto;padding:4px 18px 18px">
+    <div class="field" style="margin-bottom:8px"><label>Hugging Face ID, URL, or direct .gguf link</label>
+    <div style="display:flex;gap:7px"><input class="input" style="min-height:44px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px" value="{{ paste }}" onChange="{{ onPaste }}"><button class="btn btn-primary" style="min-height:44px;padding-inline:14px">Resolve</button></div></div>
+    <div class="text-muted" style="font-size:10.5px;margin-bottom:16px">Also accepts a local file — <span style="color:var(--color-accent)">import .gguf from storage</span></div>
+
+    <div class="card elev-sm" style="gap:0;padding:0;overflow:hidden">
+      <div style="padding:12px 13px 11px">
+        <div style="display:flex;align-items:flex-start;gap:9px">
+          <div style="flex:1"><div style="font:500 15px var(--font-heading);line-height:1.25">Qwen3-4B-Instruct-2507</div><div class="text-muted" style="font-size:11px;font-family:ui-monospace,Menlo,monospace;margin-top:2px">unsloth · qwen3 · 4.02B</div></div>
+          <span class="tag tag-accent" style="gap:5px;flex:none"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5"/></svg>Fast</span>
+        </div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:10px"><span class="tag tag-neutral">262K ctx</span><span class="tag tag-neutral">chat template ✓</span><span class="tag tag-neutral">scanned clean</span><span class="tag tag-outline">not gated</span></div>
+      </div>
+      <div style="padding:11px 13px 12px;background:var(--color-accent-900)">
+        <div style="font:500 12px var(--font-heading);color:var(--color-accent-200);margin-bottom:5px">≈ {{ totalGb }} GB at {{ ctxLabel }} context</div>
+        <div style="font-size:11px;font-family:ui-monospace,Menlo,monospace;color:var(--color-accent-300);line-height:1.7">model 2.50 &nbsp;+&nbsp; KV {{ kvGb }} &nbsp;+&nbsp; compute 0.25</div>
+        <div style="font-size:11px;color:var(--color-accent-300);opacity:.75;margin-top:5px">You have 10.4 GB free of 12 GB. Headroom {{ headroomGb }} GB.</div>
+      </div>
+    </div>
+
+    <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:var(--color-neutral-500);margin:20px 0 8px">QUANT VARIANTS · 9 IN REPO</div>
+    <sc-for list="{{ quants }}" as="q" hint-placeholder-count="4">
+      <div onClick="{{ q.onPick }}" style="display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:var(--radius-md);margin-bottom:6px;cursor:pointer;min-height:44px;background:{{ q.bg }};box-shadow:inset 0 0 0 1px {{ q.ring }}">
+        <div style="flex:1"><div style="font:500 13px ui-monospace,Menlo,monospace">{{ q.name }}</div><div class="text-muted" style="font-size:10.5px;margin-top:1px">{{ q.note }}</div></div>
+        <div style="text-align:right"><div style="font-size:12px;font-family:ui-monospace,Menlo,monospace;opacity:.85">{{ q.size }}</div><div style="font-size:10px;color:{{ q.tint }}">{{ q.speed }}</div></div>
+      </div>
+    </sc-for>
+    <div class="text-muted" style="font-size:10.5px;margin-top:8px">Q4_0 hits the Adreno OpenCL fast path on this device. Other quants fall back to CPU.</div>
+    <button class="btn btn-primary btn-block" style="min-height:46px;margin-top:16px">Download 2.50 GB</button>
+  </div>
+  <div style="display:flex;padding:7px 6px 12px;box-shadow:0 -1px 0 var(--color-divider)">
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;opacity:.5"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M4 5.5h16v11H9l-5 4z"/></svg><span style="font-size:10px">Chat</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;opacity:.5"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4.5 4 3.5 3-2.5 4 3.5"/></svg><span style="font-size:10px">Image</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;opacity:.5"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 11v2M8 8v8M12 4.5v15M16 8v8M20 11v2"/></svg><span style="font-size:10px">Voice</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;color:var(--color-accent)"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3.5l8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4M4 16.5l8 4 8-4"/></svg><span style="font-size:10px">Models</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;opacity:.5"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 7h11M18 7h3M3 17h3M10 17h11"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></svg><span style="font-size:10px">Settings</span></div>
+  </div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:var(--color-accent-900);color:var(--color-accent-300);border-radius:5px">S2</span><span style="font-size:12.5px">Model detail</span><span class="text-muted" style="font-size:11px">drag the context slider — the verdict recomputes</span></div>
+<div style="width:392px;height:824px;border-radius:32px;background:var(--color-bg);box-shadow:var(--shadow-md);overflow:hidden;display:flex;flex-direction:column">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 18px 2px;font:500 11px var(--font-body);opacity:.7"><span>22:14</span><span style="display:flex;gap:6px;align-items:center"><svg width="13" height="10" viewBox="0 0 13 10" fill="currentColor"><rect x="0" y="7" width="2" height="3" rx="1"/><rect x="3.5" y="5" width="2" height="5" rx="1"/><rect x="7" y="2.5" width="2" height="7.5" rx="1"/><rect x="10.5" y="0" width="2" height="10" rx="1"/></svg><svg width="20" height="10" viewBox="0 0 20 10" fill="none" stroke="currentColor" stroke-width="1.1"><rect x=".5" y=".5" width="16" height="9" rx="2.4"/><rect x="2" y="2" width="11" height="6" rx="1.4" fill="currentColor" stroke="none"/><path d="M18.4 3.6v2.8" stroke-linecap="round"/></svg></span></div>
+  <div style="display:flex;align-items:center;gap:10px;padding:12px 18px 10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg><span style="font:500 17px var(--font-heading);flex:1">Qwen3-4B · Q4_0</span><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg></div>
+  <div style="flex:1;overflow-y:auto;padding:4px 18px 18px">
+    <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:16px"><span class="tag tag-accent">loaded</span><span class="tag tag-neutral">rev a1b2c3d</span><span class="tag tag-neutral">sha256 ✓</span><span class="tag tag-outline">pinned in RAM</span></div>
+
+    <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:var(--color-neutral-500);margin:0 0 10px">CONTEXT WINDOW</div>
+    <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px"><span style="font:500 26px var(--font-heading);color:var(--color-accent-200)">{{ ctxLabel }}</span><span class="text-muted" style="font-size:11px;font-family:ui-monospace,Menlo,monospace">{{ ctx }} tokens · max 262144</span></div>
+    <input type="range" min="2048" max="65536" step="2048" value="{{ ctx }}" onChange="{{ onCtx }}" style="width:100%;height:28px">
+    <div class="card elev-sm" style="gap:0;padding:0;overflow:hidden;margin-top:6px">
+      <div style="padding:11px 13px;background:{{ verdictBg }}">
+        <div style="display:flex;align-items:center;gap:7px;margin-bottom:6px"><span class="tag {{ verdictTag }}" style="gap:5px">{{ verdictLabel }}</span><span style="font:500 12.5px var(--font-heading);color:{{ verdictText }}">≈ {{ totalGb }} GB resident</span></div>
+        <div style="font-size:11px;font-family:ui-monospace,Menlo,monospace;color:{{ verdictText }};opacity:.85;line-height:1.8">weights 2.50<br>KV cache 2 × 36 × {{ ctx }} × 1024 × f16 = {{ kvGb }}<br>compute buffer 0.25</div>
+        <div style="font-size:11px;color:{{ verdictText }};opacity:.7;margin-top:6px">{{ verdictNote }}</div>
+      </div>
+    </div>
+
+    <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:var(--color-neutral-500);margin:22px 0 8px">MEASURED ON THIS DEVICE</div>
+    <table class="table" style="font-size:12.5px"><thead><tr><th>Backend</th><th style="text-align:right">Prompt</th><th style="text-align:right">Gen</th></tr></thead><tbody>
+      <tr><td>OpenCL <span class="tag tag-accent" style="margin-left:5px;font-size:9.5px;padding:1px 6px">auto</span></td><td style="text-align:right;font-family:ui-monospace,Menlo,monospace">184 t/s</td><td style="text-align:right;font-family:ui-monospace,Menlo,monospace">14.1 t/s</td></tr>
+      <tr><td>Hexagon HTP</td><td style="text-align:right;font-family:ui-monospace,Menlo,monospace">211 t/s</td><td style="text-align:right;font-family:ui-monospace,Menlo,monospace">11.8 t/s</td></tr>
+      <tr><td>CPU · 6 threads</td><td style="text-align:right;font-family:ui-monospace,Menlo,monospace">42 t/s</td><td style="text-align:right;font-family:ui-monospace,Menlo,monospace">8.3 t/s</td></tr>
+    </tbody></table>
+    <button class="btn btn-secondary btn-block" style="min-height:44px;margin-top:12px">Re-run benchmark</button>
+
+    <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:var(--color-neutral-500);margin:22px 0 8px">COMPANIONS · AUTO-PAIRED</div>
+    <div style="display:flex;align-items:center;gap:9px;padding:10px 0;box-shadow:0 1px 0 var(--color-divider)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" stroke-width="1.7"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4.5 4 3.5 3-2.5 4 3.5"/></svg><div style="flex:1;font-size:12.5px;font-family:ui-monospace,Menlo,monospace">mmproj-F16.gguf</div><span class="text-muted" style="font-size:11px">742 MB</span></div>
+    <div class="text-muted" style="font-size:10.5px;margin-top:9px">Vision projector detected in the repo and queued with the weights. Image input is unavailable without it.</div>
+    <div style="display:flex;gap:7px;margin-top:18px"><button class="btn btn-secondary" style="flex:1;min-height:44px">Parameters</button><button class="btn btn-secondary" style="flex:1;min-height:44px">Delete</button></div>
+  </div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:var(--color-accent-900);color:var(--color-accent-300);border-radius:5px">S3</span><span style="font-size:12.5px">Models library</span><span class="text-muted" style="font-size:11px">residency, storage, orphans</span></div>
+<div style="width:392px;height:824px;border-radius:32px;background:var(--color-bg);box-shadow:var(--shadow-md);overflow:hidden;display:flex;flex-direction:column">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 18px 2px;font:500 11px var(--font-body);opacity:.7"><span>22:14</span><span style="display:flex;gap:6px;align-items:center"><svg width="13" height="10" viewBox="0 0 13 10" fill="currentColor"><rect x="0" y="7" width="2" height="3" rx="1"/><rect x="3.5" y="5" width="2" height="5" rx="1"/><rect x="7" y="2.5" width="2" height="7.5" rx="1"/><rect x="10.5" y="0" width="2" height="10" rx="1"/></svg><svg width="20" height="10" viewBox="0 0 20 10" fill="none" stroke="currentColor" stroke-width="1.1"><rect x=".5" y=".5" width="16" height="9" rx="2.4"/><rect x="2" y="2" width="11" height="6" rx="1.4" fill="currentColor" stroke="none"/><path d="M18.4 3.6v2.8" stroke-linecap="round"/></svg></span></div>
+  <div style="display:flex;align-items:center;gap:10px;padding:12px 18px 8px"><span style="font:500 21px var(--font-heading);flex:1">Models</span><button class="btn btn-primary" style="min-height:38px;gap:5px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add</button></div>
+  <div style="padding:0 18px 10px"><input class="input" style="min-height:40px" value="" placeholder="Filter installed models"></div>
+  <div style="flex:1;overflow-y:auto;padding:0 18px 18px">
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:12px"><div style="flex:1;height:7px;border-radius:4px;overflow:hidden;display:flex;background:var(--color-neutral-900)"><div style="width:31%;background:var(--color-accent-500)"></div><div style="width:14%;background:var(--color-accent-700)"></div><div style="width:9%;background:var(--color-neutral-700)"></div></div><span class="text-muted" style="font-size:11px;font-family:ui-monospace,Menlo,monospace">6.6 / 12 GB</span></div>
+    <div style="display:flex;gap:11px;flex-wrap:wrap;font-size:10.5px;margin-bottom:18px"><span style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:2px;background:var(--color-accent-500)"></span>Text 3.7 GB</span><span style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:2px;background:var(--color-accent-700)"></span>Diffusion 1.7 GB</span><span style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:2px;background:var(--color-neutral-700)"></span>Speech 1.2 GB</span></div>
+
+    <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:var(--color-neutral-500);margin:0 0 9px">TEXT · 2</div>
+    <div class="card elev-sm" style="gap:7px;margin-bottom:7px;box-shadow:inset 0 0 0 1px var(--color-accent-700)">
+      <div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1"><div style="font:500 14px var(--font-heading)">Qwen3-4B-Instruct-2507</div><div class="text-muted" style="font-size:10.5px;font-family:ui-monospace,Menlo,monospace;margin-top:2px">Q4_0 · 2.50 GB · qwen3</div></div><span class="tag tag-accent" style="flex:none">loaded</span></div>
+      <div class="card-meta" style="gap:10px"><span>14.1 t/s OpenCL</span><span>·</span><span>used 4m ago</span><span style="margin-left:auto;color:var(--color-accent)">pinned</span></div>
+    </div>
+    <div class="card elev-sm" style="gap:7px;margin-bottom:16px">
+      <div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1"><div style="font:500 14px var(--font-heading)">gemma-3-4b-it</div><div class="text-muted" style="font-size:10.5px;font-family:ui-monospace,Menlo,monospace;margin-top:2px">Q4_K_M · 2.49 GB · gemma3 · + mmproj</div></div><span class="tag tag-outline" style="flex:none">vision</span></div>
+      <div class="card-meta" style="gap:10px"><span>9.2 t/s CPU</span><span>·</span><span>used yesterday</span></div>
+    </div>
+
+    <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:var(--color-neutral-500);margin:0 0 9px">SPEECH · 2</div>
+    <div class="card elev-sm" style="gap:7px;margin-bottom:7px"><div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1"><div style="font:500 14px var(--font-heading)">whisper-large-v3-turbo</div><div class="text-muted" style="font-size:10.5px;font-family:ui-monospace,Menlo,monospace;margin-top:2px">ggml-q5_0 · 809 MB</div></div></div><div class="card-meta"><span>+ silero VAD 1.8 MB</span></div></div>
+    <div class="card elev-sm" style="gap:7px;margin-bottom:16px"><div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1"><div style="font:500 14px var(--font-heading)">Kokoro v0.19</div><div class="text-muted" style="font-size:10.5px;font-family:ui-monospace,Menlo,monospace;margin-top:2px">ONNX fp16 · 327 MB · 54 voices</div></div></div></div>
+
+    <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:var(--color-neutral-500);margin:0 0 9px">DIFFUSION · 1</div>
+    <div class="card elev-sm" style="gap:7px;margin-bottom:18px"><div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1"><div style="font:500 14px var(--font-heading)">sdxl-turbo</div><div class="text-muted" style="font-size:10.5px;font-family:ui-monospace,Menlo,monospace;margin-top:2px">q8_0 · 1.68 GB · + VAE, TAESD</div></div><span class="tag tag-neutral" style="flex:none">CPU only</span></div></div>
+
+    <div class="card elev-sm" style="box-shadow:inset 0 0 0 1px var(--color-neutral-700)"><div style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-neutral-400)" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg><span style="font:500 13px var(--font-heading);flex:1">1 orphaned file</span></div><p class="card-body">A 1.9 GB .gguf on disk with no library record — left by an interrupted install.</p><div style="display:flex;gap:7px"><button class="btn btn-secondary" style="flex:1">Adopt</button><button class="btn btn-secondary" style="flex:1">Delete</button></div></div>
+  </div>
+  <div style="display:flex;padding:7px 6px 12px;box-shadow:0 -1px 0 var(--color-divider)">
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;opacity:.5"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M4 5.5h16v11H9l-5 4z"/></svg><span style="font-size:10px">Chat</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;opacity:.5"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4.5 4 3.5 3-2.5 4 3.5"/></svg><span style="font-size:10px">Image</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;opacity:.5"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 11v2M8 8v8M12 4.5v15M16 8v8M20 11v2"/></svg><span style="font-size:10px">Voice</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;color:var(--color-accent)"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3.5l8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4M4 16.5l8 4 8-4"/></svg><span style="font-size:10px">Models</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;opacity:.5"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 7h11M18 7h3M3 17h3M10 17h11"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></svg><span style="font-size:10px">Settings</span></div>
+  </div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:var(--color-accent-900);color:var(--color-accent-300);border-radius:5px">S4</span><span style="font-size:12.5px">Download queue</span><span class="text-muted" style="font-size:11px">sharded, resumable, companion-aware</span></div>
+<div style="width:392px;height:824px;border-radius:32px;background:var(--color-bg);box-shadow:var(--shadow-md);overflow:hidden;display:flex;flex-direction:column">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 18px 2px;font:500 11px var(--font-body);opacity:.7"><span>22:14</span><span style="display:flex;gap:6px;align-items:center"><svg width="14" height="10" viewBox="0 0 14 10" fill="none" stroke="var(--color-accent)" stroke-width="1.3"><path d="M1 3.4a8 8 0 0 1 12 0M3.4 6a5 5 0 0 1 7.2 0"/><circle cx="7" cy="8.6" r=".8" fill="var(--color-accent)" stroke="none"/></svg><svg width="20" height="10" viewBox="0 0 20 10" fill="none" stroke="currentColor" stroke-width="1.1"><rect x=".5" y=".5" width="16" height="9" rx="2.4"/><rect x="2" y="2" width="11" height="6" rx="1.4" fill="currentColor" stroke="none"/><path d="M18.4 3.6v2.8" stroke-linecap="round"/></svg></span></div>
+  <div style="display:flex;align-items:center;gap:10px;padding:12px 18px 10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg><span style="font:500 17px var(--font-heading);flex:1">Downloads</span><span class="text-muted" style="font-size:11.5px">Wi-Fi only</span></div>
+  <div style="flex:1;overflow-y:auto;padding:4px 18px 18px">
+    <div class="card elev-sm" style="gap:9px;margin-bottom:10px;box-shadow:inset 0 0 0 1px var(--color-accent-700)">
+      <div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1"><div style="font:500 14px var(--font-heading)">gemma-3-12b-it</div><div class="text-muted" style="font-size:10.5px;font-family:ui-monospace,Menlo,monospace;margin-top:2px">3 shards + mmproj · 4 connections</div></div><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M9 6v12M15 6v12"/></svg></div>
+      <div style="height:5px;border-radius:3px;background:var(--color-neutral-900);overflow:hidden;display:flex"><div style="width:{{ dlPct }}%;background:var(--color-accent-500)"></div></div>
+      <div class="card-meta" style="gap:8px"><span style="font-family:ui-monospace,Menlo,monospace;color:var(--color-accent-300)">{{ dlPct }}%</span><span>·</span><span>{{ dlDone }} of 7.10 GB</span><span style="margin-left:auto">18.4 MB/s</span></div>
+      <div style="display:flex;flex-direction:column;gap:5px;padding-top:4px;box-shadow:0 -1px 0 var(--color-divider)">
+        <div style="display:flex;align-items:center;gap:7px;font-size:11px;font-family:ui-monospace,Menlo,monospace;padding-top:7px"><span style="color:var(--color-accent)">✓</span><span style="flex:1;opacity:.75">model-00001-of-00003.gguf</span><span class="text-muted">2.98 GB</span></div>
+        <div style="display:flex;align-items:center;gap:7px;font-size:11px;font-family:ui-monospace,Menlo,monospace"><span style="color:var(--color-accent-400)">↓</span><span style="flex:1;opacity:.75">model-00002-of-00003.gguf</span><span class="text-muted">1.4 / 2.98 GB</span></div>
+        <div style="display:flex;align-items:center;gap:7px;font-size:11px;font-family:ui-monospace,Menlo,monospace;opacity:.45"><span>·</span><span style="flex:1">model-00003-of-00003.gguf</span><span>queued</span></div>
+        <div style="display:flex;align-items:center;gap:7px;font-size:11px;font-family:ui-monospace,Menlo,monospace;opacity:.45"><span>·</span><span style="flex:1">mmproj-F16.gguf</span><span>queued</span></div>
+      </div>
+    </div>
+
+    <div class="card elev-sm" style="gap:8px;margin-bottom:10px">
+      <div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1"><div style="font:500 14px var(--font-heading)">whisper-large-v3</div><div class="text-muted" style="font-size:10.5px;font-family:ui-monospace,Menlo,monospace;margin-top:2px">paused — network lost at 61%</div></div><button class="btn btn-ghost" style="font-size:12px">Resume</button></div>
+      <div style="height:5px;border-radius:3px;background:var(--color-neutral-900);overflow:hidden"><div style="width:61%;height:100%;background:var(--color-neutral-600)"></div></div>
+      <div class="card-meta"><span>Offsets persisted. Resumes across reboot.</span></div>
+    </div>
+
+    <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:var(--color-neutral-500);margin:18px 0 9px">FAILED · 1</div>
+    <div class="card elev-sm" style="box-shadow:inset 0 0 0 1px var(--color-neutral-700)">
+      <div style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-neutral-300)" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 15.5l7-7"/></svg><div style="font:500 13px var(--font-heading);flex:1">Checksum mismatch</div></div>
+      <p class="card-body">The downloaded file's sha256 doesn't match the repo's <code style="font-size:11px">lfs.oid</code>. Nothing was installed.</p>
+      <div style="font-size:10.5px;font-family:ui-monospace,Menlo,monospace;opacity:.55;line-height:1.6;word-break:break-all">expected 9f2c…41ab<br>got &nbsp;&nbsp;&nbsp;&nbsp; 71de…c803</div>
+      <div style="display:flex;gap:7px;margin-top:4px"><button class="btn btn-primary" style="flex:1">Re-download</button><button class="btn btn-secondary" style="flex:1">Discard</button></div>
+    </div>
+    <div class="text-muted" style="font-size:10.5px;margin-top:14px">Downloads run in a foreground service and survive app kill. Partial files are swept on next boot.</div>
+  </div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:var(--color-neutral-800);color:var(--color-neutral-200);border-radius:5px">S5</span><span style="font-size:12.5px">Honest refusal</span><span class="text-muted" style="font-size:11px">§1.2 — four ways to say no, each with a remedy</span></div>
+<div style="width:392px;height:824px;border-radius:32px;background:var(--color-bg);box-shadow:var(--shadow-md);overflow:hidden;display:flex;flex-direction:column">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 18px 2px;font:500 11px var(--font-body);opacity:.7"><span>22:14</span><span style="display:flex;gap:6px;align-items:center"><svg width="20" height="10" viewBox="0 0 20 10" fill="none" stroke="currentColor" stroke-width="1.1"><rect x=".5" y=".5" width="16" height="9" rx="2.4"/><rect x="2" y="2" width="11" height="6" rx="1.4" fill="currentColor" stroke="none"/><path d="M18.4 3.6v2.8" stroke-linecap="round"/></svg></span></div>
+  <div style="display:flex;align-items:center;gap:10px;padding:12px 18px 10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg><span style="font:500 17px var(--font-heading)">Resolve results</span></div>
+  <div style="flex:1;overflow-y:auto;padding:4px 18px 18px;display:flex;flex-direction:column;gap:12px">
+
+    <div class="card elev-sm" style="box-shadow:inset 0 0 0 1px var(--color-neutral-700)">
+      <div style="display:flex;align-items:flex-start;gap:9px"><span style="flex:none;width:20px;height:20px;border-radius:50%;background:var(--color-neutral-800);display:grid;place-items:center"><svg width="11" height="11" viewBox="0 0 24 24" stroke="var(--color-neutral-200)" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12"/></svg></span><div style="flex:1"><div style="font:500 14px var(--font-heading)">Won't fit</div><div class="text-muted" style="font-size:10.5px;font-family:ui-monospace,Menlo,monospace;margin-top:2px">Llama-3.3-70B-Instruct-GGUF · Q4_K_M</div></div></div>
+      <p class="card-body" style="margin-top:2px">Needs ≈ 44.2 GB resident. This device has 12 GB, 10.4 GB free.</p>
+      <div style="font-size:10.5px;font-family:ui-monospace,Menlo,monospace;opacity:.6;line-height:1.7">weights 42.5 + KV 1.5 at 4K + compute 0.2</div>
+      <div style="display:flex;gap:7px;margin-top:4px"><button class="btn btn-secondary" style="flex:1;font-size:12.5px">Smaller quants (2)</button><button class="btn btn-secondary" style="flex:1;font-size:12.5px">8B sibling</button></div>
+    </div>
+
+    <div class="card elev-sm" style="box-shadow:inset 0 0 0 1px var(--color-neutral-700)">
+      <div style="display:flex;align-items:flex-start;gap:9px"><span style="flex:none;width:20px;height:20px;border-radius:50%;background:var(--color-neutral-800);display:grid;place-items:center"><svg width="11" height="11" viewBox="0 0 24 24" stroke="var(--color-neutral-200)" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12"/></svg></span><div style="flex:1"><div style="font:500 14px var(--font-heading)">PyTorch weights only</div><div class="text-muted" style="font-size:10.5px;font-family:ui-monospace,Menlo,monospace;margin-top:2px">mistralai/Mistral-Small-3.2-24B</div></div></div>
+      <p class="card-body" style="margin-top:2px">This repo ships safetensors. Converting to GGUF needs a desktop — the app won't pretend otherwise.</p>
+      <div style="display:flex;flex-direction:column;gap:5px">
+        <button class="btn btn-primary btn-block" style="margin:0;min-height:40px">Search for Mistral-Small-3.2-24B-GGUF</button>
+        <div style="display:flex;gap:5px"><button class="btn btn-secondary" style="flex:1;font-size:11.5px">bartowski</button><button class="btn btn-secondary" style="flex:1;font-size:11.5px">unsloth</button><button class="btn btn-secondary" style="flex:1;font-size:11.5px">mradermacher</button></div>
+      </div>
+    </div>
+
+    <div class="card elev-sm" style="box-shadow:inset 0 0 0 1px var(--color-neutral-700)">
+      <div style="display:flex;align-items:flex-start;gap:9px"><span style="flex:none;width:20px;height:20px;border-radius:50%;background:var(--color-neutral-800);display:grid;place-items:center"><svg width="11" height="11" viewBox="0 0 24 24" stroke="var(--color-neutral-200)" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12"/></svg></span><div style="flex:1"><div style="font:500 14px var(--font-heading)">Unsupported architecture</div><div class="text-muted" style="font-size:10.5px;font-family:ui-monospace,Menlo,monospace;margin-top:2px">arch <span style="color:var(--color-accent-300)">plamo3</span></div></div></div>
+      <p class="card-body" style="margin-top:2px">llama.cpp <strong style="font-weight:500">b6482</strong> — the build installed on this device — has 41 architectures and this isn't one of them. A newer runtime may add it.</p>
+      <div style="display:flex;gap:7px"><button class="btn btn-secondary" style="flex:1;font-size:12.5px">Check for runtime update</button><button class="btn btn-ghost" style="font-size:12.5px">Upstream issues</button></div>
+    </div>
+
+    <div class="card elev-sm" style="box-shadow:inset 0 0 0 1px var(--color-accent-700)">
+      <div style="display:flex;align-items:flex-start;gap:9px"><span style="flex:none;width:20px;height:20px;border-radius:50%;background:var(--color-accent-800);display:grid;place-items:center"><svg width="11" height="11" viewBox="0 0 24 24" stroke="var(--color-accent-200)" stroke-width="2.4" stroke-linecap="round" fill="none"><path d="M12 5v9M12 18h.01"/></svg></span><div style="flex:1"><div style="font:500 14px var(--font-heading)">Gated repo</div><div class="text-muted" style="font-size:10.5px;font-family:ui-monospace,Menlo,monospace;margin-top:2px">google/gemma-3-27b-it-qat-q4_0-gguf</div></div></div>
+      <p class="card-body" style="margin-top:2px">Accept the licence on Hugging Face, then paste a token. The token is stored in the Android Keystore and used for nothing else.</p>
+      <div style="display:flex;gap:7px"><button class="btn btn-primary" style="flex:1;font-size:12.5px">Open repo page</button><button class="btn btn-secondary" style="flex:1;font-size:12.5px">Enter token</button></div>
+    </div>
+
+    <div class="card elev-sm" style="box-shadow:inset 0 0 0 1px var(--color-neutral-800)">
+      <div style="display:flex;align-items:flex-start;gap:9px"><span style="flex:none;width:20px;height:20px;border-radius:50%;background:var(--color-neutral-800);display:grid;place-items:center"><svg width="11" height="11" viewBox="0 0 24 24" stroke="var(--color-neutral-200)" stroke-width="2" stroke-linecap="round" fill="none"><path d="M12 3l8 4v5c0 5-3.4 8-8 9-4.6-1-8-4-8-9V7z"/></svg></span><div style="flex:1"><div style="font:500 14px var(--font-heading)">Unscanned files</div><div class="text-muted" style="font-size:10.5px;margin-top:2px">A warning, not a block</div></div></div>
+      <p class="card-body" style="margin-top:2px">Hugging Face hasn't scanned these files. GGUF has had template-injection vulnerabilities. Pickle files, if present, are blocked outright.</p>
+      <button class="btn btn-secondary btn-block" style="min-height:40px">Continue anyway</button>
+    </div>
+  </div>
+</div>
+</div>
+
+</div>
+
+<div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.12em;color:var(--color-neutral-500);margin:0 0 18px">CHAT AND THE PARAMETER SYSTEM</div>
+<div style="display:flex;flex-wrap:wrap;gap:34px;align-items:flex-start;margin-bottom:52px">
+
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:var(--color-accent-900);color:var(--color-accent-300);border-radius:5px">S6</span><span style="font-size:12.5px">Chat</span><span class="text-muted" style="font-size:11px">tap the thinking block — live tok/s in the footer</span></div>
+<div style="width:392px;height:824px;border-radius:32px;background:var(--color-bg);box-shadow:var(--shadow-md);overflow:hidden;display:flex;flex-direction:column">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 18px 2px;font:500 11px var(--font-body);opacity:.7"><span>22:14</span><span style="display:flex;gap:6px;align-items:center"><svg width="13" height="10" viewBox="0 0 13 10" fill="currentColor"><rect x="0" y="7" width="2" height="3" rx="1"/><rect x="3.5" y="5" width="2" height="5" rx="1"/><rect x="7" y="2.5" width="2" height="7.5" rx="1"/><rect x="10.5" y="0" width="2" height="10" rx="1"/></svg><svg width="20" height="10" viewBox="0 0 20 10" fill="none" stroke="currentColor" stroke-width="1.1"><rect x=".5" y=".5" width="16" height="9" rx="2.4"/><rect x="2" y="2" width="11" height="6" rx="1.4" fill="currentColor" stroke="none"/><path d="M18.4 3.6v2.8" stroke-linecap="round"/></svg></span></div>
+  <div style="display:flex;align-items:center;gap:9px;padding:10px 16px 9px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    <div style="flex:1;min-width:0"><div style="font:500 14px var(--font-heading);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Qwen3-4B · Balanced</div><div style="font-size:10px;display:flex;gap:6px;align-items:center;opacity:.6"><span style="width:5px;height:5px;border-radius:50%;background:var(--color-accent)"></span><span>OpenCL · 2 140 / 8 192 ctx</span></div></div>
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 7h11M18 7h3M3 17h3M10 17h11"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></svg>
+  </div>
+  <div style="flex:1;overflow-y:auto;padding:8px 16px 12px;display:flex;flex-direction:column;gap:14px">
+    <div style="align-self:flex-end;max-width:80%;background:var(--color-accent-900);border-radius:14px 14px 4px 14px;padding:9px 12px;font-size:13.5px;line-height:1.5">Summarise the KV cache maths in this screenshot and tell me if 32K fits.</div>
+    <div style="align-self:flex-end;width:80%;border-radius:10px;overflow:hidden;box-shadow:inset 0 0 0 1px var(--color-divider);background:var(--color-neutral-900);height:96px;display:grid;place-items:center"><span class="text-muted" style="font-size:10.5px;font-family:ui-monospace,Menlo,monospace">screenshot.png · 1 456 img tokens</span></div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div onClick="{{ onThink }}" style="cursor:pointer;display:flex;align-items:center;gap:7px;padding:7px 10px;border-radius:var(--radius-md);background:var(--color-neutral-900);font-size:11.5px;box-shadow:inset 0 0 0 1px var(--color-divider)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 1 3 11v3H9v-3a6 6 0 0 1 3-11zM9.5 21h5"/></svg>
+        <span style="color:var(--color-accent-300);flex:1">Thought for 6.2s · 418 tokens</span>
+        <span style="color:var(--color-accent-300);font-size:14px">{{ thinkChev }}</span>
+      </div>
+      <sc-if value="{{ thinkOpen }}" hint-placeholder-val="{{ true }}">
+        <div style="font-size:12px;line-height:1.6;padding:9px 11px;border-radius:var(--radius-md);background:var(--color-neutral-900);opacity:.72;font-family:ui-monospace,Menlo,monospace">The user wants 2 × n_layer × n_ctx × n_embd_kv × bytes. For this model n_layer=36 and n_embd_kv=1024 (8 KV heads × 128). At 32768 and f16 that's 4.83 GB, plus 2.5 GB weights — so around 7.6 GB resident. Free RAM is 10.4 GB, so it fits, but headroom drops under 3 GB…</div>
+      </sc-if>
+      <div style="font-size:13.5px;line-height:1.6">Your arithmetic checks out. At 32K with an f16 cache you're looking at <strong style="font-weight:500;color:var(--color-accent-200)">4.83 GB of KV alone</strong> — nearly double the weights. Two ways down:<br><br>Set <code style="font-size:12px;color:var(--color-accent-300)">cache_type_k</code> and <code style="font-size:12px;color:var(--color-accent-300)">cache_type_v</code> to <code style="font-size:12px;color:var(--color-accent-300)">q8_0</code> and the cache halves to 2.4 GB with almost no quality cost. Enabling flash attention on top<span style="display:inline-block;width:7px;height:15px;background:var(--color-accent);margin-left:2px;vertical-align:-3px;animation:caret 1s steps(1) infinite"></span></div>
+      <div style="display:flex;gap:14px;align-items:center;padding-top:2px;opacity:.55">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="9" y="3" width="12" height="14" rx="2"/><path d="M15 21H5a2 2 0 0 1-2-2V7"/></svg>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 12a8 8 0 1 1 3 6.2M4 8v4h4"/></svg>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 12h5l2-4 3 8 2-4h4"/></svg>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h3l5 4V5L7 9zM16 8.5a5 5 0 0 1 0 7"/></svg>
+        <span style="margin-left:auto;font-size:10.5px;font-family:ui-monospace,Menlo,monospace;color:var(--color-accent-300);opacity:.9">{{ tps }} t/s</span>
+      </div>
+    </div>
+  </div>
+  <div style="padding:8px 14px 12px;box-shadow:0 -1px 0 var(--color-divider)">
+    <div style="display:flex;align-items:flex-end;gap:8px">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" style="opacity:.6;margin-bottom:11px"><path d="M12 5v14M5 12h14"/></svg>
+      <div style="flex:1;background:var(--color-surface);border-radius:18px;box-shadow:inset 0 0 0 1px var(--color-divider);padding:11px 13px;font-size:13px;opacity:.45;min-height:44px">Message Qwen3-4B…</div>
+      <button class="btn btn-primary" style="width:44px;height:44px;border-radius:50%;padding:0;flex:none"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>
+    </div>
+  </div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:var(--color-accent-900);color:var(--color-accent-300);border-radius:5px">S7</span><span style="font-size:12.5px">Chat settings</span><span class="text-muted" style="font-size:11px">sheet: model, persona, preset, Basic tier inline</span></div>
+<div style="width:392px;height:824px;border-radius:32px;background:var(--color-bg);box-shadow:var(--shadow-md);overflow:hidden;display:flex;flex-direction:column;position:relative">
+  <div style="position:absolute;inset:0;background:var(--color-bg);opacity:.55"></div>
+  <div style="position:absolute;inset:0;background:color-mix(in srgb, var(--color-neutral-900) 55%, transparent)"></div>
+  <div style="position:absolute;left:0;right:0;bottom:0;top:82px;background:var(--color-surface);border-radius:20px 20px 0 0;box-shadow:var(--shadow-lg);display:flex;flex-direction:column">
+    <div style="display:grid;place-items:center;padding:9px 0 3px"><div style="width:34px;height:4px;border-radius:2px;background:var(--color-neutral-700)"></div></div>
+    <div style="padding:6px 18px 12px;display:flex;align-items:baseline;gap:9px"><span style="font:500 19px var(--font-heading);flex:1">This conversation</span><span class="text-muted" style="font-size:11px">reload not required</span></div>
+    <div style="flex:1;overflow-y:auto;padding:0 18px 20px">
+      <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:var(--color-neutral-500);margin:0 0 8px">MODEL</div>
+      <div style="display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:var(--radius-md);background:var(--color-bg);box-shadow:inset 0 0 0 1px var(--color-accent-700);min-height:44px"><div style="flex:1"><div style="font:500 13.5px var(--font-heading)">Qwen3-4B-Instruct-2507</div><div class="text-muted" style="font-size:10.5px;font-family:ui-monospace,Menlo,monospace">Q4_0 · loaded · 14.1 t/s</div></div><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 10l4 4 4-4"/></svg></div>
+      <div class="text-muted" style="font-size:10.5px;margin-top:6px">Switching unloads this model first — the app never holds two at once.</div>
+
+      <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:var(--color-neutral-500);margin:20px 0 8px">PERSONA</div>
+      <div style="display:flex;gap:7px;overflow-x:auto;padding-bottom:4px">
+        <div style="flex:none;padding:9px 12px;border-radius:var(--radius-md);background:var(--color-accent-900);box-shadow:inset 0 0 0 1px var(--color-accent);min-width:104px"><div style="font:500 12.5px var(--font-heading);color:var(--color-accent-200)">Terse</div><div style="font-size:10px;color:var(--color-accent-300);opacity:.8;margin-top:1px">af_heart · Balanced</div></div>
+        <div style="flex:none;padding:9px 12px;border-radius:var(--radius-md);background:var(--color-bg);box-shadow:inset 0 0 0 1px var(--color-divider);min-width:104px"><div style="font:500 12.5px var(--font-heading)">Rubber duck</div><div class="text-muted" style="font-size:10px;margin-top:1px">bm_george</div></div>
+        <div style="flex:none;padding:9px 12px;border-radius:var(--radius-md);background:var(--color-bg);box-shadow:inset 0 0 0 1px var(--color-divider);min-width:70px;display:grid;place-items:center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" style="opacity:.6"><path d="M12 5v14M5 12h14"/></svg></div>
+      </div>
+
+      <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:var(--color-neutral-500);margin:20px 0 8px">SYSTEM PROMPT</div>
+      <textarea class="input" style="min-height:74px;font-size:12.5px;line-height:1.5">Answer in as few words as the question allows. Show working for any arithmetic. Never apologise.</textarea>
+
+      <div style="display:flex;align-items:baseline;gap:8px;margin:20px 0 8px"><span style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:var(--color-neutral-500);flex:1">PRESET</span><span style="font-size:11px;color:var(--color-accent)">Save as…</span></div>
+      <div class="seg" style="width:100%"><label class="seg-opt" style="flex:1;justify-content:center"><input type="radio" name="p7"><span>Precise</span></label><label class="seg-opt" style="flex:1;justify-content:center"><input type="radio" name="p7" checked><span>Balanced</span></label><label class="seg-opt" style="flex:1;justify-content:center"><input type="radio" name="p7"><span>Creative</span></label></div>
+
+      <div style="display:flex;align-items:baseline;gap:8px;margin:20px 0 4px"><span style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:var(--color-neutral-500);flex:1">BASIC</span><span class="text-muted" style="font-size:10.5px">3 of 63 params</span></div>
+      <div style="padding:10px 0;box-shadow:0 1px 0 var(--color-divider)"><div style="display:flex;align-items:baseline;gap:7px;margin-bottom:5px"><span style="font-size:12.5px;flex:1">Temperature</span><span style="width:6px;height:6px;border-radius:50%;background:var(--color-accent)"></span><span style="font:500 12px ui-monospace,Menlo,monospace;color:var(--color-accent-300)">0.70</span></div><input type="range" min="0" max="2" step="0.05" value="0.7" style="width:100%;height:22px"><div class="text-muted" style="font-size:10.5px">Higher is more random. 0 is greedy. <span style="color:var(--color-accent)">reset to 0.80</span></div></div>
+      <div style="padding:10px 0;box-shadow:0 1px 0 var(--color-divider)"><div style="display:flex;align-items:baseline;gap:7px;margin-bottom:5px"><span style="font-size:12.5px;flex:1">Max tokens</span><span style="font:500 12px ui-monospace,Menlo,monospace;color:var(--color-accent-300)">−1</span></div><div class="text-muted" style="font-size:10.5px">−1 generates until EOS or the context fills.</div></div>
+      <button class="btn btn-secondary btn-block" style="min-height:44px;margin-top:14px">Advanced · 9 parameters</button>
+      <button class="btn btn-primary btn-block" style="min-height:44px">All parameters →</button>
+    </div>
+  </div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:var(--color-accent-900);color:var(--color-accent-300);border-radius:5px">S8</span><span style="font-size:12.5px">All parameters</span><span class="text-muted" style="font-size:11px">manifest renderer — switch tiers, flip rope_scaling_type</span></div>
+<div style="width:392px;height:824px;border-radius:32px;background:var(--color-bg);box-shadow:var(--shadow-md);overflow:hidden;display:flex;flex-direction:column">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 18px 2px;font:500 11px var(--font-body);opacity:.7"><span>22:14</span><span style="display:flex;gap:6px;align-items:center"><svg width="20" height="10" viewBox="0 0 20 10" fill="none" stroke="currentColor" stroke-width="1.1"><rect x=".5" y=".5" width="16" height="9" rx="2.4"/><rect x="2" y="2" width="11" height="6" rx="1.4" fill="currentColor" stroke="none"/><path d="M18.4 3.6v2.8" stroke-linecap="round"/></svg></span></div>
+  <div style="display:flex;align-items:center;gap:10px;padding:12px 18px 8px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg><div style="flex:1"><div style="font:500 17px var(--font-heading)">Parameters</div><div class="text-muted" style="font-size:10.5px;font-family:ui-monospace,Menlo,monospace">llama.cpp b6482 · manifest v7</div></div><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 12a8 8 0 1 1 3 6.2M4 8v4h4"/></svg></div>
+  <div style="padding:2px 18px 10px;display:flex;flex-direction:column;gap:8px">
+    <input class="input" style="min-height:40px" value="{{ q }}" onChange="{{ onQ }}" placeholder="Search 63 parameters">
+    <div style="display:flex;gap:6px">
+      <sc-for list="{{ tiers }}" as="t" hint-placeholder-count="4">
+        <div onClick="{{ t.onPick }}" style="flex:1;text-align:center;padding:7px 0;border-radius:var(--radius-md);cursor:pointer;font:500 12px var(--font-heading);background:{{ t.bg }};color:{{ t.fg }};box-shadow:inset 0 0 0 1px {{ t.ring }}">{{ t.label }}</div>
+      </sc-for>
+    </div>
+  </div>
+  <div style="flex:1;overflow-y:auto;padding:0 18px 20px">
+    <div class="text-muted" style="font-size:10.5px;margin-bottom:4px">{{ shownCount }} shown · {{ hiddenCount }} hidden by dependsOn or build gate</div>
+    <sc-for list="{{ params }}" as="p" hint-placeholder-count="7">
+      <div style="padding:11px 0;box-shadow:0 1px 0 var(--color-divider)">
+        <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:3px">
+          <span style="font-size:12.5px">{{ p.label }}</span>
+          <sc-if value="{{ p.modified }}" hint-placeholder-val="{{ true }}"><span style="width:5px;height:5px;border-radius:50%;background:var(--color-accent);display:inline-block;flex:none"></span></sc-if>
+          <sc-if value="{{ p.reload }}" hint-placeholder-val="{{ true }}"><span class="tag tag-neutral" style="font-size:9px;padding:0 5px">reload</span></sc-if>
+          <span style="margin-left:auto;font:500 12px ui-monospace,Menlo,monospace;color:var(--color-accent-300)">{{ p.display }}</span>
+        </div>
+        <div class="text-muted" style="font-size:9.5px;font-family:ui-monospace,Menlo,monospace;margin-bottom:5px">{{ p.key }} · {{ p.tier }}</div>
+        <sc-if value="{{ p.isRange }}" hint-placeholder-val="{{ true }}">
+          <input type="range" min="{{ p.min }}" max="{{ p.max }}" step="{{ p.step }}" value="{{ p.value }}" onChange="{{ p.onChange }}" style="width:100%;height:22px">
+        </sc-if>
+        <sc-if value="{{ p.isBool }}" hint-placeholder-val="{{ true }}">
+          <div onClick="{{ p.onToggle }}" style="width:40px;height:23px;border-radius:12px;cursor:pointer;display:flex;align-items:center;padding:2px;background:{{ p.trackBg }};justify-content:{{ p.knobSide }};box-shadow:inset 0 0 0 1px var(--color-divider)"><span style="width:17px;height:17px;border-radius:50%;background:{{ p.knobBg }};display:block"></span></div>
+        </sc-if>
+        <sc-if value="{{ p.isEnum }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;gap:5px;flex-wrap:wrap">
+            <sc-for list="{{ p.options }}" as="o" hint-placeholder-count="3">
+              <div onClick="{{ o.onPick }}" style="padding:5px 9px;border-radius:var(--radius-sm);cursor:pointer;font:500 11px ui-monospace,Menlo,monospace;background:{{ o.bg }};color:{{ o.fg }};box-shadow:inset 0 0 0 1px {{ o.ring }}">{{ o.label }}</div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ p.isChips }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;gap:5px;flex-wrap:wrap">
+            <sc-for list="{{ p.chips }}" as="c" hint-placeholder-count="4">
+              <span style="padding:3px 8px;border-radius:var(--radius-sm);background:var(--color-neutral-900);font:500 11px ui-monospace,Menlo,monospace;box-shadow:inset 0 0 0 1px var(--color-divider)">{{ c.label }}</span>
+            </sc-for>
+            <span style="padding:3px 8px;border-radius:var(--radius-sm);color:var(--color-accent);font-size:11px;box-shadow:inset 0 0 0 1px var(--color-accent-700)">+ add</span>
+          </div>
+        </sc-if>
+        <div class="text-muted" style="font-size:10.5px;margin-top:5px">{{ p.help }}</div>
+      </div>
+    </sc-for>
+    <div class="card elev-sm" style="margin-top:16px;box-shadow:inset 0 0 0 1px var(--color-accent-800)">
+      <div class="card-kicker">Escape hatch · §16.6</div>
+      <div style="font:500 13px var(--font-heading)">Raw parameters</div>
+      <div style="font-size:11.5px;font-family:ui-monospace,Menlo,monospace;padding:8px 10px;border-radius:var(--radius-sm);background:var(--color-bg);color:var(--color-accent-300);box-shadow:inset 0 0 0 1px var(--color-divider)">{ "some_new_upstream_flag": 0.7 }</div>
+      <p class="card-body">Passed straight through to the runtime. Unknown keys are reported, never fatal — so anything the loaded .so supports is always reachable.</p>
+    </div>
+  </div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:var(--color-accent-900);color:var(--color-accent-300);border-radius:5px">S9</span><span style="font-size:12.5px">Sampler chain</span><span class="text-muted" style="font-size:11px">drag the rows to reorder; tap a row to disable</span></div>
+<div style="width:392px;height:824px;border-radius:32px;background:var(--color-bg);box-shadow:var(--shadow-md);overflow:hidden;display:flex;flex-direction:column">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 18px 2px;font:500 11px var(--font-body);opacity:.7"><span>22:14</span><span style="display:flex;gap:6px;align-items:center"><svg width="20" height="10" viewBox="0 0 20 10" fill="none" stroke="currentColor" stroke-width="1.1"><rect x=".5" y=".5" width="16" height="9" rx="2.4"/><rect x="2" y="2" width="11" height="6" rx="1.4" fill="currentColor" stroke="none"/><path d="M18.4 3.6v2.8" stroke-linecap="round"/></svg></span></div>
+  <div style="display:flex;align-items:center;gap:10px;padding:12px 18px 10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg><div style="flex:1"><div style="font:500 17px var(--font-heading)">Sampler chain</div><div class="text-muted" style="font-size:10.5px">Order changes the output. Most apps hide it.</div></div></div>
+  <div style="flex:1;overflow-y:auto;padding:4px 18px 18px">
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <sc-for list="{{ chain }}" as="c" hint-placeholder-count="8">
+        <div draggable="true" onDragStart="{{ c.onDragStart }}" onDragOver="{{ c.onDragOver }}" onDragEnd="{{ c.onDragEnd }}" style="display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:var(--radius-md);cursor:grab;min-height:46px;background:{{ c.bg }};box-shadow:inset 0 0 0 1px {{ c.ring }};opacity:{{ c.opacity }}">
+          <span style="font:500 11px ui-monospace,Menlo,monospace;color:var(--color-accent-300);width:14px">{{ c.n }}</span>
+          <div style="flex:1;min-width:0"><div style="font:500 13px var(--font-heading)">{{ c.label }}</div><div class="text-muted" style="font-size:10.5px;font-family:ui-monospace,Menlo,monospace">{{ c.detail }}</div></div>
+          <span onClick="{{ c.onToggle }}" style="padding:4px 8px;border-radius:var(--radius-sm);font:500 10px ui-monospace,Menlo,monospace;cursor:pointer;color:{{ c.badgeFg }};box-shadow:inset 0 0 0 1px {{ c.badgeRing }}">{{ c.badge }}</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="opacity:.35;flex:none"><circle cx="9" cy="7" r="1.4"/><circle cx="15" cy="7" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="17" r="1.4"/><circle cx="15" cy="17" r="1.4"/></svg>
+        </div>
+      </sc-for>
+    </div>
+    <div class="card elev-sm" style="margin-top:16px">
+      <div class="card-kicker">Current chain</div>
+      <div style="font-size:11.5px;font-family:ui-monospace,Menlo,monospace;color:var(--color-accent-300);line-height:1.7;word-break:break-all">{{ chainString }}</div>
+      <p class="card-body">Written verbatim into <code style="font-size:11px">samplers</code> and stored with every message, so any reply can be reproduced exactly.</p>
+    </div>
+    <div style="display:flex;gap:7px;margin-top:12px"><button class="btn btn-secondary" style="flex:1;min-height:44px">Reset to runtime default</button></div>
+    <div class="text-muted" style="font-size:10.5px;margin-top:14px">Mirostat, when enabled, replaces this chain entirely — the app greys it out and says so rather than silently ignoring your order.</div>
+  </div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:var(--color-accent-900);color:var(--color-accent-300);border-radius:5px">S10</span><span style="font-size:12.5px">Prompt inspector</span><span class="text-muted" style="font-size:11px">the exact string, with token boundaries</span></div>
+<div style="width:392px;height:824px;border-radius:32px;background:var(--color-bg);box-shadow:var(--shadow-md);overflow:hidden;display:flex;flex-direction:column">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 18px 2px;font:500 11px var(--font-body);opacity:.7"><span>22:14</span><span style="display:flex;gap:6px;align-items:center"><svg width="20" height="10" viewBox="0 0 20 10" fill="none" stroke="currentColor" stroke-width="1.1"><rect x=".5" y=".5" width="16" height="9" rx="2.4"/><rect x="2" y="2" width="11" height="6" rx="1.4" fill="currentColor" stroke="none"/><path d="M18.4 3.6v2.8" stroke-linecap="round"/></svg></span></div>
+  <div style="display:flex;align-items:center;gap:10px;padding:12px 18px 10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg><div style="flex:1"><div style="font:500 17px var(--font-heading)">Prompt inspector</div><div class="text-muted" style="font-size:10.5px">What actually reaches the tokenizer</div></div></div>
+  <div style="padding:0 18px 10px"><div class="seg" style="width:100%"><label class="seg-opt" style="flex:1;justify-content:center"><input type="radio" name="pi" checked><span>Rendered</span></label><label class="seg-opt" style="flex:1;justify-content:center"><input type="radio" name="pi"><span>Tokens</span></label><label class="seg-opt" style="flex:1;justify-content:center"><input type="radio" name="pi"><span>Template</span></label></div></div>
+  <div style="flex:1;overflow-y:auto;padding:4px 18px 18px">
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px"><span class="tag tag-accent">2 140 tokens</span><span class="tag tag-neutral">of 8 192</span><span class="tag tag-neutral">1 456 image</span><span class="tag tag-outline">cache hit 1 924</span></div>
+    <div style="padding:12px;border-radius:var(--radius-md);background:var(--color-neutral-900);box-shadow:inset 0 0 0 1px var(--color-divider);font-size:12px;font-family:ui-monospace,Menlo,monospace;line-height:1.85;word-break:break-word">
+      <span style="background:var(--color-accent-800);color:var(--color-accent-100);padding:1px 3px;border-radius:3px">&lt;|im_start|&gt;</span><span style="background:color-mix(in srgb,var(--color-text) 8%,transparent);padding:1px 2px">system</span><span style="opacity:.4">↵</span><br><span style="background:color-mix(in srgb,var(--color-text) 5%,transparent);padding:1px 2px">Answer</span> <span style="background:color-mix(in srgb,var(--color-text) 8%,transparent);padding:1px 2px">in</span> <span style="background:color-mix(in srgb,var(--color-text) 5%,transparent);padding:1px 2px">as</span> <span style="background:color-mix(in srgb,var(--color-text) 8%,transparent);padding:1px 2px">few</span> <span style="background:color-mix(in srgb,var(--color-text) 5%,transparent);padding:1px 2px">words</span> <span style="background:color-mix(in srgb,var(--color-text) 8%,transparent);padding:1px 2px">as</span> <span style="background:color-mix(in srgb,var(--color-text) 5%,transparent);padding:1px 2px">the</span> <span style="background:color-mix(in srgb,var(--color-text) 8%,transparent);padding:1px 2px">question</span> <span style="background:color-mix(in srgb,var(--color-text) 5%,transparent);padding:1px 2px">allows</span><span style="background:color-mix(in srgb,var(--color-text) 8%,transparent);padding:1px 2px">.</span><br><span style="background:var(--color-accent-800);color:var(--color-accent-100);padding:1px 3px;border-radius:3px">&lt;|im_end|&gt;</span><span style="opacity:.4">↵</span><br><span style="background:var(--color-accent-800);color:var(--color-accent-100);padding:1px 3px;border-radius:3px">&lt;|im_start|&gt;</span><span style="background:color-mix(in srgb,var(--color-text) 8%,transparent);padding:1px 2px">user</span><span style="opacity:.4">↵</span><br><span style="background:var(--color-accent-900);color:var(--color-accent-300);padding:1px 3px;border-radius:3px">&lt;|vision_start|&gt;</span><span class="text-muted" style="opacity:.55">…1 456 image tokens…</span><span style="background:var(--color-accent-900);color:var(--color-accent-300);padding:1px 3px;border-radius:3px">&lt;|vision_end|&gt;</span><br><span style="background:color-mix(in srgb,var(--color-text) 5%,transparent);padding:1px 2px">Summar</span><span style="background:color-mix(in srgb,var(--color-text) 8%,transparent);padding:1px 2px">ise</span> <span style="background:color-mix(in srgb,var(--color-text) 5%,transparent);padding:1px 2px">the</span> <span style="background:color-mix(in srgb,var(--color-text) 8%,transparent);padding:1px 2px">KV</span> <span style="background:color-mix(in srgb,var(--color-text) 5%,transparent);padding:1px 2px">cache</span> <span style="background:color-mix(in srgb,var(--color-text) 8%,transparent);padding:1px 2px">math</span><span style="background:color-mix(in srgb,var(--color-text) 5%,transparent);padding:1px 2px">s</span><br><span style="background:var(--color-accent-800);color:var(--color-accent-100);padding:1px 3px;border-radius:3px">&lt;|im_end|&gt;</span><span style="opacity:.4">↵</span><br><span style="background:var(--color-accent-800);color:var(--color-accent-100);padding:1px 3px;border-radius:3px">&lt;|im_start|&gt;</span><span style="background:color-mix(in srgb,var(--color-text) 8%,transparent);padding:1px 2px">assistant</span><span style="opacity:.4">↵</span>
+    </div>
+    <div style="display:flex;gap:7px;margin-top:10px"><button class="btn btn-secondary" style="flex:1;font-size:12.5px">Copy</button><button class="btn btn-secondary" style="flex:1;font-size:12.5px">Show whitespace</button></div>
+
+    <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:var(--color-neutral-500);margin:20px 0 8px">CHAT TEMPLATE</div>
+    <div class="card elev-sm" style="gap:6px">
+      <div style="display:flex;align-items:center;gap:7px"><span class="tag tag-outline">from GGUF metadata</span><span style="margin-left:auto;font-size:11px;color:var(--color-accent)">Override</span></div>
+      <p class="card-body">Read from <code style="font-size:11px">gguf.chat_template</code> at load. Nothing about this model is hardcoded in the app.</p>
+    </div>
+
+    <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:var(--color-neutral-500);margin:20px 0 8px">STOP SEQUENCES</div>
+    <div style="display:flex;gap:5px;flex-wrap:wrap"><span style="padding:4px 9px;border-radius:var(--radius-sm);background:var(--color-neutral-900);font:500 11px ui-monospace,Menlo,monospace;box-shadow:inset 0 0 0 1px var(--color-divider)">&lt;|im_end|&gt;</span><span style="padding:4px 9px;border-radius:var(--radius-sm);background:var(--color-neutral-900);font:500 11px ui-monospace,Menlo,monospace;box-shadow:inset 0 0 0 1px var(--color-divider)">&lt;|endoftext|&gt;</span><span style="padding:4px 9px;border-radius:var(--radius-sm);color:var(--color-accent);font-size:11px;box-shadow:inset 0 0 0 1px var(--color-accent-700)">+ add</span></div>
+    <div class="text-muted" style="font-size:10.5px;margin-top:8px">Two came from the template. Anything you add is yours and is kept per model.</div>
+  </div>
+</div>
+</div>
+
+</div>
+
+<div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.12em;color:var(--color-neutral-500);margin:0 0 18px">IMAGE, VOICE, SYSTEM</div>
+<div style="display:flex;flex-wrap:wrap;gap:34px;align-items:flex-start">
+
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:var(--color-accent-900);color:var(--color-accent-300);border-radius:5px">S11</span><span style="font-size:12.5px">Image</span><span class="text-muted" style="font-size:11px">switch modes; TAESD preview is live</span></div>
+<div style="width:392px;height:824px;border-radius:32px;background:var(--color-bg);box-shadow:var(--shadow-md);overflow:hidden;display:flex;flex-direction:column">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 18px 2px;font:500 11px var(--font-body);opacity:.7"><span>22:14</span><span style="display:flex;gap:6px;align-items:center"><svg width="13" height="10" viewBox="0 0 13 10" fill="currentColor"><rect x="0" y="7" width="2" height="3" rx="1"/><rect x="3.5" y="5" width="2" height="5" rx="1"/><rect x="7" y="2.5" width="2" height="7.5" rx="1"/><rect x="10.5" y="0" width="2" height="10" rx="1"/></svg><svg width="20" height="10" viewBox="0 0 20 10" fill="none" stroke="currentColor" stroke-width="1.1"><rect x=".5" y=".5" width="16" height="9" rx="2.4"/><rect x="2" y="2" width="9" height="6" rx="1.4" fill="currentColor" stroke="none"/><path d="M18.4 3.6v2.8" stroke-linecap="round"/></svg></span></div>
+  <div style="display:flex;align-items:center;gap:10px;padding:12px 18px 8px"><span style="font:500 21px var(--font-heading);flex:1">Image</span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4.5 4 3.5 3-2.5 4 3.5"/></svg></div>
+  <div style="padding:0 18px 10px;display:flex;gap:6px">
+    <sc-for list="{{ imgModes }}" as="m" hint-placeholder-count="3">
+      <div onClick="{{ m.onPick }}" style="flex:1;text-align:center;padding:8px 0;border-radius:var(--radius-md);cursor:pointer;font:500 12px var(--font-heading);background:{{ m.bg }};color:{{ m.fg }};box-shadow:inset 0 0 0 1px {{ m.ring }}">{{ m.label }}</div>
+    </sc-for>
+  </div>
+  <div style="flex:1;overflow-y:auto;padding:0 18px 18px">
+    <div style="position:relative;aspect-ratio:1;border-radius:var(--radius-md);overflow:hidden;background:var(--color-neutral-900);box-shadow:inset 0 0 0 1px var(--color-divider);display:grid;place-items:center">
+      <div style="position:absolute;inset:0;background:radial-gradient(120% 90% at 28% 22%, var(--color-accent-700), transparent 62%), radial-gradient(90% 80% at 76% 78%, var(--color-section-glow), transparent 58%), var(--color-neutral-900);filter:blur(14px);opacity:.85"></div>
+      <div style="position:absolute;inset:0;background:repeating-linear-gradient(0deg, rgba(0,0,0,.16) 0 1px, transparent 1px 3px)"></div>
+      <div style="position:relative;text-align:center"><div style="font:500 11px ui-monospace,Menlo,monospace;color:var(--color-accent-200);opacity:.9">TAESD preview</div></div>
+      <div style="position:absolute;left:0;right:0;bottom:0;padding:9px 11px;background:linear-gradient(transparent, rgba(0,0,0,.6))">
+        <div style="display:flex;align-items:center;gap:8px;font:500 11px ui-monospace,Menlo,monospace"><span style="color:var(--color-accent-200)">step {{ step }}/28</span><span style="opacity:.7">·</span><span style="opacity:.7">CPU · 3.1 s/it</span><span style="margin-left:auto;opacity:.7">~52 s left</span></div>
+        <div style="height:4px;border-radius:2px;background:rgba(0,0,0,.45);margin-top:6px;overflow:hidden"><div style="width:{{ stepPct }}%;height:100%;background:var(--color-accent-400)"></div></div>
+      </div>
+    </div>
+    <button class="btn btn-secondary btn-block" style="min-height:44px;margin-top:8px">Cancel — frees native memory</button>
+
+    <div class="field" style="margin-top:16px"><label>Prompt</label><textarea class="input" style="min-height:66px;font-size:12.5px;line-height:1.5">low-key studio portrait of a lynx, black backdrop, rim light &lt;lora:filmgrain:0.6&gt;</textarea></div>
+    <div class="field" style="margin-top:8px"><label>Negative prompt</label><input class="input" value="blurry, oversaturated"></div>
+    <sc-if value="{{ showStrength }}" hint-placeholder-val="{{ false }}">
+      <div style="margin-top:12px;padding:11px 12px;border-radius:var(--radius-md);background:var(--color-accent-900)">
+        <div style="display:flex;align-items:baseline;gap:7px;margin-bottom:4px"><span style="font-size:12.5px;color:var(--color-accent-200);flex:1">Denoise strength</span><span style="font:500 12px ui-monospace,Menlo,monospace;color:var(--color-accent-200)">0.75</span></div>
+        <input type="range" min="0" max="1" step="0.05" value="0.75" style="width:100%;height:22px">
+        <div style="font-size:10.5px;color:var(--color-accent-300);opacity:.85">The key dial in this mode. 0 leaves the source untouched, 1 ignores it.</div>
+      </div>
+    </sc-if>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px">
+      <div><div style="display:flex;align-items:baseline;gap:6px"><span style="font-size:12px;flex:1">Steps</span><span style="font:500 12px ui-monospace,Menlo,monospace;color:var(--color-accent-300)">28</span></div><input type="range" min="1" max="60" value="28" style="width:100%;height:22px"></div>
+      <div><div style="display:flex;align-items:baseline;gap:6px"><span style="font-size:12px;flex:1">CFG</span><span style="font:500 12px ui-monospace,Menlo,monospace;color:var(--color-accent-300)">7.0</span></div><input type="range" min="1" max="20" step="0.5" value="7" style="width:100%;height:22px"></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <div style="flex:1"><div class="text-muted" style="font-size:11px;margin-bottom:4px">Size</div><div class="seg" style="width:100%"><label class="seg-opt" style="flex:1;justify-content:center;font-size:11.5px"><input type="radio" name="sz" checked><span>512</span></label><label class="seg-opt" style="flex:1;justify-content:center;font-size:11.5px"><input type="radio" name="sz"><span>768</span></label><label class="seg-opt" style="flex:1;justify-content:center;font-size:11.5px"><input type="radio" name="sz"><span>1024</span></label></div></div>
+      <div style="flex:none;width:118px"><div class="text-muted" style="font-size:11px;margin-bottom:4px">Seed</div><input class="input" style="font-family:ui-monospace,Menlo,monospace;font-size:12px" value="812934177"></div>
+    </div>
+    <div class="card elev-sm" style="margin-top:14px;box-shadow:inset 0 0 0 1px var(--color-neutral-700)">
+      <div style="display:flex;align-items:center;gap:8px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--color-neutral-300)" stroke-width="1.8" stroke-linecap="round"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg><div style="font:500 12.5px var(--font-heading);flex:1">1024 × 1024 exceeds the measured envelope</div></div>
+      <p class="card-body">Turn on <code style="font-size:11px">vae_tiling</code> or drop to 768. sd.cpp on Adreno 829 is unproven — this runs on CPU.</p>
+      <div style="display:flex;align-items:center;gap:9px"><span style="font-size:12px;flex:1">vae_tiling</span><div style="width:40px;height:23px;border-radius:12px;background:var(--color-accent-700);display:flex;align-items:center;justify-content:flex-end;padding:2px"><span style="width:17px;height:17px;border-radius:50%;background:var(--color-accent-200)"></span></div></div>
+    </div>
+    <button class="btn btn-secondary btn-block" style="min-height:44px;margin-top:14px">Advanced · schedule, clip_skip, SLG</button>
+  </div>
+  <div style="display:flex;padding:7px 6px 12px;box-shadow:0 -1px 0 var(--color-divider)">
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;opacity:.5"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M4 5.5h16v11H9l-5 4z"/></svg><span style="font-size:10px">Chat</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;color:var(--color-accent)"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4.5 4 3.5 3-2.5 4 3.5"/></svg><span style="font-size:10px">Image</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;opacity:.5"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 11v2M8 8v8M12 4.5v15M16 8v8M20 11v2"/></svg><span style="font-size:10px">Voice</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;opacity:.5"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3.5l8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4M4 16.5l8 4 8-4"/></svg><span style="font-size:10px">Models</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;opacity:.5"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 7h11M18 7h3M3 17h3M10 17h11"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></svg><span style="font-size:10px">Settings</span></div>
+  </div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:var(--color-accent-900);color:var(--color-accent-300);border-radius:5px">S12</span><span style="font-size:12.5px">Mask editor</span><span class="text-muted" style="font-size:11px">brush, hardness, invert, undo</span></div>
+<div style="width:392px;height:824px;border-radius:32px;background:var(--color-bg);box-shadow:var(--shadow-md);overflow:hidden;display:flex;flex-direction:column">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 18px 2px;font:500 11px var(--font-body);opacity:.7"><span>22:14</span><span style="display:flex;gap:6px;align-items:center"><svg width="20" height="10" viewBox="0 0 20 10" fill="none" stroke="currentColor" stroke-width="1.1"><rect x=".5" y=".5" width="16" height="9" rx="2.4"/><rect x="2" y="2" width="9" height="6" rx="1.4" fill="currentColor" stroke="none"/><path d="M18.4 3.6v2.8" stroke-linecap="round"/></svg></span></div>
+  <div style="display:flex;align-items:center;gap:10px;padding:12px 18px 10px"><span style="font-size:13px;color:var(--color-accent)">Cancel</span><span style="font:500 15px var(--font-heading);flex:1;text-align:center">Mask</span><span style="font-size:13px;color:var(--color-accent)">Done</span></div>
+  <div style="flex:1;display:flex;flex-direction:column;padding:0 18px 18px">
+    <div style="position:relative;aspect-ratio:1;border-radius:var(--radius-md);overflow:hidden;background:var(--color-neutral-900);box-shadow:inset 0 0 0 1px var(--color-divider)">
+      <div style="position:absolute;inset:0;background:radial-gradient(80% 70% at 42% 38%, var(--color-neutral-700), transparent 60%), var(--color-neutral-900)"></div>
+      <div style="position:absolute;inset:0;display:grid;place-items:center"><span class="text-muted" style="font-size:10.5px;font-family:ui-monospace,Menlo,monospace">source image</span></div>
+      <div style="position:absolute;left:22%;top:30%;width:46%;height:38%;border-radius:50% 45% 52% 48%;background:color-mix(in srgb, var(--color-accent) 42%, transparent);box-shadow:0 0 22px color-mix(in srgb, var(--color-accent) 30%, transparent)"></div>
+      <div style="position:absolute;left:56%;top:58%;width:74px;height:74px;border-radius:50%;box-shadow:0 0 0 1.5px var(--color-accent-200), 0 0 0 1px rgba(0,0,0,.5) inset"></div>
+    </div>
+    <div style="display:flex;gap:6px;margin-top:12px">
+      <div style="flex:1;display:grid;place-items:center;padding:11px 0;border-radius:var(--radius-md);background:var(--color-accent-900);box-shadow:inset 0 0 0 1px var(--color-accent);min-height:46px"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-200)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15.5 4.5l4 4-9 9H6v-4.5z"/></svg></div>
+      <div style="flex:1;display:grid;place-items:center;padding:11px 0;border-radius:var(--radius-md);box-shadow:inset 0 0 0 1px var(--color-divider);min-height:46px"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" style="opacity:.75"><path d="M9 19H5l-1.5-4 11-11 4 4-11 11z"/><path d="M13 21h8"/></svg></div>
+      <div style="flex:1;display:grid;place-items:center;padding:11px 0;border-radius:var(--radius-md);box-shadow:inset 0 0 0 1px var(--color-divider);min-height:46px"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" style="opacity:.75"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17" /><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" stroke="none"/></svg></div>
+      <div style="flex:1;display:grid;place-items:center;padding:11px 0;border-radius:var(--radius-md);box-shadow:inset 0 0 0 1px var(--color-divider);min-height:46px"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" style="opacity:.75"><path d="M4 12a8 8 0 1 1 3 6.2M4 8v4h4"/></svg></div>
+      <div style="flex:1;display:grid;place-items:center;padding:11px 0;border-radius:var(--radius-md);box-shadow:inset 0 0 0 1px var(--color-divider);min-height:46px"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" style="opacity:.75"><path d="M20 12a8 8 0 1 0-3 6.2M20 8v4h-4"/></svg></div>
+    </div>
+    <div style="margin-top:16px"><div style="display:flex;align-items:baseline;gap:7px;margin-bottom:3px"><span style="font-size:12.5px;flex:1">Brush size</span><span style="font:500 12px ui-monospace,Menlo,monospace;color:var(--color-accent-300)">74 px</span></div><input type="range" min="4" max="240" value="74" style="width:100%;height:24px"></div>
+    <div style="margin-top:10px"><div style="display:flex;align-items:baseline;gap:7px;margin-bottom:3px"><span style="font-size:12.5px;flex:1">Hardness</span><span style="font:500 12px ui-monospace,Menlo,monospace;color:var(--color-accent-300)">0.35</span></div><input type="range" min="0" max="1" step="0.05" value="0.35" style="width:100%;height:24px"></div>
+    <div style="margin-top:10px"><div style="display:flex;align-items:baseline;gap:7px;margin-bottom:3px"><span style="font-size:12.5px;flex:1">Mask opacity overlay</span><span style="font:500 12px ui-monospace,Menlo,monospace;color:var(--color-accent-300)">0.42</span></div><input type="range" min="0" max="1" step="0.02" value="0.42" style="width:100%;height:24px"></div>
+    <div style="display:flex;gap:7px;margin-top:14px"><button class="btn btn-secondary" style="flex:1;min-height:44px">Invert</button><button class="btn btn-secondary" style="flex:1;min-height:44px">Clear</button></div>
+    <div class="text-muted" style="font-size:10.5px;margin-top:14px">Denoising is confined to the painted region. The mask is saved with the generation so the result can be reproduced.</div>
+  </div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:var(--color-accent-900);color:var(--color-accent-300);border-radius:5px">S13</span><span style="font-size:12.5px">Gallery</span><span class="text-muted" style="font-size:11px">parameters live in the PNG; reuse repopulates the form</span></div>
+<div style="width:392px;height:824px;border-radius:32px;background:var(--color-bg);box-shadow:var(--shadow-md);overflow:hidden;display:flex;flex-direction:column">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 18px 2px;font:500 11px var(--font-body);opacity:.7"><span>22:14</span><span style="display:flex;gap:6px;align-items:center"><svg width="20" height="10" viewBox="0 0 20 10" fill="none" stroke="currentColor" stroke-width="1.1"><rect x=".5" y=".5" width="16" height="9" rx="2.4"/><rect x="2" y="2" width="9" height="6" rx="1.4" fill="currentColor" stroke="none"/><path d="M18.4 3.6v2.8" stroke-linecap="round"/></svg></span></div>
+  <div style="display:flex;align-items:center;gap:10px;padding:12px 18px 10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg><span style="font:500 17px var(--font-heading);flex:1">Gallery</span><span class="text-muted" style="font-size:11.5px">148</span></div>
+  <div style="flex:1;overflow-y:auto;padding:4px 18px 18px">
+    <div style="position:relative;aspect-ratio:1;border-radius:var(--radius-md);overflow:hidden;background:var(--color-neutral-900);box-shadow:inset 0 0 0 1px var(--color-divider)">
+      <div style="position:absolute;inset:0;background:radial-gradient(110% 85% at 34% 26%, var(--color-accent-600), transparent 58%), radial-gradient(85% 75% at 72% 74%, var(--color-section-glow), transparent 55%), var(--color-neutral-900)"></div>
+      <div style="position:absolute;inset:0;display:grid;place-items:center"><span style="font:500 10.5px ui-monospace,Menlo,monospace;color:var(--color-accent-100);opacity:.8">lynx · 512×512 · 28 steps</span></div>
+    </div>
+    <div style="display:flex;gap:6px;margin-top:8px"><button class="btn btn-primary" style="flex:1;min-height:44px;font-size:12.5px">Reuse parameters</button><button class="btn btn-secondary" style="width:46px;min-height:44px;padding:0"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M8 8l4-4 4 4M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg></button><button class="btn btn-secondary" style="width:46px;min-height:44px;padding:0"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button></div>
+
+    <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:var(--color-neutral-500);margin:18px 0 8px">EMBEDDED IN THE PNG</div>
+    <table class="table" style="font-size:12px"><tbody>
+      <tr><td class="text-muted" style="width:44%">model</td><td style="font-family:ui-monospace,Menlo,monospace">sdxl-turbo q8_0</td></tr>
+      <tr><td class="text-muted">seed</td><td style="font-family:ui-monospace,Menlo,monospace">812934177</td></tr>
+      <tr><td class="text-muted">sampling_method</td><td style="font-family:ui-monospace,Menlo,monospace">dpm++2m</td></tr>
+      <tr><td class="text-muted">schedule</td><td style="font-family:ui-monospace,Menlo,monospace">karras</td></tr>
+      <tr><td class="text-muted">cfg_scale</td><td style="font-family:ui-monospace,Menlo,monospace">7.0</td></tr>
+      <tr><td class="text-muted">clip_skip</td><td style="font-family:ui-monospace,Menlo,monospace">2</td></tr>
+      <tr><td class="text-muted">vae_tiling</td><td style="font-family:ui-monospace,Menlo,monospace">true</td></tr>
+      <tr><td class="text-muted">lora</td><td style="font-family:ui-monospace,Menlo,monospace">filmgrain:0.6</td></tr>
+    </tbody></table>
+
+    <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:var(--color-neutral-500);margin:20px 0 8px">TODAY · 6</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">
+      <div style="aspect-ratio:1;border-radius:var(--radius-sm);background:radial-gradient(100% 90% at 30% 25%, var(--color-accent-600), transparent 60%), var(--color-neutral-900)"></div>
+      <div style="aspect-ratio:1;border-radius:var(--radius-sm);background:radial-gradient(100% 90% at 70% 30%, var(--color-section-ghost), transparent 60%), var(--color-neutral-900)"></div>
+      <div style="aspect-ratio:1;border-radius:var(--radius-sm);background:radial-gradient(100% 90% at 45% 70%, var(--color-accent-700), transparent 60%), var(--color-neutral-900)"></div>
+      <div style="aspect-ratio:1;border-radius:var(--radius-sm);background:radial-gradient(100% 90% at 60% 40%, var(--color-neutral-700), transparent 60%), var(--color-neutral-900)"></div>
+      <div style="aspect-ratio:1;border-radius:var(--radius-sm);background:radial-gradient(100% 90% at 25% 60%, var(--color-accent-500), transparent 62%), var(--color-neutral-900)"></div>
+      <div style="aspect-ratio:1;border-radius:var(--radius-sm);background:radial-gradient(100% 90% at 75% 65%, var(--color-section-glow), transparent 60%), var(--color-neutral-900)"></div>
+    </div>
+    <div class="text-muted" style="font-size:10.5px;margin-top:12px">Files sit in a normal folder you can open in any file manager. Nothing is in a private store.</div>
+  </div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:var(--color-accent-900);color:var(--color-accent-300);border-radius:5px">S14</span><span style="font-size:12.5px">Transcribe</span><span class="text-muted" style="font-size:11px">switch live / file — confidence shading on partials</span></div>
+<div style="width:392px;height:824px;border-radius:32px;background:var(--color-bg);box-shadow:var(--shadow-md);overflow:hidden;display:flex;flex-direction:column">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 18px 2px;font:500 11px var(--font-body);opacity:.7"><span>22:14</span><span style="display:flex;gap:6px;align-items:center"><span style="width:6px;height:6px;border-radius:50%;background:var(--color-accent)"></span><svg width="20" height="10" viewBox="0 0 20 10" fill="none" stroke="currentColor" stroke-width="1.1"><rect x=".5" y=".5" width="16" height="9" rx="2.4"/><rect x="2" y="2" width="9" height="6" rx="1.4" fill="currentColor" stroke="none"/><path d="M18.4 3.6v2.8" stroke-linecap="round"/></svg></span></div>
+  <div style="display:flex;align-items:center;gap:10px;padding:12px 18px 8px"><span style="font:500 21px var(--font-heading);flex:1">Voice</span><span class="tag tag-neutral">large-v3-turbo</span></div>
+  <div style="padding:0 18px 10px;display:flex;gap:6px">
+    <sc-for list="{{ sttModes }}" as="m" hint-placeholder-count="2">
+      <div onClick="{{ m.onPick }}" style="flex:1;text-align:center;padding:8px 0;border-radius:var(--radius-md);cursor:pointer;font:500 12px var(--font-heading);background:{{ m.bg }};color:{{ m.fg }};box-shadow:inset 0 0 0 1px {{ m.ring }}">{{ m.label }}</div>
+    </sc-for>
+  </div>
+  <div style="flex:1;overflow-y:auto;padding:0 18px 18px">
+    <sc-if value="{{ sttLive }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:center;gap:2px;height:56px;padding:0 2px">
+          <sc-for list="{{ wave }}" as="w" hint-placeholder-count="40">
+            <span style="flex:1;border-radius:2px;background:{{ w.color }};height:{{ w.h }}%"></span>
+          </sc-for>
+        </div>
+        <div style="display:flex;align-items:center;gap:9px;font-size:11px;font-family:ui-monospace,Menlo,monospace"><span style="color:var(--color-accent)">● REC 00:38</span><span class="text-muted">VAD on · step 3 000 ms</span></div>
+        <div style="padding:12px;border-radius:var(--radius-md);background:var(--color-surface);font-size:13.5px;line-height:1.65">
+          <span>The KV cache is the thing that actually eats your memory,</span> <span style="opacity:.72">not the weights — people always </span><span style="opacity:.5">assume it's the weights.</span> <span style="opacity:.3">So if you're</span><span style="display:inline-block;width:6px;height:14px;background:var(--color-accent);margin-left:2px;vertical-align:-2px;animation:caret 1s steps(1) infinite"></span>
+        </div>
+        <div class="text-muted" style="font-size:10.5px">Opacity tracks per-token confidence. Faded text may still change as the window slides.</div>
+        <button class="btn btn-primary btn-block" style="min-height:48px">Stop and keep</button>
+      </div>
+    </sc-if>
+    <sc-if value="{{ sttFile }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div class="card elev-sm" style="gap:8px">
+          <div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1"><div style="font:500 13.5px var(--font-heading)">standup-2026-07-28.m4a</div><div class="text-muted" style="font-size:10.5px;font-family:ui-monospace,Menlo,monospace">18:42 · 21.4 MB · shared from Recorder</div></div></div>
+          <div style="height:5px;border-radius:3px;background:var(--color-neutral-900);overflow:hidden"><div style="width:74%;height:100%;background:var(--color-accent-500)"></div></div>
+          <div class="card-meta" style="gap:8px"><span style="color:var(--color-accent-300);font-family:ui-monospace,Menlo,monospace">74%</span><span>·</span><span>13:51 of 18:42</span><span style="margin-left:auto">4.1× realtime</span></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:0">
+          <div style="display:flex;gap:10px;padding:10px 0;box-shadow:0 1px 0 var(--color-divider)"><span style="font:500 11px ui-monospace,Menlo,monospace;color:var(--color-accent-300);flex:none;width:52px">00:12.4</span><span style="font-size:12.5px;line-height:1.55;flex:1">Right, the Hexagon path is capped at three and a half gigs a session.</span></div>
+          <div style="display:flex;gap:10px;padding:10px 0;box-shadow:0 1px 0 var(--color-divider)"><span style="font:500 11px ui-monospace,Menlo,monospace;color:var(--color-accent-300);flex:none;width:52px">00:19.1</span><span style="font-size:12.5px;line-height:1.55;flex:1">So anything bigger has to be layer-split, or we just fall back to OpenCL.</span></div>
+          <div style="display:flex;gap:10px;padding:10px 0;box-shadow:0 1px 0 var(--color-divider)"><span style="font:500 11px ui-monospace,Menlo,monospace;color:var(--color-accent-300);flex:none;width:52px">00:27.8</span><span style="font-size:12.5px;line-height:1.55;flex:1">Falling back is fine as long as we <em style="opacity:.85">say</em> we fell back.</span></div>
+          <div style="display:flex;gap:10px;padding:10px 0;box-shadow:0 1px 0 var(--color-divider);opacity:.5"><span style="font:500 11px ui-monospace,Menlo,monospace;flex:none;width:52px">00:34.2</span><span style="font-size:12.5px;line-height:1.55;flex:1">Yeah — and the number goes in the model sheet, not a toast.</span></div>
+        </div>
+        <div style="display:flex;gap:6px"><button class="btn btn-secondary" style="flex:1;font-size:12px;min-height:42px">TXT</button><button class="btn btn-secondary" style="flex:1;font-size:12px;min-height:42px">SRT</button><button class="btn btn-secondary" style="flex:1;font-size:12px;min-height:42px">VTT</button><button class="btn btn-secondary" style="flex:1;font-size:12px;min-height:42px">JSON</button></div>
+      </div>
+    </sc-if>
+
+    <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:var(--color-neutral-500);margin:20px 0 8px">READ ALOUD · KOKORO</div>
+    <div class="card elev-sm" style="gap:9px">
+      <div style="display:flex;align-items:center;gap:9px"><span style="width:30px;height:30px;border-radius:50%;background:var(--color-accent-800);display:grid;place-items:center;flex:none"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-100)" stroke-width="2" stroke-linecap="round"><path d="M8 5l11 7-11 7z"/></svg></span><div style="flex:1"><div style="font:500 13px var(--font-heading)">af_heart</div><div class="text-muted" style="font-size:10.5px">US · female · 1.0×</div></div><span class="tag tag-outline">blend</span></div>
+      <div style="display:flex;align-items:baseline;gap:7px"><span style="font-size:12px;flex:1">Speed</span><span style="font:500 12px ui-monospace,Menlo,monospace;color:var(--color-accent-300)">1.15×</span></div>
+      <input type="range" min="0.5" max="2" step="0.05" value="1.15" style="width:100%;height:22px">
+      <p class="card-body">Playback starts on the first synthesised chunk, not after the whole passage. 54 voices, each with a preview.</p>
+    </div>
+  </div>
+  <div style="display:flex;padding:7px 6px 12px;box-shadow:0 -1px 0 var(--color-divider)">
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;opacity:.5"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M4 5.5h16v11H9l-5 4z"/></svg><span style="font-size:10px">Chat</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;opacity:.5"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4.5 4 3.5 3-2.5 4 3.5"/></svg><span style="font-size:10px">Image</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;color:var(--color-accent)"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 11v2M8 8v8M12 4.5v15M16 8v8M20 11v2"/></svg><span style="font-size:10px">Voice</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;opacity:.5"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3.5l8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4M4 16.5l8 4 8-4"/></svg><span style="font-size:10px">Models</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;opacity:.5"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 7h11M18 7h3M3 17h3M10 17h11"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></svg><span style="font-size:10px">Settings</span></div>
+  </div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:var(--color-accent-900);color:var(--color-accent-300);border-radius:5px">S15</span><span style="font-size:12.5px">Settings → Runtimes</span><span class="text-muted" style="font-size:11px">engines are versioned, installable artifacts</span></div>
+<div style="width:392px;height:824px;border-radius:32px;background:var(--color-bg);box-shadow:var(--shadow-md);overflow:hidden;display:flex;flex-direction:column">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 18px 2px;font:500 11px var(--font-body);opacity:.7"><span>22:14</span><span style="display:flex;gap:6px;align-items:center"><svg width="20" height="10" viewBox="0 0 20 10" fill="none" stroke="currentColor" stroke-width="1.1"><rect x=".5" y=".5" width="16" height="9" rx="2.4"/><rect x="2" y="2" width="9" height="6" rx="1.4" fill="currentColor" stroke="none"/><path d="M18.4 3.6v2.8" stroke-linecap="round"/></svg></span></div>
+  <div style="display:flex;align-items:center;gap:10px;padding:12px 18px 10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg><span style="font:500 17px var(--font-heading)">Runtimes</span></div>
+  <div style="flex:1;overflow-y:auto;padding:4px 18px 18px">
+    <div class="card elev-sm" style="gap:8px;margin-bottom:8px;box-shadow:inset 0 0 0 1px var(--color-accent-700)">
+      <div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1"><div style="font:500 14px var(--font-heading)">llama.cpp</div><div class="text-muted" style="font-size:10.5px;font-family:ui-monospace,Menlo,monospace;margin-top:2px">b6482 · 41 architectures · OpenCL, CPU</div></div><button class="btn btn-primary" style="font-size:12px;flex:none">Update</button></div>
+      <div style="padding:9px 10px;border-radius:var(--radius-sm);background:var(--color-accent-900)"><div style="font:500 11.5px var(--font-heading);color:var(--color-accent-200);margin-bottom:3px">b6482 → b6531</div><div style="font-size:11px;color:var(--color-accent-300);line-height:1.6;opacity:.9">+3 parameters, 1 changed default, +2 architectures (plamo3, hunyuan-dense). 214 MB.</div></div>
+      <div class="card-meta"><span>Signed bundle · jniContract 3 · previous kept for rollback</span></div>
+    </div>
+    <div class="card elev-sm" style="gap:7px;margin-bottom:8px"><div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1"><div style="font:500 14px var(--font-heading)">whisper.cpp</div><div class="text-muted" style="font-size:10.5px;font-family:ui-monospace,Menlo,monospace;margin-top:2px">v1.7.6 · installed · 68 MB</div></div><span class="text-muted" style="font-size:11.5px;flex:none">Up to date</span></div></div>
+    <div class="card elev-sm" style="gap:7px;margin-bottom:8px"><div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1"><div style="font:500 14px var(--font-heading)">kokoro</div><div class="text-muted" style="font-size:10.5px;font-family:ui-monospace,Menlo,monospace;margin-top:2px">v0.19 · sherpa-onnx · 41 MB</div></div><span class="text-muted" style="font-size:11.5px;flex:none">Up to date</span></div></div>
+    <div class="card elev-sm" style="gap:7px;margin-bottom:8px;box-shadow:inset 0 0 0 1px var(--color-neutral-800)"><div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1"><div style="font:500 14px var(--font-heading);opacity:.7">stable-diffusion.cpp</div><div class="text-muted" style="font-size:10.5px;font-family:ui-monospace,Menlo,monospace;margin-top:2px">not installed · 412 MB</div></div><button class="btn btn-secondary" style="font-size:12px;flex:none">Install</button></div><p class="card-body">Diffusion is optional. Skipping it keeps 412 MB of code and every image model off the device.</p></div>
+
+    <div class="card elev-sm" style="gap:7px;margin-bottom:16px;box-shadow:inset 0 0 0 1px var(--color-neutral-700)">
+      <div style="display:flex;align-items:center;gap:8px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--color-neutral-300)" stroke-width="1.8" stroke-linecap="round"><path d="M4 12a8 8 0 1 1 3 6.2M4 8v4h4"/></svg><div style="font:500 13px var(--font-heading);flex:1">Rolled back once</div></div>
+      <p class="card-body">b6470 failed to initialise twice in a row, so the app reverted to b6462 on its own and told you why. A bad upstream commit can't brick it.</p>
+    </div>
+
+    <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:var(--color-neutral-500);margin:0 0 8px">PARAMETER MANIFEST</div>
+    <div class="card elev-sm" style="gap:8px;margin-bottom:16px">
+      <div style="display:flex;align-items:baseline;gap:8px"><span style="font:500 13.5px var(--font-heading);flex:1">v7</span><span class="text-muted" style="font-size:11px;font-family:ui-monospace,Menlo,monospace">bundled v6 · Ed25519 ✓</span></div>
+      <p class="card-body">Data, not code — so it updates freely. It can retier, relabel and reveal parameters the installed engine already supports. It cannot add capability the engine lacks.</p>
+      <div style="display:flex;align-items:center;gap:9px"><span style="font-size:12px;flex:1">Auto-check</span><span class="tag tag-neutral">Wi-Fi only</span><span class="text-muted" style="font-size:11px">2h ago</span></div>
+    </div>
+
+    <div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:var(--color-neutral-500);margin:0 0 8px">THERMAL POLICY</div>
+    <div class="card elev-sm" style="gap:9px">
+      <div style="display:flex;align-items:center;gap:7px"><span class="tag tag-neutral">status: light</span><span class="text-muted" style="font-size:11px;margin-left:auto">42°C</span></div>
+      <div style="display:flex;flex-direction:column;gap:7px">
+        <label class="radio"><input type="radio" name="th"><span class="dot"></span><span>Continue regardless</span></label>
+        <label class="radio"><input type="radio" name="th" checked><span class="dot"></span><span>Reduce threads at severe</span></label>
+        <label class="radio"><input type="radio" name="th"><span class="dot"></span><span>Downshift to CPU</span></label>
+        <label class="radio"><input type="radio" name="th"><span class="dot"></span><span>Pause generation</span></label>
+      </div>
+    </div>
+    <div class="text-muted" style="font-size:10.5px;margin-top:14px">No account, no telemetry, no network after download. The only outbound calls are the HF API and the ones you start.</div>
+  </div>
+  <div style="display:flex;padding:7px 6px 12px;box-shadow:0 -1px 0 var(--color-divider)">
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;opacity:.5"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M4 5.5h16v11H9l-5 4z"/></svg><span style="font-size:10px">Chat</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;opacity:.5"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4.5 4 3.5 3-2.5 4 3.5"/></svg><span style="font-size:10px">Image</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;opacity:.5"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 11v2M8 8v8M12 4.5v15M16 8v8M20 11v2"/></svg><span style="font-size:10px">Voice</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;opacity:.5"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3.5l8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4M4 16.5l8 4 8-4"/></svg><span style="font-size:10px">Models</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;color:var(--color-accent)"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 7h11M18 7h3M3 17h3M10 17h11"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></svg><span style="font-size:10px">Settings</span></div>
+  </div>
+</div>
+</div>
+
+</div>
+
+<div style="max-width:660px;margin:56px 0 0">
+<div style="font:600 10px ui-monospace,Menlo,monospace;letter-spacing:.12em;color:var(--color-neutral-500);margin-bottom:12px">WHAT I'D DO NEXT</div>
+<p style="font-size:13.5px;line-height:1.7;opacity:.75;margin:0">Three things are unresolved. The <strong style="font-weight:500;color:var(--color-accent-200)">multi-file diffusion assembly</strong> — a Flux repo needs UNet plus three text encoders plus a VAE, and S1's single verdict card doesn't yet carry five files. <strong style="font-weight:500;color:var(--color-accent-200)">Tool-call and branch rendering</strong> in chat, which needs its own message shape. And an <strong style="font-weight:500;color:var(--color-accent-200)">onboarding first-run</strong> — right now the app opens on an empty Chat with no model, which is the one screen I'd want to see before build.</p>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1800,&quot;height&quot;:1400}}">
+const QUANTS = [
+  {name:'Q4_0', size:'2.50 GB', speed:'fast · OpenCL', note:'Adreno fast path'},
+  {name:'Q4_K_M', size:'2.62 GB', speed:'CPU path', note:'better quality, no GPU kernel'},
+  {name:'Q5_K_M', size:'3.05 GB', speed:'CPU path', note:'tight at 32K context'},
+  {name:'Q8_0', size:'4.28 GB', speed:'CPU path', note:'near-lossless, slow here'}
+];
+
+const PARAMS = [
+  {key:'temp', label:'Temperature', tier:'basic', type:'range', v:0.7, def:0.8, min:0, max:2, step:0.05, help:'Higher is more random. 0 is greedy.'},
+  {key:'n_predict', label:'Max tokens', tier:'basic', type:'range', v:-1, def:-1, min:-1, max:4096, step:1, help:'-1 generates until EOS or the context fills.'},
+  {key:'min_p', label:'Min-P', tier:'advanced', type:'range', v:0.05, def:0.05, min:0, max:1, step:0.01, help:'Floor on token probability relative to the top token. Often preferred over Top-P.'},
+  {key:'top_k', label:'Top-K', tier:'advanced', type:'range', v:40, def:40, min:0, max:200, step:1, help:'Keep only the K most likely tokens. 0 disables.'},
+  {key:'top_p', label:'Top-P', tier:'advanced', type:'range', v:0.95, def:0.95, min:0, max:1, step:0.01, help:'Nucleus sampling. 1.0 disables.'},
+  {key:'repeat_penalty', label:'Repeat penalty', tier:'advanced', type:'range', v:1.05, def:1.0, min:0, max:2, step:0.01, help:'Penalises tokens already seen. 1.0 disables.'},
+  {key:'n_ctx', label:'Context size', tier:'advanced', type:'range', v:8192, def:8192, min:2048, max:32768, step:1024, reload:true, help:'Drives the KV cache. Clamped to the model maximum of 262144.'},
+  {key:'n_gpu_layers', label:'GPU layers', tier:'advanced', type:'range', v:37, def:37, min:0, max:37, step:1, reload:true, help:'Layers offloaded to OpenCL. Auto-computed from free VRAM; override at your own risk.'},
+  {key:'flash_attn', label:'Flash attention', tier:'expert', type:'bool', v:true, def:true, reload:true, help:'Large KV memory saving. Required by a q4_0 V-cache.'},
+  {key:'cache_type_k', label:'KV cache — K', tier:'expert', type:'enum', v:'f16', def:'f16', options:['f32','f16','q8_0','q5_1','q4_0'], reload:true, help:'Quantising K halves cache memory at a small quality cost.'},
+  {key:'cache_type_v', label:'KV cache — V', tier:'expert', type:'enum', v:'f16', def:'f16', options:['f32','f16','q8_0','q5_1','q4_0'], reload:true, help:'Same set. q4_0 here needs flash attention on.'},
+  {key:'rope_scaling_type', label:'RoPE scaling', tier:'expert', type:'enum', v:'none', def:'none', options:['none','linear','yarn','longrope'], reload:true, help:'Pick yarn to reveal the four YaRN parameters below.'},
+  {key:'yarn_ext_factor', label:'YaRN extrapolation mix', tier:'expert', type:'range', v:-1, def:-1, min:-1, max:1, step:0.05, reload:true, dep:'yarn', help:'-1 uses the model\u2019s own value.'},
+  {key:'yarn_attn_factor', label:'YaRN attention scale', tier:'expert', type:'range', v:1, def:1, min:0, max:4, step:0.1, reload:true, dep:'yarn', help:'Scales attention magnitude under YaRN.'},
+  {key:'yarn_beta_fast', label:'YaRN beta fast', tier:'expert', type:'range', v:32, def:32, min:0, max:64, step:1, reload:true, dep:'yarn', help:'Low correction dimension.'},
+  {key:'yarn_beta_slow', label:'YaRN beta slow', tier:'expert', type:'range', v:1, def:1, min:0, max:8, step:0.5, reload:true, dep:'yarn', help:'High correction dimension.'},
+  {key:'dry_multiplier', label:'DRY multiplier', tier:'expert', type:'range', v:0.8, def:0.0, min:0, max:5, step:0.1, help:'Repetition penalty that works on sequences rather than single tokens. 0 disables.'},
+  {key:'dry_sequence_breakers', label:'DRY sequence breakers', tier:'expert', type:'chips', v:['\\n',':','"','*'], def:null, help:'Tokens that reset DRY\u2019s sequence matching.'},
+  {key:'xtc_probability', label:'XTC probability', tier:'expert', type:'range', v:0, def:0, min:0, max:1, step:0.01, help:'Chance of excluding top choices, for less predictable prose. 0 disables.'},
+  {key:'top_n_sigma', label:'Top-N sigma', tier:'expert', type:'range', v:-1, def:-1, min:-1, max:10, step:0.1, help:'Sigma-based logit truncation. -1 disables. Added upstream in b4356.'},
+  {key:'mirostat', label:'Mirostat', tier:'expert', type:'enum', v:'0', def:'0', options:['0','1','2'], help:'When active it replaces the whole sampler chain, including your ordering.'},
+  {key:'ignore_eos', label:'Ignore EOS', tier:'expert', type:'bool', v:false, def:false, help:'Keep generating past the end-of-sequence token.'},
+  {key:'stop', label:'Stop sequences', tier:'expert', type:'chips', v:['<|im_end|>','<|endoftext|>'], def:null, help:'Two came from the chat template. Anything you add is kept per model.'}
+];
+
+const CHAIN = [
+  {id:'penalties', label:'Penalties', detail:'repeat · presence · frequency', on:true},
+  {id:'dry', label:'DRY', detail:'dry_multiplier 0.8', on:true},
+  {id:'top_k', label:'Top-K', detail:'40', on:true},
+  {id:'typ_p', label:'Typical-P', detail:'1.00 — no effect', on:false},
+  {id:'top_p', label:'Top-P', detail:'0.95', on:true},
+  {id:'min_p', label:'Min-P', detail:'0.05', on:true},
+  {id:'xtc', label:'XTC', detail:'probability 0.00', on:false},
+  {id:'temp', label:'Temperature', detail:'0.70 · dynatemp off', on:true},
+  {id:'dist', label:'Distribution', detail:'final sample · seed -1', on:true}
+];
+
+const ACC = 'var(--color-accent)';
+const ACC2 = 'var(--color-accent-200)';
+const ACC3 = 'var(--color-accent-300)';
+const ACC9 = 'var(--color-accent-900)';
+const DIV = 'var(--color-divider)';
+
+class Component extends DCLogic {
+  state = {
+    paste: 'unsloth/Qwen3-4B-Instruct-2507-GGUF',
+    quant: 'Q4_0',
+    ctx: 8192,
+    tier: 'expert',
+    q: '',
+    params: PARAMS.map(p => ({...p})),
+    chain: CHAIN.map(c => ({...c})),
+    drag: null,
+    thinkOpen: false,
+    imgMode: 'img2img',
+    sttMode: 'live',
+    tps: '14.1',
+    step: 12,
+    dlPct: 61,
+    wave: Array.from({length: 44}, (_, i) => 20 + Math.round(Math.abs(Math.sin(i * 0.7)) * 60))
+  };
+
+  componentDidMount() {
+    this.timer = setInterval(() => this.setState(s => ({
+      tps: (13.4 + Math.random() * 1.6).toFixed(1),
+      step: s.step >= 28 ? 5 : s.step + 1,
+      dlPct: s.dlPct >= 99 ? 61 : s.dlPct + 1,
+      wave: s.wave.slice(1).concat([12 + Math.round(Math.random() * 76)])
+    })), 850);
+  }
+  componentWillUnmount() { clearInterval(this.timer); }
+
+  setParam(key, value) {
+    this.setState(s => ({params: s.params.map(p => p.key === key ? {...p, v: value} : p)}));
+  }
+
+  moveChain(from, to) {
+    if (from === to || from == null) return;
+    this.setState(s => {
+      const next = s.chain.slice();
+      next.splice(to, 0, next.splice(from, 1)[0]);
+      return {chain: next, drag: to};
+    });
+  }
+
+  fmt(p) {
+    if (p.type === 'bool') return p.v ? 'true' : 'false';
+    if (p.type === 'chips') return p.v.length + ' items';
+    if (p.type === 'enum') return String(p.v);
+    if (Number.isInteger(p.v) || Math.abs(p.v) >= 100) return String(p.v);
+    return Number(p.v).toFixed(2);
+  }
+
+  renderVals() {
+    const s = this.state;
+
+    // — fit arithmetic, recomputed live from the context slider —
+    const kv = 2 * 36 * s.ctx * 1024 * 2 / 1e9;
+    const total = 2.5 + kv + 0.25;
+    const headroom = 10.4 - total;
+    const wontFit = headroom < 0;
+    const tight = headroom < 1;
+    const ctxLabel = s.ctx >= 1024 ? (s.ctx / 1024) + 'K' : String(s.ctx);
+
+    const quants = QUANTS.map(q => {
+      const on = q.name === s.quant;
+      return {...q,
+        bg: on ? ACC9 : 'var(--color-surface)',
+        ring: on ? ACC : DIV,
+        tint: q.speed.indexOf('fast') === 0 ? ACC3 : 'color-mix(in srgb, var(--color-text) 45%, transparent)',
+        onPick: () => this.setState({quant: q.name})};
+    });
+
+    // — manifest renderer: tier filter, search, dependsOn gating —
+    const rope = s.params.find(p => p.key === 'rope_scaling_type').v;
+    const q = s.q.trim().toLowerCase();
+    const visible = s.params.filter(p => !p.dep || p.dep === rope);
+    const hiddenCount = s.params.length - visible.length + 40;
+    const params = visible.filter(p =>
+      (s.tier === 'all' || p.tier === s.tier) &&
+      (!q || p.key.indexOf(q) > -1 || p.label.toLowerCase().indexOf(q) > -1)
+    ).map(p => {
+      const modified = p.type === 'chips' ? false : p.v !== p.def;
+      return {
+        key: p.key, label: p.label, tier: p.tier, help: p.help, modified,
+        reload: !!p.reload, display: this.fmt(p),
+        value: p.v, min: p.min, max: p.max, step: p.step,
+        isRange: p.type === 'range', isBool: p.type === 'bool',
+        isEnum: p.type === 'enum', isChips: p.type === 'chips',
+        chips: p.type === 'chips' ? p.v.map(c => ({label: c})) : [],
+        trackBg: p.v ? 'var(--color-accent-700)' : 'var(--color-neutral-900)',
+        knobBg: p.v ? ACC2 : 'var(--color-neutral-600)',
+        knobSide: p.v ? 'flex-end' : 'flex-start',
+        options: (p.options || []).map(o => ({
+          label: o,
+          bg: o === p.v ? ACC9 : 'transparent',
+          fg: o === p.v ? ACC2 : 'color-mix(in srgb, var(--color-text) 65%, transparent)',
+          ring: o === p.v ? ACC : DIV,
+          onPick: () => this.setParam(p.key, o)
+        })),
+        onChange: e => this.setParam(p.key, Number(e.target.value)),
+        onToggle: () => this.setParam(p.key, !p.v)
+      };
+    });
+
+    const tiers = [
+      {id: 'basic', label: 'Basic'}, {id: 'advanced', label: 'Adv'},
+      {id: 'expert', label: 'Expert'}, {id: 'all', label: 'All 63'}
+    ].map(t => ({
+      label: t.label,
+      bg: s.tier === t.id ? ACC9 : 'transparent',
+      fg: s.tier === t.id ? ACC2 : 'color-mix(in srgb, var(--color-text) 62%, transparent)',
+      ring: s.tier === t.id ? ACC : DIV,
+      onPick: () => this.setState({tier: t.id})
+    }));
+
+    const chain = s.chain.map((c, i) => ({
+      n: String(i + 1).padStart(2, '0'),
+      label: c.label, detail: c.detail,
+      badge: c.on ? 'on' : 'off',
+      badgeFg: c.on ? ACC3 : 'color-mix(in srgb, var(--color-text) 45%, transparent)',
+      badgeRing: c.on ? 'var(--color-accent-700)' : DIV,
+      bg: c.on ? 'var(--color-surface)' : 'transparent',
+      ring: s.drag === i ? ACC : (c.on ? DIV : 'var(--color-neutral-800)'),
+      opacity: c.on ? '1' : '0.55',
+      onDragStart: () => this.setState({drag: i}),
+      onDragOver: e => { e.preventDefault(); this.moveChain(s.drag, i); },
+      onDragEnd: () => this.setState({drag: null}),
+      onToggle: () => this.setState(st => ({chain: st.chain.map((x, j) => j === i ? {...x, on: !x.on} : x)}))
+    }));
+
+    const imgModes = [
+      {id: 'txt2img', label: 'Text'}, {id: 'img2img', label: 'Image + text'}, {id: 'inpaint', label: 'Inpaint'}
+    ].map(m => ({
+      label: m.label,
+      bg: s.imgMode === m.id ? ACC9 : 'transparent',
+      fg: s.imgMode === m.id ? ACC2 : 'color-mix(in srgb, var(--color-text) 62%, transparent)',
+      ring: s.imgMode === m.id ? ACC : DIV,
+      onPick: () => this.setState({imgMode: m.id})
+    }));
+
+    const sttModes = [{id: 'live', label: 'Live mic'}, {id: 'file', label: 'From file'}].map(m => ({
+      label: m.label,
+      bg: s.sttMode === m.id ? ACC9 : 'transparent',
+      fg: s.sttMode === m.id ? ACC2 : 'color-mix(in srgb, var(--color-text) 62%, transparent)',
+      ring: s.sttMode === m.id ? ACC : DIV,
+      onPick: () => this.setState({sttMode: m.id})
+    }));
+
+    return {
+      paste: s.paste, onPaste: e => this.setState({paste: e.target.value}),
+      quants,
+      ctx: s.ctx, ctxLabel, onCtx: e => this.setState({ctx: Number(e.target.value)}),
+      kvGb: kv.toFixed(2), totalGb: total.toFixed(2), headroomGb: headroom.toFixed(1),
+      verdictLabel: wontFit ? 'Won\u2019t fit' : (tight ? 'Tight' : 'Fast'),
+      verdictTag: wontFit ? 'tag-neutral' : (tight ? 'tag-outline' : 'tag-accent'),
+      verdictBg: tight ? 'transparent' : ACC9,
+      verdictText: tight ? 'var(--color-text)' : ACC2,
+      verdictNote: wontFit
+        ? 'Short by ' + Math.abs(headroom).toFixed(1) + ' GB. This context cannot load on this device — drop to ' + Math.max(2, Math.floor((10.4 - 2.75) / (2 * 36 * 1024 * 2 / 1e9) / 1024)) + 'K, or quantise the KV cache to q8_0 to halve it.'
+        : (tight
+          ? 'Under 1 GB of headroom at this context. It will load, but Android may reclaim it when you switch apps.'
+          : 'Fits with room to spare. Q4_0 keeps the Adreno OpenCL fast path.'),
+      q: s.q, onQ: e => this.setState({q: e.target.value}),
+      tiers, params, shownCount: params.length, hiddenCount,
+      chain, chainString: s.chain.filter(c => c.on).map(c => c.id).join(' → '),
+      thinkOpen: s.thinkOpen, thinkChev: s.thinkOpen ? '\u2013' : '+',
+      onThink: () => this.setState(st => ({thinkOpen: !st.thinkOpen})),
+      imgModes,
+      showStrength: s.imgMode !== 'txt2img',
+      sttModes, sttLive: s.sttMode === 'live', sttFile: s.sttMode === 'file',
+      wave: s.wave.map((h, i) => ({h: String(h), color: i > 34 ? ACC : 'var(--color-accent-700)'})),
+      tps: s.tps, step: s.step, stepPct: String(Math.round(s.step / 28 * 100)),
+      dlPct: s.dlPct, dlDone: (7.1 * s.dlPct / 100).toFixed(2)
+    };
+  }
+}
+</script>
+</body>
+</html>

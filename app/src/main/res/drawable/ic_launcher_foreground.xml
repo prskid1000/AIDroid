@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Models glyph from the design canvas bottom bar: a stacked-layers mark,
+     accent stroke on the Nocturne ground. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:translateX="30" android:translateY="30" android:scaleX="2" android:scaleY="2">
+        <path
+            android:pathData="M12,3.5l8,4 -8,4 -8,-4z"
+            android:strokeColor="#9184D9"
+            android:strokeWidth="1.7"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M4,12l8,4 8,-4M4,16.5l8,4 8,-4"
+            android:strokeColor="#9184D9"
+            android:strokeWidth="1.7"
+            android:strokeLineJoin="round" />
+    </group>
+</vector>

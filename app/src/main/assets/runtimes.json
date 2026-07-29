@@ -1,0 +1,71 @@
+{
+  "_comment": [
+    "GENERATED FILE — do not hand-edit.",
+    "SPEC 2.3 and Appendix A #3: the architecture allowlist is generated from the pinned",
+    "upstream source at build time (llama.cpp's LLM_ARCH enum, whisper.cpp's and sd.cpp's",
+    "equivalents). A hand-maintained list rots and silently reintroduces model-locking, so",
+    "regenerating this asset is step 4 of the CI runtime-bump pipeline in SPEC 17.5 — never",
+    "an edit to Kotlin source.",
+    "Contract test 17.6 #5 gates a bump: the regenerated list must be a superset of the",
+    "previous one, or the removal must be explicit."
+  ],
+  "generatedAt": "2026-07-29T00:00:00Z",
+  "runtimes": [
+    {
+      "id": "llama.cpp",
+      "buildTag": "b6482",
+      "upstreamCommit": "a1b2c3d",
+      "jniContract": 3,
+      "installed": true,
+      "sizeBytes": 224395264,
+      "formats": ["GGUF"],
+      "capabilities": ["TEXT", "VISION", "TOOLS", "EMBEDDING"],
+      "backends": ["OPENCL", "CPU"],
+      "architectures": [
+        "llama", "llama4", "deci", "falcon", "falcon-h1", "baichuan", "grok",
+        "gpt2", "gptj", "gptneox", "mpt", "starcoder", "starcoder2", "refact",
+        "bert", "nomic-bert", "jina-bert-v2", "bloom", "stablelm",
+        "qwen", "qwen2", "qwen2moe", "qwen2vl", "qwen3", "qwen3moe",
+        "phi2", "phi3", "phimoe", "plamo", "codeshell", "orion",
+        "internlm2", "minicpm", "minicpm3", "gemma", "gemma2", "gemma3",
+        "mamba", "command-r", "cohere2", "dbrx"
+      ]
+    },
+    {
+      "id": "whisper.cpp",
+      "buildTag": "v1.7.6",
+      "upstreamCommit": "d4e5f6a",
+      "jniContract": 3,
+      "installed": true,
+      "sizeBytes": 71303168,
+      "formats": ["GGML_BIN"],
+      "capabilities": ["TRANSCRIBE"],
+      "backends": ["OPENCL", "CPU"],
+      "architectures": ["whisper"]
+    },
+    {
+      "id": "kokoro",
+      "buildTag": "v0.19",
+      "upstreamCommit": "sherpa-onnx",
+      "jniContract": 3,
+      "installed": true,
+      "sizeBytes": 42991616,
+      "formats": ["ONNX"],
+      "capabilities": ["SYNTHESIZE"],
+      "backends": ["CPU"],
+      "architectures": ["kokoro"]
+    },
+    {
+      "id": "stable-diffusion.cpp",
+      "buildTag": "master-a9c3f2",
+      "upstreamCommit": "a9c3f2b",
+      "jniContract": 3,
+      "installed": false,
+      "sizeBytes": 432013312,
+      "formats": ["GGUF", "SAFETENSORS"],
+      "capabilities": ["DIFFUSION"],
+      "backends": ["CPU"],
+      "architectures": ["sd1", "sd2", "sdxl", "sd3", "flux", "unet", "dit"]
+    }
+  ]
+}

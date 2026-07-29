@@ -1,0 +1,259 @@
+package ai.ondevice.ui.screens
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ai.ondevice.core.Fmt
+import ai.ondevice.core.Modality
+import ai.ondevice.ui.BottomDestinations
+import ai.ondevice.ui.components.NBottomBar
+import ai.ondevice.ui.components.NButton
+import ai.ondevice.ui.components.NButtonStyle
+import ai.ondevice.ui.components.NCard
+import ai.ondevice.ui.components.NCardMeta
+import ai.ondevice.ui.components.NHelp
+import ai.ondevice.ui.components.NInput
+import ai.ondevice.ui.components.NMetaText
+import ai.ondevice.ui.components.NStackedBar
+import ai.ondevice.ui.components.NTag
+import ai.ondevice.ui.components.NTagStyle
+import ai.ondevice.ui.components.PhoneScaffold
+import ai.ondevice.ui.components.RootToolbar
+import ai.ondevice.ui.components.nClickableFlat
+import ai.ondevice.ui.theme.NIcons
+import ai.ondevice.ui.theme.NocturneColors
+import ai.ondevice.ui.theme.NocturneType
+import ai.ondevice.ui.vm.ModelsViewModel
+
+/**
+ * **S3 — Models library.**
+ *
+ * Residency, storage and orphans on one screen. The storage meter is a single
+ * strip split by modality using ramp steps rather than distinct hues, which is
+ * how a mono palette encodes a category breakdown.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun ModelsScreen(
+    currentRoute: String?,
+    onNavigate: (String) -> Unit,
+    onAddModel: () -> Unit,
+    onOpenModel: (String) -> Unit,
+    onOpenDownloads: () -> Unit,
+    viewModel: ModelsViewModel = hiltViewModel(),
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    PhoneScaffold(
+        toolbar = {
+            RootToolbar("Models") {
+                NButton(
+                    "Add",
+                    onClick = onAddModel,
+                    style = NButtonStyle.Primary,
+                    leadingIcon = NIcons.Plus,
+                    minHeight = 38.dp,
+                )
+            }
+        },
+        bottomBar = {
+            NBottomBar(BottomDestinations, currentRoute) { onNavigate(it.route) }
+        },
+        contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 18.dp),
+    ) {
+        NInput(
+            value = state.filter,
+            onValueChange = viewModel::onFilterChange,
+            placeholder = "Filter installed models",
+            minHeight = 40.dp,
+            modifier = Modifier.padding(bottom = 10.dp),
+        )
+
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+
+            // Disk usage grouped by modality (SPEC §3.5).
+            val textBytes = state.byModality.filterKeys {
+                it == Modality.TEXT || it == Modality.VISION || it == Modality.EMBEDDING
+            }.values.sum()
+            val diffusionBytes = state.byModality[Modality.DIFFUSION] ?: 0
+            val speechBytes = state.byModality.filterKeys {
+                it == Modality.SPEECH_TO_TEXT || it == Modality.TEXT_TO_SPEECH
+            }.values.sum()
+            val capacity = (state.usedBytes + state.freeStorageBytes).coerceAtLeast(1)
+
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                NStackedBar(
+                    segments = listOf(
+                        textBytes.toFloat() / capacity to NocturneColors.Accent500,
+                        diffusionBytes.toFloat() / capacity to NocturneColors.Accent700,
+                        speechBytes.toFloat() / capacity to NocturneColors.Neutral700,
+                    ),
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "${Fmt.gb(state.usedBytes)} / ${Fmt.gb(capacity)} GB",
+                    style = NocturneType.MonoSm,
+                    color = NocturneColors.TextMuted,
+                )
+            }
+
+            FlowRow(
+                Modifier.fillMaxWidth().padding(bottom = 18.dp),
+                horizontalArrangement = Arrangement.spacedBy(11.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                StorageLegend("Text", textBytes, NocturneColors.Accent500)
+                StorageLegend("Diffusion", diffusionBytes, NocturneColors.Accent700)
+                StorageLegend("Speech", speechBytes, NocturneColors.Neutral700)
+            }
+
+            if (state.groups.isEmpty()) {
+                NCard {
+                    Text("No models installed", style = NocturneType.CardTitleSm)
+                    Text(
+                        "Paste a Hugging Face ID on the Add screen. Any model whose artifacts match a " +
+                            "bundled runtime and fits this device will resolve — no curated list, no " +
+                            "app update needed.",
+                        style = NocturneType.CardBody,
+                        color = NocturneColors.Text.copy(alpha = 0.8f),
+                    )
+                    NButton("Add a model", onAddModel, style = NButtonStyle.Primary, block = true)
+                }
+            }
+
+            state.groups.forEach { group ->
+                ai.ondevice.ui.components.SectionKicker(
+                    "${group.modality.label} · ${group.models.size}",
+                    Modifier.padding(bottom = 9.dp),
+                )
+                group.models.forEach { model ->
+                    val loaded = model.id == state.loadedModelId
+                    NCard(
+                        Modifier
+                            .padding(bottom = 7.dp)
+                            .nClickableFlat { onOpenModel(model.id) },
+                        gap = 7.dp,
+                        ring = if (loaded) NocturneColors.Accent700 else null,
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(model.displayName, style = NocturneType.CardTitle)
+                                Text(
+                                    listOfNotNull(
+                                        model.quant,
+                                        Fmt.bytes(model.sizeBytes),
+                                        model.architecture,
+                                    ).joinToString(" · "),
+                                    style = NocturneType.MonoXs,
+                                    color = NocturneColors.TextMuted,
+                                    modifier = Modifier.padding(top = 2.dp),
+                                )
+                            }
+                            when {
+                                loaded -> NTag("loaded", style = NTagStyle.Accent)
+                                model.modality == Modality.VISION -> NTag("vision", style = NTagStyle.Outline)
+                                model.modality == Modality.DIFFUSION -> NTag("CPU only", style = NTagStyle.Neutral)
+                                else -> Unit
+                            }
+                        }
+                        NCardMeta(gap = 10.dp) {
+                            model.lastUsedAt?.let { NMetaText("used ${Fmt.relative(it)}") }
+                                ?: NMetaText("never used")
+                            if (model.pinned) {
+                                Box(Modifier.weight(1f))
+                                Text("pinned", style = NocturneType.Meta, color = NocturneColors.Accent)
+                            }
+                        }
+                    }
+                }
+                Box(Modifier.padding(bottom = 9.dp))
+            }
+
+            // Orphan cleanup — files with no record, records with no file.
+            state.orphans?.takeIf { it.hasAny }?.let { report ->
+                NCard(ring = NocturneColors.Neutral700) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            NIcons.InfoCircle,
+                            contentDescription = null,
+                            tint = NocturneColors.Neutral400,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(
+                            "${report.strayFiles.size + report.recordsWithoutFiles.size} orphaned item(s)",
+                            style = NocturneType.CardTitleSm,
+                        )
+                    }
+                    Text(
+                        buildString {
+                            if (report.strayFiles.isNotEmpty()) {
+                                append(
+                                    "${Fmt.bytes(report.strayBytes)} on disk with no library record — " +
+                                        "left by an interrupted install. ",
+                                )
+                            }
+                            if (report.recordsWithoutFiles.isNotEmpty()) {
+                                append("${report.recordsWithoutFiles.size} record(s) whose file has gone.")
+                            }
+                        },
+                        style = NocturneType.CardBody,
+                        color = NocturneColors.Text.copy(alpha = 0.8f),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        NButton("Clean up", viewModel::sweepOrphans, modifier = Modifier.weight(1f))
+                        NButton("Downloads", onOpenDownloads, modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+
+            NHelp(
+                "Model files sit in a normal folder you can open in any file manager. Nothing is in a " +
+                    "private store.",
+                Modifier.padding(top = 14.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun StorageLegend(label: String, bytes: Long, color: androidx.compose.ui.graphics.Color) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(7.dp).background(color, RoundedCornerShape(2.dp)))
+        Text("$label ${Fmt.bytes(bytes)}", style = NocturneType.Help)
+    }
+}
