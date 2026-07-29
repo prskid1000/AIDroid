@@ -25,6 +25,7 @@ import ai.ondevice.ui.screens.ResolveResultsScreen
 import ai.ondevice.ui.screens.RuntimesScreen
 import ai.ondevice.ui.screens.SamplerChainScreen
 import ai.ondevice.ui.screens.SettingsScreen
+import ai.ondevice.ui.screens.ToolsScreen
 import ai.ondevice.ui.screens.VoiceScreen
 import ai.ondevice.ui.theme.NIcons
 
@@ -65,6 +66,7 @@ object Routes {
     const val MASK_EDITOR = "image/mask"
     const val GALLERY = "image/gallery"
     const val RUNTIMES = "settings/runtimes"
+    const val TOOLS = "settings/tools"
 
     /**
      * A model id is `owner/repo:quant`, so it carries both a slash and a colon.
@@ -155,6 +157,7 @@ fun OnDeviceApp(
                 currentRoute = currentRoute,
                 onNavigate = { navController.navigateToRoot(it) },
                 onOpenRuntimes = { navController.navigate(Routes.RUNTIMES) },
+                onOpenTools = { navController.navigate(Routes.TOOLS) },
             )
         }
 
@@ -224,6 +227,9 @@ fun OnDeviceApp(
         }
         composable(Routes.RUNTIMES) {
             RuntimesScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Routes.TOOLS) {
+            ToolsScreen(onBack = { navController.popBackStack() })
         }
     }
 }

@@ -65,6 +65,31 @@ class ImageViewModel @Inject constructor(
             )
             refreshAttachmentLibrary()
         }
+
+        // Live, so a model that finishes downloading while this screen is open
+        // appears — the same mistake the chat picker used to make.
+        viewModelScope.launch {
+            db.models().observeByModality(Modality.DIFFUSION).collect { models ->
+                _state.value = _state.value.copy(
+                    availableModels = models,
+                    model = _state.value.model?.let { current ->
+                        models.firstOrNull { it.id == current.id }
+                    } ?: models.firstOrNull(),
+                )
+            }
+        }
+    }
+
+    /**
+     * With more than one diffusion model installed, which one runs is the
+     * user's choice — not whichever the database happened to return first.
+     */
+    fun selectModel(model: ModelEntity) {
+        if (_state.value.model?.id == model.id) return
+        // The loaded context belongs to the old model; keep them in step.
+        diffusion.unload()
+        _state.value = _state.value.copy(model = model, error = null, errorHint = null, previewBitmap = null)
+        viewModelScope.launch { db.models().touch(model.id, System.currentTimeMillis()) }
     }
 
     fun setMode(mode: ImageMode) {
@@ -191,12 +216,22 @@ class ImageViewModel @Inject constructor(
                 ).collect { event ->
                     when (event) {
                         is ai.ondevice.engine.DiffusionEvent.Progress -> {
+                            // `steps` is the user's setting and must never be
+                            // written from here. sd.cpp counts its own internal
+                            // work — hundreds of graph nodes, not sampler steps
+                            // — and feeding that back turned the Steps slider
+                            // into "686" and destroyed the value the user set.
                             val remaining = (event.steps - event.step).coerceAtLeast(0)
                             _state.value = _state.value.copy(
                                 step = event.step,
-                                steps = if (event.steps > 0) event.steps else _state.value.steps,
+                                progressSteps = event.steps,
+                                phase = event.phase,
                                 secondsPerStep = event.secondsPerStep,
-                                etaSeconds = (remaining * event.secondsPerStep).toLong(),
+                                etaSeconds = if (event.secondsPerStep > 0f) {
+                                    (remaining * event.secondsPerStep).toLong()
+                                } else {
+                                    0L
+                                },
                             )
                         }
                         is ai.ondevice.engine.DiffusionEvent.Preview -> {
@@ -407,6 +442,9 @@ data class ImageState(
     val vaeTiling: Boolean = true,
     val generating: Boolean = false,
     val step: Int = 0,
+    /** What the engine reports as its total — *not* the user's step setting. */
+    val progressSteps: Int = 0,
+    val phase: ai.ondevice.engine.DiffusionPhase = ai.ondevice.engine.DiffusionPhase.PREPARING,
     val secondsPerStep: Float = 0f,
     val etaSeconds: Long = 0,
     val exceedsEnvelope: Boolean = false,
@@ -420,11 +458,13 @@ data class ImageState(
     val previewBitmap: android.graphics.Bitmap? = null,
     val maskPath: String? = null,
     val availableAttachments: List<ai.ondevice.core.ModelAttachment> = emptyList(),
+    val availableModels: List<ModelEntity> = emptyList(),
 ) {
     /** Only the ones actually ticked go to the runtime. */
     val attachments: List<ai.ondevice.core.ModelAttachment>
         get() = availableAttachments.filter { it.enabled }
-    val progress: Float get() = if (steps > 0) step.toFloat() / steps else 0f
+    val progress: Float
+        get() = if (progressSteps > 0) (step.toFloat() / progressSteps).coerceIn(0f, 1f) else 0f
     /** The denoise dial appears when, and only when, there is a source. */
     val showStrength: Boolean get() = sourceImageUri != null
 

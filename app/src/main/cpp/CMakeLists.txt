@@ -7,6 +7,26 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(VENDOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../native")
 
 # ---------------------------------------------------------------------------
+# One ggml, shared by all three runtimes — and it has to be built for the
+# strictest of them.
+#
+# ggml sizes `ggml_tensor::name` at compile time and defaults to 64 bytes.
+# Diffusion tensor names are far longer than language-model ones
+# ("model.diffusion_model.output_blocks.11.1.transformer_blocks.0.ff…" is 76),
+# which is why stable-diffusion.cpp's own CMakeLists raises the limit to 160.
+#
+# It raises it with `add_definitions`, which only reaches targets declared
+# after that line — and here ggml is declared earlier, by llama.cpp. The result
+# was a ggml compiled at 64 that every diffusion model in the world fails to
+# load with "tensor name is too long", *including* ones built specifically for
+# sd.cpp. It reads exactly like a bad model file and is not one.
+#
+# So the definition is hoisted to the top, before any runtime is added. A
+# larger name buffer costs a few bytes per tensor and is otherwise invisible to
+# llama.cpp and whisper.cpp.
+add_compile_definitions(GGML_MAX_NAME=160)
+
+# ---------------------------------------------------------------------------
 # llama.cpp
 #
 # SPEC §17.5 pins the runtime to an upstream tag rather than tracking a branch,

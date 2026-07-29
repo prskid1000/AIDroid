@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
@@ -119,6 +120,44 @@ fun ImageScreen(
         )
 
         Column(Modifier.verticalScroll(rememberScrollState())) {
+
+            // Which model runs is the user's choice once there is more than
+            // one. Picking whichever the database returned first is how a
+            // broken model gets loaded forever while a working one sits beside
+            // it, unreachable.
+            if (state.availableModels.size > 1) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(bottom = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    state.availableModels.forEach { model ->
+                        val selected = model.id == state.model?.id
+                        Box(
+                            Modifier
+                                .background(
+                                    if (selected) NocturneColors.Accent900 else NocturneColors.Surface,
+                                    Radius.Md,
+                                )
+                                .ring(
+                                    if (selected) NocturneColors.Accent else NocturneColors.Divider,
+                                    Radius.Md,
+                                )
+                                .nClickableFlat { viewModel.selectModel(model) }
+                                .padding(horizontal = 12.dp, vertical = 9.dp),
+                        ) {
+                            Text(
+                                model.displayName,
+                                style = NocturneType.Row,
+                                color = if (selected) NocturneColors.Accent200 else NocturneColors.Text,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+            }
 
             TaesdPreview(state)
 
@@ -712,15 +751,26 @@ private fun TaesdPreview(state: ImageState) {
             }
         }
 
+        // "Warming up" is only true before the first step. Once the engine is
+        // stepping, saying it is still warming up contradicts the progress bar
+        // directly underneath — and this build has no TAESD decoder to produce
+        // a preview with, so that state used to last the entire run.
         if (!showingSource && preview == null) {
             Text(
-                if (state.generating) "warming up…" else "No preview yet",
+                when {
+                    state.loadingModel -> "loading model…"
+                    state.generating && state.step <= 0 -> "warming up…"
+                    state.generating -> "sampling · no preview decoder installed"
+                    else -> "No preview yet"
+                },
                 style = NocturneType.MonoSm,
                 color = if (state.generating) {
                     NocturneColors.Accent200.copy(alpha = 0.9f)
                 } else {
                     NocturneColors.TextMuted
                 },
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 24.dp),
             )
         }
 
@@ -738,22 +788,35 @@ private fun TaesdPreview(state: ImageState) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        "step ${state.step}/${state.steps}",
+                        // Only the sampling phase has steps worth counting.
+                        if (state.phase == ai.ondevice.engine.DiffusionPhase.SAMPLING) {
+                            "step ${state.step}/${state.progressSteps}"
+                        } else {
+                            state.phase.label
+                        },
                         style = NocturneType.MonoSm,
                         color = NocturneColors.Accent200,
                     )
                     Text("·", style = NocturneType.MonoSm, color = Color.White.copy(alpha = 0.7f))
                     Text(
-                        "CPU · ${String.format("%.1f", state.secondsPerStep)} s/it",
+                        if (state.secondsPerStep > 0f) {
+                            "CPU · ${String.format("%.1f", state.secondsPerStep)} s/it"
+                        } else {
+                            "CPU"
+                        },
                         style = NocturneType.MonoSm,
                         color = Color.White.copy(alpha = 0.7f),
                     )
                     Box(Modifier.weight(1f))
-                    Text(
-                        Fmt.eta(state.etaSeconds),
-                        style = NocturneType.MonoSm,
-                        color = Color.White.copy(alpha = 0.7f),
-                    )
+                    // An ETA computed from a rate we do not have yet is a
+                    // guess dressed as a number. Better to show nothing.
+                    if (state.secondsPerStep > 0f && state.etaSeconds > 0) {
+                        Text(
+                            Fmt.eta(state.etaSeconds),
+                            style = NocturneType.MonoSm,
+                            color = Color.White.copy(alpha = 0.7f),
+                        )
+                    }
                 }
                 NProgressBar(
                     fraction = state.progress,

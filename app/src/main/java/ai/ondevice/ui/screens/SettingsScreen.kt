@@ -52,6 +52,7 @@ fun SettingsScreen(
     currentRoute: String?,
     onNavigate: (String) -> Unit,
     onOpenRuntimes: () -> Unit,
+    onOpenTools: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.settings.collectAsStateWithLifecycle()
@@ -162,11 +163,19 @@ fun SettingsScreen(
             }
 
             NButton(
+                "Tools and MCP servers →",
+                onClick = onOpenTools,
+                style = ai.ondevice.ui.components.NButtonStyle.Secondary,
+                block = true,
+                modifier = Modifier.padding(top = 20.dp),
+            )
+
+            NButton(
                 "Runtimes →",
                 onClick = onOpenRuntimes,
                 style = ai.ondevice.ui.components.NButtonStyle.Primary,
                 block = true,
-                modifier = Modifier.padding(top = 20.dp),
+                modifier = Modifier.padding(top = 8.dp),
             )
 
             NHelp(

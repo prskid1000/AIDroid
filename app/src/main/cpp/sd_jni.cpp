@@ -68,6 +68,10 @@ struct od_sd {
     std::atomic<int>   total_steps{0};
     std::atomic<float> seconds_per_step{0.0f};
     std::atomic<bool>  generating{false};
+    /** The step count we asked for — used to tell sampling from other phases. */
+    std::atomic<int>   expected_steps{0};
+    std::atomic<int>   phase{0};
+    std::atomic<bool>  sampling_started{false};
 
     std::mutex           preview_mutex;
     std::vector<uint8_t> preview_rgb;
@@ -120,6 +124,10 @@ std::string take_last_error() {
     std::lock_guard<std::mutex> lock(g_last_error_mutex);
     return g_last_error;
 }
+
+constexpr int PHASE_PREPARING = 0;
+constexpr int PHASE_SAMPLING  = 1;
+constexpr int PHASE_DECODING  = 2;
 
 od_sd * as_sd(jlong handle) {
     return reinterpret_cast<od_sd *>(handle);
@@ -186,12 +194,39 @@ const std::map<std::string, row> & table() {
     return t;
 }
 
+/**
+ * sd.cpp funnels three unrelated things through one progress callback:
+ * weight loading (`pretty_bytes_progress`), VAE tile decoding, and the actual
+ * sampling loop. They all arrive as `(step, steps, time)` with no tag.
+ *
+ * Reporting them all as "step X/Y" is how the screen ended up saying
+ * "step 686/686" for a three-step run — 686 was the loader counting tensors.
+ * The only signal available is the *total*: the sampling loop is the one whose
+ * total matches the step count we asked for. Anything else is a different
+ * phase, and is reported as one rather than mislabelled as progress.
+ */
 void progress_cb(int step, int steps, float time, void *) {
     od_sd * e = g_current.load();
     if (e == nullptr) return;
-    e->step.store(step);
-    e->total_steps.store(steps);
-    e->seconds_per_step.store(time);
+
+    if (steps == e->expected_steps.load() && steps > 0) {
+        e->step.store(step);
+        e->total_steps.store(steps);
+        e->phase.store(PHASE_SAMPLING);
+        if (time > 0.0f) {
+            e->seconds_per_step.store(time);
+        }
+    } else if (!e->sampling_started.load()) {
+        // Before sampling begins this is the loader; afterwards it is the VAE
+        // decoding tiles. Both are honest to name and neither is a step.
+        e->phase.store(PHASE_PREPARING);
+    } else {
+        e->phase.store(PHASE_DECODING);
+    }
+
+    if (e->phase.load() == PHASE_SAMPLING) {
+        e->sampling_started.store(true);
+    }
 }
 
 void preview_cb(int step, int frame_count, sd_image_t * frames, bool, void *) {
@@ -319,9 +354,17 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
     }
 
     sd_set_progress_callback(progress_cb, nullptr);
-    // A preview every few steps: often enough to look live, rare enough that
-    // decoding the latent does not dominate the run.
-    sd_set_preview_callback(preview_cb, PREVIEW_TAE, 2, true, false, nullptr);
+
+    // TAESD decodes a latent to something that looks like the final image, but
+    // it is a *separate model file*. Asking for PREVIEW_TAE without one means
+    // the callback never fires and the preview stays empty for the whole run —
+    // which is worse than no preview, because the screen sits on "warming up"
+    // while the engine is plainly working. PREVIEW_PROJ is a cheap linear
+    // projection of the latent: blurry and colour-shifted, but real, and it
+    // needs no extra weights. So the mode follows what is actually installed.
+    const bool has_taesd = !taesd.empty();
+    sd_set_preview_callback(preview_cb, has_taesd ? PREVIEW_TAE : PREVIEW_PROJ,
+                            /* interval */ 1, /* denoised */ true, /* noisy */ false, nullptr);
 
     return reinterpret_cast<jlong>(engine);
 }
@@ -362,12 +405,15 @@ JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeProgress(JNIEnv * env, jobject, jlong handle) {
     auto * e = as_sd(handle);
     if (e == nullptr) return jni_from_string(env, "{}");
+    const int phase = e->phase.load();
     return jni_from_string(env, json{
         { "step",           e->step.load() },
         { "steps",          e->total_steps.load() },
         { "secondsPerStep", e->seconds_per_step.load() },
         { "generating",     e->generating.load() },
         { "previewSerial",  e->preview_serial.load() },
+        { "phase",          phase == PHASE_SAMPLING ? "sampling"
+                            : phase == PHASE_DECODING ? "decoding" : "preparing" },
     }.dump());
 }
 
@@ -425,6 +471,9 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
     g_current.store(e);
     e->generating.store(true);
     e->step.store(0);
+    e->expected_steps.store(e->steps);
+    e->phase.store(PHASE_PREPARING);
+    e->sampling_started.store(false);
     {
         std::lock_guard<std::mutex> preview_lock(e->preview_mutex);
         e->preview_rgb.clear();

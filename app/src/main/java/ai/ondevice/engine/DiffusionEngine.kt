@@ -179,7 +179,12 @@ class DiffusionEngine(
             val step = progress["step"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
             val steps = progress["steps"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
             val secondsPerStep = progress["secondsPerStep"]?.jsonPrimitive?.content?.toFloatOrNull() ?: 0f
-            send(DiffusionEvent.Progress(step, steps, secondsPerStep))
+            val phase = when (progress["phase"]?.jsonPrimitive?.content) {
+                "sampling" -> DiffusionPhase.SAMPLING
+                "decoding" -> DiffusionPhase.DECODING
+                else -> DiffusionPhase.PREPARING
+            }
+            send(DiffusionEvent.Progress(step, steps, secondsPerStep, phase))
 
             val serial = progress["previewSerial"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
             if (serial != lastPreviewSerial) {
@@ -277,8 +282,25 @@ data class DiffusionImage(val width: Int, val height: Int, val pixels: IntArray)
     }
 }
 
+/**
+ * Which part of the run is happening. sd.cpp reports loading, tiled VAE decode
+ * and sampling through one untagged callback, so the phase is inferred natively
+ * and carried here — the screen can then say "preparing" instead of pretending
+ * the loader's tensor count is a sampler step.
+ */
+enum class DiffusionPhase(val label: String) {
+    PREPARING("preparing"),
+    SAMPLING("sampling"),
+    DECODING("decoding"),
+}
+
 sealed interface DiffusionEvent {
-    data class Progress(val step: Int, val steps: Int, val secondsPerStep: Float) : DiffusionEvent
+    data class Progress(
+        val step: Int,
+        val steps: Int,
+        val secondsPerStep: Float,
+        val phase: DiffusionPhase,
+    ) : DiffusionEvent
     data class Preview(val image: DiffusionImage) : DiffusionEvent
     data class Completed(val image: DiffusionImage) : DiffusionEvent
     data class Failed(val message: String, val suggestion: String?) : DiffusionEvent
