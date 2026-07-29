@@ -1,5 +1,7 @@
 package ai.ondevice.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,9 +25,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -76,6 +81,28 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     var sheetOpen by rememberSaveable { mutableStateOf(false) }
 
+    // One picker for all three kinds. `OpenDocument` rather than the photo
+    // picker because the composer accepts documents too, and making the user
+    // guess which of two "attach" buttons handles their file is worse than one
+    // that takes everything and says what it did with it.
+    val context = LocalContext.current
+    val attachLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        uri?.let {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            viewModel.attach(it)
+        }
+    }
+    val pickAttachment = {
+        attachLauncher.launch(arrayOf("image/*", "text/*", "application/pdf", "application/json", "audio/*"))
+    }
+
     LaunchedEffect(state.messages.size, state.streaming?.content) {
         val target = state.messages.size
         if (target > 0) listState.animateScrollToItem(target)
@@ -91,7 +118,8 @@ fun ChatScreen(
                         onInputChange = viewModel::onInputChange,
                         onSend = viewModel::send,
                         onStop = viewModel::stop,
-                        onAttach = { viewModel.attachImage("content://image/screenshot.png") },
+                        onAttach = { pickAttachment() },
+                        onRemoveAttachment = viewModel::removeAttachment,
                     )
                     NBottomBar(BottomDestinations, currentRoute) { onNavigate(it.route) }
                 }
@@ -456,6 +484,78 @@ private fun MessageActions(
     }
 }
 
+/**
+ * The attached files, before sending.
+ *
+ * An image shows itself; a document shows its name and how much of the context
+ * it will occupy. Both are removable, because an attachment you cannot take
+ * back is a trap — especially a 40 000-token one.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun AttachmentStrip(
+    attachments: List<ai.ondevice.ui.vm.PendingAttachment>,
+    onRemove: (String) -> Unit,
+) {
+    androidx.compose.foundation.layout.FlowRow(
+        Modifier.fillMaxWidth().padding(bottom = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        attachments.forEach { attachment ->
+            Row(
+                Modifier
+                    .background(NocturneColors.Surface, Radius.Sm)
+                    .ring(NocturneColors.Divider, Radius.Sm)
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (attachment.kind == ai.ondevice.data.AttachmentKind.IMAGE) {
+                    coil3.compose.AsyncImage(
+                        model = attachment.path,
+                        contentDescription = attachment.name,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(Radius.Sm)
+                            .background(NocturneColors.Neutral900),
+                    )
+                } else {
+                    Icon(
+                        NIcons.File,
+                        contentDescription = null,
+                        tint = NocturneColors.Accent300,
+                        modifier = Modifier.size(16.dp).padding(start = 4.dp),
+                    )
+                }
+                Column {
+                    Text(
+                        attachment.name,
+                        style = NocturneType.Meta,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 140.dp),
+                    )
+                    Text(
+                        "${Fmt.grouped(attachment.tokenCost)} tok",
+                        style = NocturneType.Mono2Xs,
+                        color = NocturneColors.TextMuted,
+                    )
+                }
+                Text(
+                    "×",
+                    style = NocturneType.Row,
+                    color = NocturneColors.TextMuted,
+                    modifier = Modifier
+                        .nClickableFlat { onRemove(attachment.path) }
+                        .padding(horizontal = 6.dp),
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun ChatComposer(
     state: ChatState,
@@ -463,6 +563,7 @@ private fun ChatComposer(
     onSend: () -> Unit,
     onStop: () -> Unit,
     onAttach: () -> Unit,
+    onRemoveAttachment: (String) -> Unit,
 ) {
     Column(
         Modifier
@@ -470,12 +571,17 @@ private fun ChatComposer(
             .ruleAbove()
             .padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 12.dp),
     ) {
-        if (state.pendingImages.isNotEmpty()) {
+        if (state.pendingAttachments.isNotEmpty()) {
+            AttachmentStrip(state.pendingAttachments, onRemoveAttachment)
+            // §4.5 — the price is stated before the send, not discovered after.
             NHelp(
-                "${state.pendingImages.size} image attached · " +
-                    "${Fmt.grouped(state.pendingImages.size * 1456)} tokens before you send",
+                "${state.pendingAttachments.size} attached · " +
+                    "${Fmt.grouped(state.pendingAttachments.sumOf { it.tokenCost })} tokens before you send",
                 Modifier.padding(bottom = 6.dp),
             )
+        }
+        state.runningTool?.let { tool ->
+            NHelp("Running $tool…", Modifier.padding(bottom = 6.dp), color = NocturneColors.Accent300)
         }
         Row(
             Modifier.fillMaxWidth(),

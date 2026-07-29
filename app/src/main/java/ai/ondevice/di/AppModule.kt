@@ -56,6 +56,11 @@ object AppModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): OnDeviceDatabase =
         Room.databaseBuilder(context, OnDeviceDatabase::class.java, OnDeviceDatabase.NAME)
+            // A real migration rather than a destructive one: the conversations
+            // and the per-model parameter overrides in this database are the
+            // user's work, and dropping them to add a table is not a trade the
+            // app gets to make on their behalf.
+            .addMigrations(OnDeviceDatabase.MIGRATION_1_2)
             .build()
 
     @Provides @Singleton fun provideModelDao(db: OnDeviceDatabase) = db.models()
@@ -120,4 +125,34 @@ object AppModule {
     @Provides
     @Singleton
     fun provideBenchmarker(registry: RuntimeRegistry, db: OnDeviceDatabase) = Benchmarker(registry, db)
+
+    @Provides
+    @Singleton
+    fun provideToolProviders(db: OnDeviceDatabase, capabilities: DeviceCapabilities) =
+        ai.ondevice.tools.ToolProviderFactory(db, capabilities)
+
+    @Provides
+    @Singleton
+    fun provideConversationArchive(db: OnDeviceDatabase, storage: ModelStorage) =
+        ai.ondevice.data.ConversationArchive(db, storage)
+
+    @Provides
+    @Singleton
+    fun provideAttachmentStore(@ApplicationContext context: Context, storage: ModelStorage) =
+        ai.ondevice.data.AttachmentStore(context, storage)
+
+    @Provides
+    @Singleton
+    fun provideSpeechSynthesizer(@ApplicationContext context: Context) =
+        ai.ondevice.speech.SpeechSynthesizer(context)
+
+    @Provides
+    @Singleton
+    fun provideTranscriber(@ApplicationContext context: Context) =
+        ai.ondevice.engine.Transcriber(context)
+
+    @Provides
+    @Singleton
+    fun provideDiffusionEngine(@ApplicationContext context: Context) =
+        ai.ondevice.engine.DiffusionEngine(context)
 }

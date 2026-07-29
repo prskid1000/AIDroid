@@ -27,11 +27,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NHelp
 import ai.ondevice.ui.components.NSlider
@@ -55,7 +60,10 @@ import ai.ondevice.ui.theme.ring
 fun MaskEditorScreen(
     onCancel: () -> Unit,
     onDone: () -> Unit,
+    viewModel: ai.ondevice.ui.vm.ImageViewModel = activityImageViewModel(),
 ) {
+    val imageState by viewModel.state.collectAsStateWithLifecycle()
+    val sourceUri = imageState.sourceImageUri
     val strokes = remember { mutableStateListOf<MaskStroke>() }
     val redoStack = remember { mutableStateListOf<MaskStroke>() }
     var brushSize by remember { mutableFloatStateOf(74f) }
@@ -121,30 +129,56 @@ fun MaskEditorScreen(
                     )
                 },
         ) {
-            Canvas(Modifier.fillMaxSize()) {
-                // The source image stand-in, matching the canvas mock.
-                drawRect(
-                    Brush.radialGradient(
-                        colors = listOf(NocturneColors.Neutral700, NocturneColors.Neutral900),
-                        center = Offset(size.width * 0.42f, size.height * 0.38f),
-                        radius = size.maxDimension * 0.6f,
-                    ),
+            // The real source the Image screen picked. Painting a mask over a
+            // stand-in would be busywork — the point of the brush is that you
+            // can see what you are confining the denoise to.
+            sourceUri?.let {
+                coil3.compose.AsyncImage(
+                    model = it,
+                    contentDescription = "Source image",
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
                 )
+            }
 
+            if (sourceUri == null) {
+                Canvas(Modifier.fillMaxSize()) {
+                    drawRect(
+                        Brush.radialGradient(
+                            colors = listOf(NocturneColors.Neutral700, NocturneColors.Neutral900),
+                            center = Offset(size.width * 0.42f, size.height * 0.38f),
+                            radius = size.maxDimension * 0.6f,
+                        ),
+                    )
+                }
+            }
+
+            // The mask is composited off-screen so that erasing punches a hole
+            // in the overlay and reveals the source underneath. Painting the
+            // eraser in the background colour would work only over a stand-in;
+            // over a real photo it would smear grey across the image.
+            Canvas(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen },
+            ) {
                 val paint = NocturneColors.Accent.copy(alpha = overlayOpacity)
                 (strokes + listOfNotNull(current)).forEach { stroke ->
                     stroke.points.forEach { point ->
                         drawCircle(
-                            color = if (stroke.erase) NocturneColors.Neutral900 else paint,
+                            color = if (stroke.erase) Color.Transparent else paint,
                             radius = stroke.size / 2f,
                             center = point,
                             // Hardness shapes the edge: 1.0 is a hard disc,
                             // lower values feather it.
                             alpha = if (stroke.erase) 1f else (0.35f + hardness * 0.65f),
+                            blendMode = if (stroke.erase) BlendMode.Clear else DrawScope.DefaultBlendMode,
                         )
                     }
                 }
+            }
 
+            Canvas(Modifier.fillMaxSize()) {
                 // The brush cursor ring from the canvas.
                 cursor?.let { position ->
                     drawCircle(
@@ -158,7 +192,11 @@ fun MaskEditorScreen(
 
             if (strokes.isEmpty() && current == null) {
                 Text(
-                    "source image — drag to paint the mask",
+                    if (sourceUri == null) {
+                        "no source image — pick one on the Image screen"
+                    } else {
+                        "drag to paint the mask"
+                    },
                     style = NocturneType.MonoXs,
                     color = NocturneColors.TextMuted,
                     modifier = Modifier.align(Alignment.Center),

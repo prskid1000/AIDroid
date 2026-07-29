@@ -41,28 +41,61 @@ class ParamsViewModel @Inject constructor(
     val state: StateFlow<ParamsState> = _state.asStateFlow()
 
     init {
-        viewModelScope.launch {
-            val manifest = repository.manifest()
-            val model = engines.state.value.loaded?.modelId?.let { db.models().get(it) }
-            val specs = manifest.paramsFor(RuntimeRegistry.LLAMA)
-            _state.value = _state.value.copy(
-                manifestVersion = manifest.manifestVersion,
-                bundledVersion = repository.bundledVersion(),
-                runtimeId = RuntimeRegistry.LLAMA,
-                buildTag = registry.llamaBuildTag,
-                allSpecs = specs,
-                values = SparseParams.parse(model?.paramOverridesJson),
-                modality = model?.modality?.name?.lowercase() ?: Modality.TEXT.name.lowercase(),
-                architecture = model?.architecture,
-                showAll = prefs.showAllParameters.first(),
-                modelId = model?.id,
-            )
-            // Seed the display order from the stored value when there is one,
-            // otherwise from the manifest default.
-            val stored = _state.value.values.stringList("samplers")
-            _state.value = _state.value.copy(samplerOrder = stored ?: defaultSamplerOrder())
-            recompute()
-        }
+        viewModelScope.launch { load(RuntimeRegistry.LLAMA) }
+    }
+
+    /**
+     * The screen is not llama-only. S11's "Advanced" button opens this same
+     * renderer against stable-diffusion.cpp, and the manifest already carries
+     * every runtime's parameters — so the only thing that changes is which
+     * `runtimes[…]` block is read and which model's overrides are edited.
+     * Nothing about the renderer knows a runtime name.
+     */
+    fun setRuntime(runtimeId: String) {
+        if (_state.value.runtimeId == runtimeId && _state.value.allSpecs.isNotEmpty()) return
+        viewModelScope.launch { load(runtimeId) }
+    }
+
+    private suspend fun load(runtimeId: String) {
+        val manifest = repository.manifest()
+        val model = modelFor(runtimeId)
+        _state.value = _state.value.copy(
+            manifestVersion = manifest.manifestVersion,
+            bundledVersion = repository.bundledVersion(),
+            runtimeId = runtimeId,
+            buildTag = registry.buildTag(runtimeId),
+            allSpecs = manifest.paramsFor(runtimeId),
+            values = SparseParams.parse(model?.paramOverridesJson),
+            modality = (model?.modality ?: modalityOf(runtimeId)).name.lowercase(),
+            architecture = model?.architecture,
+            showAll = prefs.showAllParameters.first(),
+            modelId = model?.id,
+            query = "",
+        )
+        // Seed the display order from the stored value when there is one,
+        // otherwise from the manifest default.
+        val stored = _state.value.values.stringList("samplers")
+        _state.value = _state.value.copy(samplerOrder = stored ?: defaultSamplerOrder())
+        recompute()
+    }
+
+    /**
+     * Whose overrides this screen edits. For llama that is deliberately the
+     * *loaded* model rather than any installed one — the build gate and the
+     * context readout have to describe the model actually in memory. The other
+     * runtimes load on demand, so the first installed model of the matching
+     * modality is the right target.
+     */
+    private suspend fun modelFor(runtimeId: String) = when (runtimeId) {
+        RuntimeRegistry.LLAMA -> engines.state.value.loaded?.modelId?.let { db.models().get(it) }
+        else -> db.models().observeByModality(modalityOf(runtimeId)).first().firstOrNull()
+    }
+
+    private fun modalityOf(runtimeId: String) = when (runtimeId) {
+        RuntimeRegistry.STABLE_DIFFUSION -> Modality.DIFFUSION
+        RuntimeRegistry.WHISPER -> Modality.SPEECH_TO_TEXT
+        RuntimeRegistry.KOKORO -> Modality.TEXT_TO_SPEECH
+        else -> Modality.TEXT
     }
 
     fun setTier(tier: Tier?) {
@@ -102,7 +135,10 @@ class ParamsViewModel @Inject constructor(
             },
         )
         recompute()
-        if (spec?.requiresReload != true) {
+        // Only the text engine is warm; a diffusion or transcription parameter
+        // is stored now and passed at the next run, so it must not be pushed
+        // into the loaded llama context.
+        if (spec?.requiresReload != true && _state.value.runtimeId == RuntimeRegistry.LLAMA) {
             viewModelScope.launch {
                 val report = engines.llama?.applyParams(SparseParams.of(key to value))
                 _state.value = _state.value.copy(lastReport = report)
@@ -113,6 +149,7 @@ class ParamsViewModel @Inject constructor(
 
     fun applyPendingReload() {
         val modelId = _state.value.modelId ?: return
+        if (_state.value.runtimeId != RuntimeRegistry.LLAMA) return
         viewModelScope.launch {
             val model = db.models().get(modelId) ?: return@launch
             engines.load(model, _state.value.values)

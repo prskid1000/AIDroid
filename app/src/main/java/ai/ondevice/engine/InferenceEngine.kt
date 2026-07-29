@@ -99,12 +99,36 @@ data class GenerateRequest(
     val imagePaths: List<String> = emptyList(),
     val grammar: String? = null,
     val seed: Long = -1,
+    /**
+     * Tools offered to the model this turn. They go into the chat template,
+     * which is the only place that knows a given family's tool-call syntax —
+     * the app never formats one itself.
+     */
+    val tools: List<ToolSpec> = emptyList(),
 )
 
 data class EngineMessage(
     val role: String,
     val content: String,
     val imagePaths: List<String> = emptyList(),
+    /** Set on an assistant message that asked for tools. */
+    val toolCalls: List<ToolCallRequest> = emptyList(),
+    /** Set on a `tool` message carrying a result back. */
+    val toolCallId: String? = null,
+    val toolName: String? = null,
+)
+
+/** A tool as the model sees it: a name, a sentence, and a JSON Schema. */
+data class ToolSpec(
+    val name: String,
+    val description: String,
+    val parametersJson: String,
+)
+
+data class ToolCallRequest(
+    val name: String,
+    val argumentsJson: String,
+    val id: String,
 )
 
 /** Streaming output. Everything the generation UI shows comes through here. */
@@ -133,6 +157,13 @@ sealed interface GenerationEvent {
         val contextUsed: Int,
         val backend: BackendId,
     ) : GenerationEvent
+
+    /**
+     * The model asked for a tool. Lifted out of the raw text by upstream's own
+     * chat parser, so this arrives already separated from the visible reply
+     * whatever syntax the model family uses.
+     */
+    data class ToolCall(val name: String, val argumentsJson: String, val id: String) : GenerationEvent
 
     data class Done(val stopReason: StopReason, val generatedTokens: Int, val elapsedMillis: Long) : GenerationEvent
 

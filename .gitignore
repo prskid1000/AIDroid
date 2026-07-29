@@ -9,3 +9,10 @@ captures/
 .cxx/
 *.apk
 *.aab
+
+# Vendored upstream runtimes. Pinned in native/VERSIONS and fetched by
+# tools/fetch-native.sh — checking in ~400 MB of someone else's source would
+# make every clone of this repo pay for it.
+native/llama.cpp/
+native/whisper.cpp/
+native/stable-diffusion.cpp/

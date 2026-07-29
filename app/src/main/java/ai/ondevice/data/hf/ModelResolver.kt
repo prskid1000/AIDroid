@@ -177,8 +177,22 @@ class ModelResolver(
             else -> onnxFiles
         }
 
-        // Step 7 — exact sizes, sha256 and the commit to pin to.
-        val sizeLookup = api.pathsInfo(repoId, (primaryFiles + files.filter { isCompanionFilename(it) }).take(64), repoRef.revision)
+        // Step 7 — pin *first*, then read everything at the pin.
+        //
+        // This ordering is the whole point. "main" is a moving target: a repo
+        // that is re-uploaded keeps its filenames and changes their contents,
+        // so sizes and hashes read at `main` describe a different file from the
+        // one a URL pinned to an older commit will serve. That mismatch does
+        // not fail loudly at resolve time — it fails after a 382 MB download,
+        // as a checksum error blaming the file. Resolving the revision to a
+        // concrete commit once, and using that same commit for paths-info and
+        // for every download URL, is what makes the sha256 check meaningful.
+        val pinnedRevision = info.sha?.takeIf { it.isNotBlank() } ?: repoRef.revision
+        val sizeLookup = api.pathsInfo(
+            repoId,
+            (primaryFiles + files.filter { isCompanionFilename(it) }).take(64),
+            pinnedRevision,
+        )
             .getOrDefault(emptyList())
             .associateBy { it.path }
 
@@ -204,7 +218,9 @@ class ModelResolver(
             return@withContext unsupportedArchRefusal(repoId, arch)
         }
 
-        val commitId = sizeLookup.values.firstNotNullOfOrNull { it.lastCommit?.id } ?: info.sha
+        // Deliberately *not* a per-file `lastCommit.id`: that is the commit
+        // which last touched one particular file, which for a repo uploaded in
+        // several passes is older than the tree the hashes were read from.
         val security = sizeLookup.values.firstNotNullOfOrNull { it.securityFileStatus?.status }
 
         Resolution.Resolved(
@@ -212,7 +228,7 @@ class ModelResolver(
                 repoId = repoId,
                 owner = repoRef.owner,
                 repo = repoRef.repo,
-                revision = commitId ?: repoRef.revision,
+                revision = pinnedRevision,
                 displayName = repoRef.repo,
                 architecture = arch,
                 modality = modality,
@@ -246,8 +262,29 @@ class ModelResolver(
         val url = api.resolveUrl(model.repoId, first.filename, model.revision)
         val bytes = api.rangeGet(url, GgufHeaderReader.HEADER_BYTES).getOrNull() ?: return model
         val meta = GgufHeaderReader.parse(bytes).getOrNull() ?: return model
+        val architecture = model.architecture ?: meta.architecture
+
+        // Learning the architecture can change what the model *is*. The first
+        // classification ran before this file had been read at all, so a repo
+        // whose HF metadata block is empty — which is exactly the case that
+        // brings us here — was classified as text by default. SD-Turbo lands
+        // that way: `sd2` in the header, nothing in the API. Re-deriving the
+        // modality once the header is known is the difference between offering
+        // a diffusion model in the chat picker and offering it on the Image
+        // screen where it can actually run.
+        val modality = if (model.modality == Modality.TEXT && architecture != null) {
+            when (architecture.lowercase()) {
+                in DIFFUSION_ARCHITECTURES -> Modality.DIFFUSION
+                "whisper" -> Modality.SPEECH_TO_TEXT
+                else -> model.modality
+            }
+        } else {
+            model.modality
+        }
+
         return model.copy(
-            architecture = model.architecture ?: meta.architecture,
+            architecture = architecture,
+            modality = modality,
             contextLength = model.contextLength ?: meta.contextLength,
             chatTemplate = model.chatTemplate ?: meta.chatTemplate,
             layers = model.layers ?: meta.blockCount,
@@ -281,6 +318,17 @@ class ModelResolver(
             arch != null && arch in DIFFUSION_ARCHITECTURES -> Modality.DIFFUSION
             files.any { it.equals("model_index.json", true) } -> Modality.DIFFUSION
             files.any { it.contains("unet", true) } && files.any { it.contains("vae", true) } -> Modality.DIFFUSION
+            // A single-file SD/SDXL GGUF has none of the shapes above: no
+            // `model_index.json`, no separate unet, and an architecture string
+            // llama.cpp's enum has never heard of. What it does have is the
+            // repo's declared pipeline, which is metadata rather than a name —
+            // so this stays inside §1.3 while catching the case that would
+            // otherwise install a diffusion model into the chat picker.
+            info.pipelineTag == "text-to-image" || info.pipelineTag == "image-to-image" -> Modality.DIFFUSION
+            info.tags.any {
+                it.equals("stable-diffusion", true) || it.equals("diffusers", true) ||
+                    it.equals("text-to-image", true)
+            } -> Modality.DIFFUSION
             companions.any { it.role == CompanionRole.VISION_PROJECTOR } -> Modality.VISION
             info.pipelineTag == "feature-extraction" || info.pipelineTag == "sentence-similarity" -> Modality.EMBEDDING
             format == ModelFormat.GGUF -> Modality.TEXT
@@ -343,9 +391,20 @@ class ModelResolver(
             grouped.getOrPut(key) { mutableListOf() }.add(f)
         }
 
+        // A quant suffix only identifies a variant when the repo holds one model.
+        // whisper.cpp's repo holds tiny/base/small/medium/large *and* several
+        // quantisations of each, so keying on the suffix alone produced six rows
+        // all labelled "Q5_1" — a list in which you cannot tell base from small,
+        // which is worse than no list. Where the suffix does not distinguish,
+        // fall back to the part of the filename that does.
+        val proposed = grouped.keys.associateWith { extractQuantName(it, info) }
+        val ambiguous = proposed.values.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
+
         return grouped.map { (key, members) ->
             val sorted = members.sorted()
-            val quantName = extractQuantName(key, info)
+            val quantName = proposed.getValue(key).let { name ->
+                if (name in ambiguous) distinguishingName(key) else name
+            }
             val remoteFiles = sorted.map { name ->
                 val pi = sizes[name]
                 RemoteFile(
@@ -356,15 +415,31 @@ class ModelResolver(
                     securityStatus = pi?.securityFileStatus?.status,
                 )
             }
-            val speed = CompatibilityGate.speedClassFor(quantName)
+            val speed = CompatibilityGate.speedClassFor(quantName, registry.hasOpenClBackend)
             QuantVariant(
                 name = quantName,
                 files = remoteFiles,
                 speedClass = speed,
-                note = quantNote(quantName, speed, sorted.size),
+                // The character note is about the *quantisation*, so it reads
+                // the suffix even when the label had to be widened to stay
+                // unambiguous.
+                note = quantNote(proposed.getValue(key), speed, sorted.size),
             )
         }.sortedBy { it.totalBytes }
     }
+
+    /**
+     * The whole filename, minus the noise every file in the repo shares.
+     *
+     * `ggml-base.en-q5_1.bin` → `base.en-q5_1`. Used only when the quant suffix
+     * fails to tell two variants apart, so the label stays short in the common
+     * case and stays *correct* in the awkward one.
+     */
+    private fun distinguishingName(filename: String): String =
+        filename.substringAfterLast('/')
+            .removeSuffix(".gguf").removeSuffix(".bin").removeSuffix(".onnx")
+            .removePrefix("ggml-")
+            .removePrefix("model-")
 
     /** `Qwen2.5-7B-Instruct-Q4_K_M.gguf` → `Q4_K_M`. */
     private fun extractQuantName(filename: String, info: HfModelInfo): String {
@@ -378,7 +453,8 @@ class ModelResolver(
      * speed class shown on the right — the two columns answer different
      * questions ("what does this quant cost you?" vs "which backend runs it?").
      */
-    private fun quantNote(quant: String, speed: SpeedClass, shards: Int): String = buildString {
+    private fun quantNote(rawQuant: String, speed: SpeedClass, shards: Int): String = buildString {
+        val quant = rawQuant.uppercase()
         append(
             when {
                 speed == SpeedClass.OPENCL_FAST -> "Adreno fast path"
@@ -392,8 +468,15 @@ class ModelResolver(
                 quant.startsWith("IQ1") || quant.startsWith("IQ2") -> "very small, real quality cost"
                 quant.startsWith("IQ") -> "small, quality cost"
                 quant.startsWith("Q2") || quant.startsWith("Q3") -> "small, quality cost"
-                quant.endsWith("_1") -> "legacy quant"
-                else -> "no GPU kernel on this device"
+                // Q4_0/Q4_1/Q5_0/Q5_1 — the pre-K quantisations. Still common
+                // in whisper.cpp's own repo, so they need a real description
+                // rather than falling through to "unrecognised".
+                quant.matches(Regex("""Q[45]_[01]""")) -> "legacy quant"
+                quant.endsWith("_1") || quant.endsWith("_0") -> "legacy quant"
+                // No quant suffix at all: whisper's plain `ggml-base.bin` and
+                // friends ship at full precision.
+                !quant.matches(Regex("""(?i)(IQ|Q)\d.*""")) -> "full precision"
+                else -> "unrecognised quant name"
             },
         )
         if (shards > 1) append(" · $shards shards")
@@ -488,7 +571,7 @@ class ModelResolver(
                     QuantVariant(
                         name = extractQuantName(name, HfModelInfo()),
                         files = listOf(RemoteFile(name, 0L)),
-                        speedClass = CompatibilityGate.speedClassFor(name),
+                        speedClass = CompatibilityGate.speedClassFor(name, registry.hasOpenClBackend),
                         note = "direct file — metadata read from the header",
                     ),
                 ),

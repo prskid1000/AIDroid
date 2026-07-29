@@ -26,6 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -63,10 +64,12 @@ import ai.ondevice.ui.vm.GalleryViewModel
 fun GalleryScreen(
     onBack: () -> Unit,
     viewModel: GalleryViewModel = hiltViewModel(),
+    imageViewModel: ai.ondevice.ui.vm.ImageViewModel = activityImageViewModel(),
 ) {
     val images by viewModel.images.collectAsStateWithLifecycle()
     val selected by viewModel.selected.collectAsStateWithLifecycle()
     val focused = selected ?: images.firstOrNull()
+    val context = LocalContext.current
 
     PhoneScaffold(
         toolbar = {
@@ -110,11 +113,19 @@ fun GalleryScreen(
                 ) {
                     NButton(
                         "Reuse parameters",
-                        onClick = { },
+                        onClick = {
+                            imageViewModel.reuseParameters(image)
+                            onBack()
+                        },
                         style = NButtonStyle.Primary,
                         modifier = Modifier.weight(1f),
                     )
-                    NIconButton(NIcons.Share, "Share", onClick = { }, size = 46.dp)
+                    NIconButton(
+                        NIcons.Share,
+                        "Share",
+                        onClick = { shareImage(context, image) },
+                        size = 46.dp,
+                    )
                     NIconButton(NIcons.Trash, "Delete", onClick = { viewModel.delete(image) }, size = 46.dp)
                 }
 
@@ -169,6 +180,48 @@ fun GalleryScreen(
             )
         }
     }
+}
+
+/**
+ * Share the artifact itself when the file exists, and its parameter set when it
+ * does not.
+ *
+ * The claim this screen makes is that the file is reproducible on its own, so
+ * the share always carries the full parameter set as text alongside the image —
+ * which is what makes "another app can reproduce it" true rather than a
+ * flourish. The FileProvider grant is scoped to the receiving app and read-only.
+ */
+private fun shareImage(context: android.content.Context, image: GeneratedImageEntity) {
+    val file = java.io.File(image.path)
+    val params = SparseParams.parse(image.paramsJson)
+    val text = buildString {
+        appendLine(image.prompt)
+        image.negativePrompt?.let { appendLine("negative: $it") }
+        appendLine("seed: ${image.seed} · ${image.width}×${image.height}")
+        image.modelId?.let { appendLine("model: $it") }
+        params.keys.sorted().forEach { key ->
+            if (key != "prompt" && key != "negative_prompt" && key != "seed") {
+                appendLine("$key: ${params[key]?.displayValue() ?: "—"}")
+            }
+        }
+    }
+
+    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        putExtra(android.content.Intent.EXTRA_TEXT, text)
+        if (file.exists()) {
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file,
+            )
+            type = "image/png"
+            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } else {
+            type = "text/plain"
+        }
+    }
+    context.startActivity(android.content.Intent.createChooser(intent, "Share image"))
 }
 
 /**

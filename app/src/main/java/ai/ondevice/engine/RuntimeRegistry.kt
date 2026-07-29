@@ -62,7 +62,18 @@ class RuntimeRegistry(private val context: Context) {
     fun supportsFormat(format: ModelFormat): Boolean =
         descriptors.any { it.installed && format in it.formats }
 
-    val llamaBuildTag: String get() = descriptor(LLAMA)?.version ?: "not installed"
+    /**
+     * Whether the installed text runtime actually has a GPU backend compiled
+     * in. The quant list quotes a fast path off the back of this, so it has to
+     * describe the binary rather than the hardware the binary is running on.
+     */
+    val hasOpenClBackend: Boolean
+        get() = descriptor(LLAMA)?.let { it.installed && BackendId.OPENCL in it.backends } == true
+
+    val llamaBuildTag: String get() = buildTag(LLAMA)
+
+    /** The build tag the parameter screen gates `sinceBuild` against, per runtime. */
+    fun buildTag(runtimeId: String): String = descriptor(runtimeId)?.version ?: "not installed"
 
     val architectureCount: Int get() = descriptor(LLAMA)?.architectures?.size ?: 0
 

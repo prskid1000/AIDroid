@@ -191,6 +191,28 @@ data class RuntimeBundleEntity(
     val rolledBackFrom: String?,
 )
 
+/**
+ * An MCP server the user added by hand.
+ *
+ * There is no discovery and no default list on purpose: every entry here is a
+ * third party the user typed in, and one they can see and delete. `enabled`
+ * exists separately from deletion so a server can be switched off for a
+ * conversation without losing its URL.
+ */
+@Entity(tableName = "mcp_servers")
+data class McpServerEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val url: String,
+    /** Sent verbatim as `Authorization`. Stored here, not in the URL. */
+    val authHeader: String?,
+    val enabled: Boolean,
+    val lastToolsJson: String?,
+    val lastCheckedAt: Long?,
+    val lastError: String?,
+    val createdAt: Long,
+)
+
 @Entity(tableName = "param_manifests")
 data class ParamManifestEntity(
     @PrimaryKey val version: Int,

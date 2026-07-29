@@ -98,10 +98,16 @@ class AddModelViewModel @Inject constructor(
 
         viewModelScope.launch {
             val reserve = prefs.storageReserveMb.first() * 1_000_000L
+            // Only autoregressive models have a KV cache. Passing a context to
+            // the estimator for a diffusion or transcription model would invent
+            // a number the user could act on, so the context is zeroed for them
+            // and the summary drops the term rather than printing a fiction.
+            val autoregressive = resolved.modality == ai.ondevice.core.Modality.TEXT ||
+                resolved.modality == ai.ondevice.core.Modality.VISION
             val estimate = CompatibilityGate.estimate(
                 weightsBytes = quant.totalBytes,
                 layers = resolved.layers,
-                contextTokens = _state.value.contextTokens,
+                contextTokens = if (autoregressive) _state.value.contextTokens else 0,
                 embeddingLengthKv = resolved.embeddingLengthKv,
                 embeddingLength = resolved.embeddingLength,
             )

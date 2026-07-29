@@ -16,9 +16,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
@@ -27,9 +29,11 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ai.ondevice.core.Fmt
 import ai.ondevice.ui.components.NButton
+import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NCard
 import ai.ondevice.ui.components.NChipRow
 import ai.ondevice.ui.components.NHelp
+import ai.ondevice.ui.components.NInput
 import ai.ondevice.ui.components.NSeg
 import ai.ondevice.ui.components.NTag
 import ai.ondevice.ui.components.NTagStyle
@@ -61,6 +65,10 @@ fun PromptInspectorScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var tab by remember { mutableIntStateOf(0) }
+    var showWhitespace by remember { mutableStateOf(false) }
+    var addingStop by remember { mutableStateOf(false) }
+    var newStop by remember { mutableStateOf("") }
+    val clipboard = LocalClipboardManager.current
 
     LaunchedEffect(Unit) { viewModel.loadPromptInspector() }
 
@@ -113,9 +121,9 @@ fun PromptInspectorScreen(
                                         background = NocturneColors.Accent800,
                                         color = NocturneColors.Accent100,
                                     ),
-                                ) { append(token.text) }
+                                ) { append(token.text.marked(showWhitespace)) }
                             } else {
-                                append(token.text)
+                                append(token.text.marked(showWhitespace))
                             }
                         }
                     },
@@ -136,14 +144,18 @@ fun PromptInspectorScreen(
                                 )
                                 else -> SpanStyle(background = NocturneColors.Text.copy(alpha = 0.08f))
                             }
-                            withStyle(style) { append(token.text) }
+                            withStyle(style) { append(token.text.marked(showWhitespace)) }
                         }
                     },
                 )
 
                 else -> PromptBody(
                     buildAnnotatedString {
-                        append(prompt.template ?: "No chat template in the GGUF metadata; the runtime default applies.")
+                        append(
+                            (prompt.template
+                                ?: "No chat template in the GGUF metadata; the runtime default applies.")
+                                .marked(showWhitespace),
+                        )
                     },
                 )
             }
@@ -152,8 +164,30 @@ fun PromptInspectorScreen(
                 Modifier.fillMaxWidth().padding(top = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(7.dp),
             ) {
-                NButton("Copy", onClick = {}, modifier = Modifier.weight(1f))
-                NButton("Show whitespace", onClick = {}, modifier = Modifier.weight(1f))
+                NButton(
+                    "Copy",
+                    // The exact string, unmarked — a copy that pasted middle
+                    // dots for spaces would be useless for the one thing you
+                    // copy a prompt for, which is replaying it elsewhere.
+                    onClick = {
+                        clipboard.setText(
+                            androidx.compose.ui.text.AnnotatedString(
+                                if (tab == 2) {
+                                    prompt.template.orEmpty()
+                                } else {
+                                    prompt.tokens.joinToString("") { it.text }
+                                },
+                            ),
+                        )
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                NButton(
+                    if (showWhitespace) "Hide whitespace" else "Show whitespace",
+                    onClick = { showWhitespace = !showWhitespace },
+                    style = if (showWhitespace) NButtonStyle.Primary else NButtonStyle.Secondary,
+                    modifier = Modifier.weight(1f),
+                )
             }
 
             SectionKicker("Chat template", Modifier.padding(top = 20.dp, bottom = 8.dp))
@@ -176,7 +210,40 @@ fun PromptInspectorScreen(
             }
 
             SectionKicker("Stop sequences", Modifier.padding(top = 20.dp, bottom = 8.dp))
-            NChipRow(chips = prompt.stopSequences, onAdd = {})
+            NChipRow(
+                chips = prompt.stopSequences + state.userStopSequences,
+                onRemove = { index ->
+                    // Only the user's own are removable; the template's two are
+                    // what the model was trained to emit.
+                    val userIndex = index - prompt.stopSequences.size
+                    if (userIndex >= 0) viewModel.removeStopSequence(userIndex)
+                },
+                onAdd = { addingStop = true },
+            )
+            if (addingStop) {
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    NInput(
+                        value = newStop,
+                        onValueChange = { newStop = it },
+                        placeholder = "</s>",
+                        textStyle = NocturneType.MonoCode,
+                        modifier = Modifier.weight(1f),
+                        minHeight = 42.dp,
+                    )
+                    NButton(
+                        "Add",
+                        onClick = {
+                            if (newStop.isNotBlank()) viewModel.addStopSequence(newStop)
+                            newStop = ""
+                            addingStop = false
+                        },
+                        minHeight = 42.dp,
+                    )
+                }
+            }
             NHelp(
                 "${prompt.stopSequences.size} came from the template. Anything you add is yours and " +
                     "is kept per model.",
@@ -185,6 +252,14 @@ fun PromptInspectorScreen(
         }
     }
 }
+
+/**
+ * SPEC §4.4 — trailing spaces and stray newlines in a chat template are a
+ * classic cause of "the model behaves differently to llama-cli", and they are
+ * invisible until you make them visible.
+ */
+private fun String.marked(on: Boolean): String =
+    if (!on) this else replace(" ", "·").replace("\t", "→   ").replace("\n", "⏎\n")
 
 @Composable
 private fun PromptBody(text: androidx.compose.ui.text.AnnotatedString) {

@@ -18,9 +18,25 @@ android {
         versionCode = 1
         versionName = "0.1.0"
 
-        // SPEC 2.2 — one ABI. Adding armeabi-v7a doubles APK size for devices
-        // that could never load these models anyway.
-        ndk { abiFilters += "arm64-v8a" }
+        // SPEC 2.2 — arm64 is the only shipping ABI; armeabi-v7a would double
+        // the APK for devices that could never load these models anyway.
+        // x86_64 is here for the emulator, and is excluded from release below.
+        ndk { abiFilters += setOf("arm64-v8a", "x86_64") }
+
+        externalNativeBuild {
+            cmake {
+                // -DNDEBUG turns off ggml's assertions in the shipped build.
+                cppFlags += listOf("-std=c++17", "-fexceptions", "-frtti", "-O3", "-DNDEBUG")
+                arguments += listOf("-DANDROID_STL=c++_shared")
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     // SPEC 17.2 — two channels built from one source. `sideload` may self-update
@@ -48,6 +64,8 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // No emulator ships to users.
+            ndk { abiFilters.clear(); abiFilters += "arm64-v8a" }
         }
     }
 

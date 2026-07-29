@@ -181,13 +181,24 @@ fun NSeg(
     ) {
         options.forEachIndexed { i, label ->
             val selected = i == selectedIndex
+            // The selected ring has to follow the container's own corners at
+            // the two ends. Drawing it square meant the outer clip sliced its
+            // corners off, which reads as a chipped border rather than a
+            // deliberate shape — visible on every first- or last-segment
+            // selection, which is most of them.
+            val segmentShape = RoundedCornerShape(
+                topStart = if (i == 0) Radius.md else 0.dp,
+                bottomStart = if (i == 0) Radius.md else 0.dp,
+                topEnd = if (i == options.lastIndex) Radius.md else 0.dp,
+                bottomEnd = if (i == options.lastIndex) Radius.md else 0.dp,
+            )
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .then(
                         if (i > 0) Modifier.drawLeftDivider() else Modifier,
                     )
-                    .then(if (selected) Modifier.ring(NocturneColors.Accent, RoundedCornerShape(0.dp)) else Modifier)
+                    .then(if (selected) Modifier.ring(NocturneColors.Accent, segmentShape) else Modifier)
                     .selectable(selected = selected, onClick = { onSelect(i) })
                     .padding(horizontal = 12.dp, vertical = 7.dp),
                 contentAlignment = Alignment.Center,

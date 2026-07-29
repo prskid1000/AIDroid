@@ -1,0 +1,19 @@
+# Pinned upstream runtimes.
+#
+# SPEC §17.5: the runtime is pinned to a commit, not a branch, because the
+# parameter manifest and the architecture allowlist are generated from that
+# exact source. A floating dependency lets the manifest and the engine disagree
+# about what `sinceBuild` means, and the disagreement only shows up as a
+# parameter that silently does nothing.
+#
+# Bumping one of these is a four-step pipeline, in order:
+#   1. change the ref here
+#   2. tools/fetch-native.sh          — re-checkout
+#   3. tools/generate_runtimes.py     — regenerate the architecture allowlist
+#   4. ./gradlew :app:assembleSideloadDebug
+#
+# Format: <name> <url> <ref> <commit>
+
+llama.cpp             https://github.com/ggml-org/llama.cpp              b10175  60bccc3763395e01b039aa1ddeacc8cc0ea69f70
+whisper.cpp           https://github.com/ggml-org/whisper.cpp            v1.9.1  f049fff95a089aa9969deb009cdd4892b3e74916
+stable-diffusion.cpp  https://github.com/leejet/stable-diffusion.cpp     master  22516991cbdf725e69b0b4a87e52ca16cce07c2d

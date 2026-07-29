@@ -187,6 +187,16 @@ object NIcons {
     val Trash: ImageVector by lazy {
         icon(1.7f, stroked = listOf("M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"))
     }
+    /** A page with a folded corner — a document attachment. */
+    val File: ImageVector by lazy {
+        icon(1.7f, stroked = listOf("M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z", "M14 3v5h5"))
+    }
+
+    /** Sound wave — read aloud. */
+    val Waveform: ImageVector by lazy {
+        icon(1.8f, stroked = listOf("M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4"))
+    }
+
     val Brush: ImageVector by lazy { icon(1.7f, stroked = listOf("M15.5 4.5l4 4-9 9H6v-4.5")) }
     val Erase: ImageVector by lazy { icon(1.7f, stroked = listOf("M9 19H5l-1.5-4 11-11 4 4-11 11z", "M13 21h8")) }
 

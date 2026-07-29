@@ -1,5 +1,7 @@
 package ai.ondevice.ui.screens
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,57 +22,107 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ai.ondevice.core.Fmt
+import ai.ondevice.core.TranscriptFormat
 import ai.ondevice.ui.BottomDestinations
 import ai.ondevice.ui.components.NBottomBar
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NCard
 import ai.ondevice.ui.components.NCardMeta
+import ai.ondevice.ui.components.NEnumRow
 import ai.ondevice.ui.components.NHelp
+import ai.ondevice.ui.components.NInput
 import ai.ondevice.ui.components.NMetaText
 import ai.ondevice.ui.components.NPills
 import ai.ondevice.ui.components.NProgressBar
 import ai.ondevice.ui.components.NSlider
 import ai.ondevice.ui.components.NTag
 import ai.ondevice.ui.components.NTagStyle
+import ai.ondevice.ui.components.NTextArea
 import ai.ondevice.ui.components.PhoneScaffold
 import ai.ondevice.ui.components.RootToolbar
 import ai.ondevice.ui.components.SectionKicker
+import ai.ondevice.ui.components.nClickableFlat
 import ai.ondevice.ui.theme.NIcons
 import ai.ondevice.ui.theme.NocturneColors
 import ai.ondevice.ui.theme.NocturneType
 import ai.ondevice.ui.theme.Radius
+import ai.ondevice.ui.theme.ring
 import ai.ondevice.ui.theme.ruleBelow
+import ai.ondevice.ui.components.NSeg
+import ai.ondevice.ui.vm.SpeakSource
+import ai.ondevice.ui.vm.TranscribeSource
 import ai.ondevice.ui.vm.VoiceMode
 import ai.ondevice.ui.vm.VoiceViewModel
 
 /**
  * **S14 — Voice.**
  *
- * Live and file transcription (whisper.cpp, SPEC §6) plus the Kokoro read-aloud
- * panel (§7). The detail the canvas calls out is the confidence shading: a
- * partial transcript fades by per-token confidence, and the caption says
- * plainly that faded text may still change as the window slides. That is the
- * honest-refusal principle applied to a streaming decoder.
+ * Two tabs, and they are inverses of each other:
+ *
+ *  - **Transcribe** (whisper.cpp, SPEC §6) — audio in, text out. The audio
+ *    comes from the microphone or a file; both go through the same decoder and
+ *    produce the same timed, confidence-scored segments.
+ *  - **Speak** (SPEC §7) — text in, audio out. The text is typed or loaded from
+ *    a file; the audio is played aloud and can be saved as a WAV.
+ *
+ * The detail the canvas calls out is the confidence shading: a partial
+ * transcript fades by per-token confidence, and the caption says plainly that
+ * faded text may still change as the window slides. That is the honest-refusal
+ * principle applied to a streaming decoder — whisper genuinely re-decodes the
+ * window each pass, so earlier words really can change.
  */
 @Composable
 fun VoiceScreen(
     currentRoute: String?,
     onNavigate: (String) -> Unit,
+    onOpenAdvanced: () -> Unit,
     viewModel: VoiceViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    // Scripts are documents, so this is the document picker rather than the
+    // photo picker — the same choice the chat composer makes.
+    val scriptLauncher = rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri -> uri?.let(viewModel::loadScript) }
+    val pickScript = {
+        scriptLauncher.launch(arrayOf("text/*", "application/json", "application/pdf"))
+    }
+
+    val audioLauncher = rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri -> uri?.let(viewModel::transcribeFile) }
+    val pickAudio = { audioLauncher.launch(arrayOf("audio/*", "video/*")) }
+
+    var hasMicPermission by remember {
+        mutableStateOf(
+            context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED,
+        )
+    }
+    val micPermission = rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        hasMicPermission = granted
+        if (granted) viewModel.startRecording()
+    }
 
     PhoneScaffold(
         toolbar = {
@@ -85,13 +137,61 @@ fun VoiceScreen(
             options = VoiceMode.entries.map { it.label },
             selectedIndex = VoiceMode.entries.indexOf(state.mode),
             onSelect = { viewModel.setMode(VoiceMode.entries[it]) },
-            modifier = Modifier.padding(bottom = 10.dp),
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+
+        // The input source, one level down from the mode. Both tabs have the
+        // same two answers — live from the device, or from a file — so they
+        // read as the mirror image they are.
+        NSeg(
+            options = when (state.mode) {
+                VoiceMode.TRANSCRIBE -> TranscribeSource.entries.map { it.label }
+                VoiceMode.SPEAK -> SpeakSource.entries.map { it.label }
+            },
+            selectedIndex = when (state.mode) {
+                VoiceMode.TRANSCRIBE -> TranscribeSource.entries.indexOf(state.source)
+                VoiceMode.SPEAK -> SpeakSource.entries.indexOf(state.speakSource)
+            },
+            onSelect = { index ->
+                when (state.mode) {
+                    VoiceMode.TRANSCRIBE -> viewModel.setSource(TranscribeSource.entries[index])
+                    VoiceMode.SPEAK -> viewModel.setSpeakSource(SpeakSource.entries[index])
+                }
+            },
+            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
         )
 
         Column(Modifier.verticalScroll(rememberScrollState())) {
 
-            when (state.mode) {
-                VoiceMode.LIVE -> {
+            // §1.2 — a refusal names what went wrong and what to do about it.
+            state.error?.let { message ->
+                NCard(Modifier.padding(bottom = 10.dp), ring = NocturneColors.Neutral700) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            NIcons.TriangleAlert,
+                            contentDescription = null,
+                            tint = NocturneColors.Neutral300,
+                            modifier = Modifier.size(15.dp),
+                        )
+                        Text(message, style = NocturneType.CardTitleSm, modifier = Modifier.weight(1f))
+                    }
+                    state.errorHint?.let {
+                        Text(
+                            it,
+                            style = NocturneType.CardBody,
+                            color = NocturneColors.Text.copy(alpha = 0.8f),
+                        )
+                    }
+                }
+            }
+
+            when {
+                state.mode == VoiceMode.TRANSCRIBE &&
+                    state.source == TranscribeSource.MICROPHONE -> {
                     // The waveform: one bar per window slot, accent where the
                     // VAD says speech, neutral where it doesn't.
                     Row(
@@ -161,8 +261,21 @@ fun VoiceScreen(
                     )
 
                     NButton(
-                        if (state.recording) "Stop and keep" else "Start recording",
-                        onClick = { if (state.recording) viewModel.stopRecording() else viewModel.startRecording() },
+                        when {
+                            state.loading -> "Loading model…"
+                            state.recording -> "Stop and keep"
+                            else -> "Start recording"
+                        },
+                        onClick = {
+                            when {
+                                state.recording -> viewModel.stopRecording()
+                                // The permission is asked for at the moment it
+                                // is needed, with the reason on screen — not at
+                                // launch, before the user has any context.
+                                !hasMicPermission -> micPermission.launch(Manifest.permission.RECORD_AUDIO)
+                                else -> viewModel.startRecording()
+                            }
+                        },
                         style = NButtonStyle.Primary,
                         block = true,
                         minHeight = 48.dp,
@@ -170,48 +283,70 @@ fun VoiceScreen(
                     )
                 }
 
-                VoiceMode.FILE -> {
-                    NCard(gap = 8.dp) {
-                        Text("standup-2026-07-28.m4a", style = NocturneType.CardTitleSm)
-                        Text(
-                            "18:42 · 21.4 MB · shared from Recorder",
-                            style = NocturneType.MonoXs,
-                            color = NocturneColors.TextMuted,
+                state.mode == VoiceMode.TRANSCRIBE -> {
+                    if (state.segments.isEmpty()) {
+                        NHelp(
+                            "Pick an audio file and whisper.cpp transcribes it on this device. " +
+                                "Anything Android can decode works — m4a, mp3, wav, opus.",
+                            Modifier.padding(bottom = 10.dp),
                         )
-                        NProgressBar(fraction = state.fileProgress)
-                        NCardMeta(gap = 8.dp) {
+                    } else {
+                        NCard(gap = 8.dp) {
+                            Text(state.title, style = NocturneType.CardTitleSm)
                             Text(
-                                Fmt.percent(state.fileProgress),
-                                style = NocturneType.MonoSm,
-                                color = NocturneColors.Accent300,
+                                "${Fmt.duration(state.segments.maxOf { it.endMillis })} · " +
+                                    "${state.segments.size} segments",
+                                style = NocturneType.MonoXs,
+                                color = NocturneColors.TextMuted,
                             )
-                            NMetaText("·")
-                            NMetaText("13:51 of 18:42")
-                            Box(Modifier.weight(1f))
-                            NMetaText("4.1× realtime")
+                            NProgressBar(fraction = state.fileProgress)
+                            NCardMeta(gap = 8.dp) {
+                                Text(
+                                    Fmt.percent(state.fileProgress),
+                                    style = NocturneType.MonoSm,
+                                    color = NocturneColors.Accent300,
+                                )
+                                NMetaText("·")
+                                NMetaText(state.sttModel?.displayName ?: "no model")
+                                Box(Modifier.weight(1f))
+                                // Measured, not asserted (§8.2).
+                                NMetaText(String.format("%.1f× realtime", state.realtimeFactor))
+                            }
                         }
                     }
 
-                    SampleSegments.forEachIndexed { index, (timestamp, text) ->
+                    NButton(
+                        if (state.loading) "Transcribing…" else "Choose an audio file",
+                        onClick = pickAudio,
+                        style = NButtonStyle.Primary,
+                        block = true,
+                        minHeight = 46.dp,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+
+                    state.segments.forEachIndexed { index, segment ->
                         Row(
                             Modifier
                                 .fillMaxWidth()
                                 .ruleBelow()
                                 .padding(vertical = 10.dp)
-                                .alpha(if (index == SampleSegments.lastIndex) 0.5f else 1f),
+                                // Faded by the decoder's own confidence, not by
+                                // position — a late segment the model is sure of
+                                // reads at full strength.
+                                .alpha(0.35f + segment.confidence * 0.65f),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             Text(
-                                timestamp,
+                                timestamp(segment.startMillis),
                                 style = NocturneType.MonoTimestamp,
-                                color = if (index == SampleSegments.lastIndex) {
+                                color = if (segment.confidence < 0.7f) {
                                     NocturneColors.TextMuted
                                 } else {
                                     NocturneColors.Accent300
                                 },
                                 modifier = Modifier.width(52.dp),
                             )
-                            Text(text, style = NocturneType.Row, modifier = Modifier.weight(1f))
+                            Text(segment.text, style = NocturneType.Row, modifier = Modifier.weight(1f))
                         }
                     }
 
@@ -219,74 +354,310 @@ fun VoiceScreen(
                         Modifier.fillMaxWidth().padding(top = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        listOf("TXT", "SRT", "VTT", "JSON").forEach { format ->
+                        TranscriptFormat.entries.forEach { format ->
                             NButton(
-                                format,
-                                onClick = { },
+                                format.label,
+                                onClick = {
+                                    viewModel.export(format) { file ->
+                                        shareTranscript(context, file, format)
+                                    }
+                                },
                                 modifier = Modifier.weight(1f),
                                 minHeight = 42.dp,
                             )
                         }
                     }
                 }
-            }
 
-            // — Kokoro read-aloud (SPEC §7) —
-            SectionKicker("Read aloud · Kokoro", Modifier.padding(top = 20.dp, bottom = 8.dp))
-            NCard(gap = 9.dp) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(9.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(
-                        Modifier.size(30.dp).background(NocturneColors.Accent800, CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            NIcons.Play,
-                            contentDescription = "Preview voice",
-                            tint = NocturneColors.Accent100,
-                            modifier = Modifier.size(14.dp),
-                        )
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text(state.voice, style = NocturneType.CardTitleSm)
-                        Text(
-                            voiceDescription(state.voice, state.speed),
-                            style = NocturneType.Help,
-                            color = NocturneColors.TextMuted,
-                        )
-                    }
-                    NTag("blend", style = NTagStyle.Outline)
-                }
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("Speed", style = NocturneType.Row, modifier = Modifier.weight(1f))
-                    Text(
-                        String.format("%.2f×", state.speed),
-                        style = NocturneType.MonoValue,
-                        color = NocturneColors.Accent300,
-                    )
-                }
-                NSlider(
-                    value = state.speed,
-                    onValueChange = viewModel::setSpeed,
-                    valueRange = 0.5f..2f,
-                )
-                Text(
-                    "Playback starts on the first synthesised chunk, not after the whole passage. " +
-                        "54 voices, each with a preview.",
-                    style = NocturneType.CardBody,
-                    color = NocturneColors.Text.copy(alpha = 0.8f),
+                else -> SpeakPanel(
+                    state = state,
+                    viewModel = viewModel,
+                    onPickScript = pickScript,
+                    onShareAudio = { file -> shareAudio(context, file) },
+                    onOpenAdvanced = onOpenAdvanced,
                 )
             }
         }
     }
 }
+
+/**
+ * **Read aloud — SPEC §7.**
+ *
+ * A script, a voice, an expression, and a file at the end. The order is the
+ * order you work in, which is why this is a mode and not a card: choosing a
+ * voice for a passage you have not written yet is backwards.
+ *
+ * The engine in use is named at the top of the panel, always. The app will fall
+ * back to the system synthesiser when Kokoro is not installed — that is a
+ * feature, but it is not something to be quiet about.
+ */
+@Composable
+private fun SpeakPanel(
+    state: ai.ondevice.ui.vm.VoiceState,
+    viewModel: VoiceViewModel,
+    onPickScript: () -> Unit,
+    onShareAudio: (java.io.File) -> Unit,
+    onOpenAdvanced: () -> Unit,
+) {
+    // — which engine is actually speaking —
+    NCard(ring = if (state.kokoroAvailable) NocturneColors.Accent700 else NocturneColors.Divider) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                NIcons.Waveform,
+                contentDescription = null,
+                tint = NocturneColors.Accent300,
+                modifier = Modifier.size(16.dp),
+            )
+            Text(
+                if (state.kokoroAvailable) "Kokoro · on-device neural" else "System engine",
+                style = NocturneType.CardTitleSm,
+                modifier = Modifier.weight(1f),
+            )
+            NTag(
+                if (state.kokoroAvailable) "neural" else "fallback",
+                style = if (state.kokoroAvailable) NTagStyle.Accent else NTagStyle.Outline,
+            )
+        }
+        if (!state.kokoroAvailable) {
+            Text(
+                "Kokoro is not installed, so this uses Android's own synthesiser. It is a different " +
+                    "voice with different prosody — the app says so rather than passing it off as Kokoro.",
+                style = NocturneType.CardBody,
+                color = NocturneColors.Text.copy(alpha = 0.8f),
+            )
+        }
+    }
+
+    // — the script —
+    SectionKicker("Script", Modifier.padding(top = 18.dp, bottom = 8.dp))
+    if (state.speakSource == ai.ondevice.ui.vm.SpeakSource.FILE) {
+        NButton(
+            if (state.scriptSource != null) "Replace script file" else "Choose a script file",
+            onClick = onPickScript,
+            style = NButtonStyle.Primary,
+            block = true,
+            minHeight = 46.dp,
+        )
+        // The loaded text is still shown and still editable. A file you cannot
+        // correct a typo in before it is read aloud is a worse file.
+        if (state.script.isNotEmpty()) {
+            NTextArea(
+                value = state.script,
+                onValueChange = viewModel::setScript,
+                minHeight = 130.dp,
+                textStyle = NocturneType.Row,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+    } else {
+        NTextArea(
+            value = state.script,
+            onValueChange = viewModel::setScript,
+            placeholder = "Type or paste what should be read aloud.",
+            minHeight = 130.dp,
+            textStyle = NocturneType.Row,
+        )
+        NButton(
+            "Clear",
+            onClick = { viewModel.setScript("") },
+            block = true,
+            minHeight = 44.dp,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+    }
+    NHelp(
+        buildString {
+            state.scriptSource?.let { append("$it · ") }
+            append("${Fmt.grouped(state.script.length)} characters")
+            if (state.estimatedSeconds > 0) {
+                append(" · about ${Fmt.duration(state.estimatedSeconds * 1000L)} at ${
+                    String.format("%.2f", state.speed)
+                }×")
+            }
+        },
+        Modifier.padding(top = 6.dp),
+    )
+
+    // — the voice —
+    SectionKicker(
+        "Voice · ${state.voices.count { it.available }} available of ${state.voices.size}",
+        Modifier.padding(top = 20.dp, bottom = 8.dp),
+    )
+    NInput(
+        value = state.voiceQuery,
+        onValueChange = viewModel::setVoiceQuery,
+        placeholder = "Search by name or language",
+        minHeight = 40.dp,
+    )
+    Column(
+        Modifier.fillMaxWidth().padding(top = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        // Capped, with the count stated — a silent truncation would read as
+        // "these are all of them".
+        val shown = state.filteredVoices.take(VOICE_ROWS)
+        shown.forEach { voice ->
+            val selected = voice.id == state.voice
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(
+                        if (selected) NocturneColors.Accent900 else NocturneColors.Surface,
+                        Radius.Md,
+                    )
+                    .ring(if (selected) NocturneColors.Accent else NocturneColors.Divider, Radius.Md)
+                    .alpha(if (voice.available) 1f else 0.45f)
+                    .nClickableFlat { viewModel.selectVoice(voice.id) }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        voice.displayName,
+                        style = NocturneType.Row,
+                        color = if (selected) NocturneColors.Accent200 else NocturneColors.Text,
+                    )
+                    Text(
+                        voice.localeLabel,
+                        style = NocturneType.MonoXs,
+                        color = NocturneColors.TextMuted,
+                    )
+                }
+                if (!voice.available) {
+                    NTag("not installed", style = NTagStyle.Outline)
+                } else {
+                    NTag(voice.provider.label, style = NTagStyle.Neutral)
+                }
+            }
+        }
+        if (state.filteredVoices.size > shown.size) {
+            NHelp("${state.filteredVoices.size - shown.size} more — narrow the search to see them.")
+        }
+    }
+
+    // — expression —
+    SectionKicker("Expression", Modifier.padding(top = 20.dp, bottom = 8.dp))
+    NCard(gap = 4.dp) {
+        SpeakSlider("Speed", String.format("%.2f×", state.speed), state.speed, 0.5f..2f, viewModel::setSpeed)
+        SpeakSlider("Pitch", String.format("%.2f", state.pitch), state.pitch, 0.5f..2f, viewModel::setPitch)
+        SpeakSlider("Volume", Fmt.percent(state.volume), state.volume, 0f..1f, viewModel::setVolume)
+        Text(
+            "Speed and pitch are applied by the engine, not by resampling, so the voice does not " +
+                "turn chipmunk when you raise it.",
+            style = NocturneType.CardBody,
+            color = NocturneColors.Text.copy(alpha = 0.8f),
+        )
+    }
+
+    // — blend, Kokoro only —
+    if (state.kokoroAvailable) {
+        SectionKicker("Blend", Modifier.padding(top = 20.dp, bottom = 8.dp))
+        NCard(gap = 6.dp) {
+            Text("Mix a second voice", style = NocturneType.CardTitleSm)
+            NEnumRow(
+                options = state.voices.filter { it.provider == ai.ondevice.speech.SynthProvider.KOKORO }
+                    .take(12).map { it.id },
+                selected = state.blendVoice,
+                onSelect = { viewModel.setBlendVoice(if (it == state.blendVoice) null else it) },
+            )
+            if (state.blendVoice != null) {
+                SpeakSlider(
+                    "Mix",
+                    "${Fmt.percent(1f - state.blendRatio)} / ${Fmt.percent(state.blendRatio)}",
+                    state.blendRatio,
+                    0f..1f,
+                    viewModel::setBlendRatio,
+                )
+            }
+        }
+    }
+
+    state.speakError?.let { error ->
+        NCard(Modifier.padding(top = 14.dp), ring = NocturneColors.Neutral700) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    NIcons.TriangleAlert,
+                    contentDescription = null,
+                    tint = NocturneColors.Neutral300,
+                    modifier = Modifier.size(15.dp),
+                )
+                Text(error, style = NocturneType.CardBody, modifier = Modifier.weight(1f))
+            }
+        }
+    }
+
+    // — act —
+    NButton(
+        if (state.speaking) "Stop" else "Read aloud",
+        onClick = { if (state.speaking) viewModel.stopSpeaking() else viewModel.speak() },
+        style = if (state.speaking) NButtonStyle.Secondary else NButtonStyle.Primary,
+        block = true,
+        modifier = Modifier.padding(top = 16.dp),
+    )
+    Row(
+        Modifier.fillMaxWidth().padding(top = 7.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        NButton(
+            if (state.rendering) "Rendering…" else "Save as WAV",
+            onClick = { viewModel.exportAudio { } },
+            modifier = Modifier.weight(1f),
+            minHeight = 44.dp,
+        )
+        NButton(
+            "Send audio",
+            onClick = { viewModel.exportAudio(onShareAudio) },
+            modifier = Modifier.weight(1f),
+            minHeight = 44.dp,
+        )
+    }
+    state.lastAudioPath?.let {
+        NHelp(
+            "Saved to ${it.substringAfterLast('/')} in the transcripts folder — an ordinary file you " +
+                "can open in any player.",
+            Modifier.padding(top = 6.dp),
+        )
+    }
+
+    NButton(
+        "Advanced · phonemizer, split, sample rate",
+        onClick = onOpenAdvanced,
+        style = NButtonStyle.Secondary,
+        block = true,
+        modifier = Modifier.padding(top = 14.dp),
+    )
+}
+
+@Composable
+private fun SpeakSlider(
+    label: String,
+    display: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    onChange: (Float) -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = NocturneType.Row, modifier = Modifier.weight(1f))
+        Text(display, style = NocturneType.MonoValue, color = NocturneColors.Accent300)
+    }
+    NSlider(value = value, onValueChange = onChange, valueRange = range)
+}
+
+private const val VOICE_ROWS = 14
 
 /** Per-token confidence expressed as opacity — value, not hue. */
 private fun buildAnnotatedTranscript(
@@ -319,9 +690,46 @@ private fun voiceDescription(voice: String, speed: Float): String {
     return "$region · $gender · ${String.format("%.1f", speed)}×"
 }
 
-private val SampleSegments = listOf(
-    "00:12.4" to "Right, the Hexagon path is capped at three and a half gigs a session.",
-    "00:19.1" to "So anything bigger has to be layer-split, or we just fall back to OpenCL.",
-    "00:27.8" to "Falling back is fine as long as we say we fell back.",
-    "00:34.2" to "Yeah — and the number goes in the model sheet, not a toast.",
-)
+/** `MM:SS.d` — the canvas' segment clock. */
+private fun timestamp(millis: Long): String =
+    String.format("%02d:%02d.%d", millis / 60_000, (millis % 60_000) / 1000, (millis % 1000) / 100)
+
+/**
+ * The export leaves through the system share sheet rather than a bespoke
+ * "saved to…" toast: the file is already in a folder the user can open, and the
+ * chooser is how a transcript actually reaches a player or an editor.
+ */
+/** The "send audio" half of §7 — the rendered WAV, out through the share sheet. */
+private fun shareAudio(context: android.content.Context, file: java.io.File) {
+    val uri = androidx.core.content.FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.fileprovider",
+        file,
+    )
+    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "audio/wav"
+        putExtra(android.content.Intent.EXTRA_STREAM, uri)
+        putExtra(android.content.Intent.EXTRA_TITLE, file.name)
+        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(android.content.Intent.createChooser(intent, "Send audio"))
+}
+
+private fun shareTranscript(
+    context: android.content.Context,
+    file: java.io.File,
+    format: TranscriptFormat,
+) {
+    val uri = androidx.core.content.FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.fileprovider",
+        file,
+    )
+    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = format.mime
+        putExtra(android.content.Intent.EXTRA_STREAM, uri)
+        putExtra(android.content.Intent.EXTRA_TITLE, file.name)
+        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(android.content.Intent.createChooser(intent, "Export ${format.label}"))
+}

@@ -29,9 +29,18 @@ class OnDeviceApp : Application() {
 
     @Inject @ApplicationScope lateinit var scope: CoroutineScope
 
+    @Inject lateinit var downloader: ai.ondevice.data.download.Downloader
+
     override fun onCreate() {
         super.onCreate()
-        scope.launch { seed() }
+        scope.launch {
+            seed()
+            // A download interrupted by a crash, a force-stop or a reinstall
+            // leaves a row saying RUNNING with nothing behind it. §3.4 promises
+            // downloads survive the app being killed, so picking those up is
+            // part of keeping that promise rather than a nicety.
+            downloader.resumeInterrupted()
+        }
     }
 
     /**

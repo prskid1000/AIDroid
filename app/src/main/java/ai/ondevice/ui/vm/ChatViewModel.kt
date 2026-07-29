@@ -47,6 +47,8 @@ class ChatViewModel @Inject constructor(
     private val db: OnDeviceDatabase,
     private val engines: EngineManager,
     private val prefs: AppPrefs,
+    private val toolProviders: ai.ondevice.tools.ToolProviderFactory,
+    private val attachments: ai.ondevice.data.AttachmentStore,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ChatState())
@@ -56,6 +58,32 @@ class ChatViewModel @Inject constructor(
 
     init {
         viewModelScope.launch { restore() }
+
+        // The model list has to be live. Taking it once at construction meant a
+        // model that finished downloading while the chat screen existed never
+        // appeared in the picker — and since the picker only rendered when
+        // there was more than one model, the *first* model you ever installed
+        // was unreachable until the app was restarted.
+        viewModelScope.launch {
+            db.models().observeAll().collect { models ->
+                _state.value = _state.value.copy(
+                    availableModels = models.filter {
+                        it.modality == Modality.TEXT || it.modality == Modality.VISION
+                    },
+                )
+            }
+        }
+
+        // Likewise the engine's own view of what is loaded, so the sheet says
+        // "loaded" only when something actually is.
+        viewModelScope.launch {
+            engines.state.collect { engine ->
+                _state.value = _state.value.copy(
+                    loadedModelId = engine.loaded?.modelId,
+                    loadingModel = engine.loading,
+                )
+            }
+        }
     }
 
     private suspend fun restore() {
@@ -104,12 +132,90 @@ class ChatViewModel @Inject constructor(
         _state.value = _state.value.copy(input = value)
     }
 
-    fun attachImage(path: String) {
-        _state.value = _state.value.copy(pendingImages = _state.value.pendingImages + path)
+    /**
+     * Attach a file the user picked, and decide what it *is* before deciding
+     * what to do with it.
+     *
+     * The three kinds go three different ways, and conflating them is how these
+     * features usually break: an image is passed to the vision projector as an
+     * image; a document is read and its text enters the prompt as text, priced
+     * in tokens the user can see before sending; audio needs transcription,
+     * which needs a runtime that may not be installed, so it says so rather
+     * than attaching something the model will never receive.
+     */
+    fun attach(uri: android.net.Uri) {
+        viewModelScope.launch {
+            val attachment = attachments.copyIn(uri) ?: run {
+                _state.value = _state.value.copy(
+                    error = "That file could not be read.",
+                    errorSuggestion = "Pick it from a different app, or copy it into local storage first.",
+                )
+                return@launch
+            }
+
+            val pending = when (attachment.kind) {
+                ai.ondevice.data.AttachmentKind.IMAGE -> {
+                    if (_state.value.model?.modality != Modality.VISION) {
+                        // Attaching it anyway and letting the model ignore it
+                        // silently would be the worst of both worlds.
+                        _state.value = _state.value.copy(
+                            error = "${_state.value.model?.displayName ?: "This model"} has no vision projector, " +
+                                "so it cannot see images.",
+                            errorSuggestion = "Add a model with an mmproj companion, or describe the image in text.",
+                        )
+                        return@launch
+                    }
+                    PendingAttachment(
+                        path = attachment.path,
+                        name = attachment.displayName,
+                        kind = attachment.kind,
+                        tokenCost = IMAGE_TOKEN_COST,
+                    )
+                }
+
+                ai.ondevice.data.AttachmentKind.DOCUMENT -> {
+                    val extraction = attachments.extractText(attachment)
+                    if (extraction.text.isBlank()) {
+                        _state.value = _state.value.copy(
+                            error = extraction.error ?: "Nothing readable in ${attachment.displayName}.",
+                            errorSuggestion = null,
+                        )
+                        return@launch
+                    }
+                    PendingAttachment(
+                        path = attachment.path,
+                        name = attachment.displayName,
+                        kind = attachment.kind,
+                        text = extraction.text,
+                        // Counted by the real tokenizer when a model is loaded,
+                        // so the figure above the composer is the true cost.
+                        tokenCost = engines.llama?.tokenCount(extraction.text)
+                            ?: (extraction.text.length / 4),
+                        note = extraction.error,
+                    )
+                }
+
+                ai.ondevice.data.AttachmentKind.AUDIO -> {
+                    _state.value = _state.value.copy(
+                        error = "Audio has to be transcribed before it can enter a prompt, and the " +
+                            "whisper.cpp runtime is not installed.",
+                        errorSuggestion = "Settings → Runtimes installs it. Voice → File transcribes there.",
+                    )
+                    return@launch
+                }
+            }
+
+            _state.value = _state.value.copy(
+                pendingAttachments = _state.value.pendingAttachments + pending,
+                error = null,
+            )
+        }
     }
 
-    fun removeImage(path: String) {
-        _state.value = _state.value.copy(pendingImages = _state.value.pendingImages - path)
+    fun removeAttachment(path: String) {
+        _state.value = _state.value.copy(
+            pendingAttachments = _state.value.pendingAttachments.filterNot { it.path == path },
+        )
     }
 
     /** The parameter set actually in force: preset, then per-model overrides. */
@@ -121,16 +227,32 @@ class ChatViewModel @Inject constructor(
     }
 
     fun send() {
-        val text = _state.value.input.trim()
+        val typed = _state.value.input.trim()
         val conversation = _state.value.conversation ?: return
         val model = _state.value.model ?: run {
             _state.value = _state.value.copy(error = "Pick a model first — Models → Add.")
             return
         }
-        if (text.isEmpty() && _state.value.pendingImages.isEmpty()) return
+        val pending = _state.value.pendingAttachments
+        if (typed.isEmpty() && pending.isEmpty()) return
 
-        val images = _state.value.pendingImages
-        _state.value = _state.value.copy(input = "", pendingImages = emptyList(), error = null)
+        val images = pending.filter { it.kind == ai.ondevice.data.AttachmentKind.IMAGE }.map { it.path }
+
+        // A document's text becomes part of the message, fenced and named, so
+        // the conversation records what the model actually read — not a path
+        // that means nothing once the file moves.
+        val documents = pending.filter { it.kind == ai.ondevice.data.AttachmentKind.DOCUMENT }
+        val text = buildString {
+            documents.forEach { document ->
+                appendLine("--- ${document.name} ---")
+                appendLine(document.text)
+                appendLine("--- end of ${document.name} ---")
+                appendLine()
+            }
+            append(typed)
+        }.trim()
+
+        _state.value = _state.value.copy(input = "", pendingAttachments = emptyList(), error = null)
 
         generationJob = viewModelScope.launch {
             val params = effectiveParams()
@@ -173,16 +295,52 @@ class ChatViewModel @Inject constructor(
             engine.applyParams(params)
 
             InferenceService.holdWakeLock(context)
+            try {
+                runTurn(conversation, params, images, parentId = userMessage.id)
+            } finally {
+                InferenceService.releaseWakeLock(context)
+                db.conversations().touch(conversation.id, System.currentTimeMillis())
+                _state.value = _state.value.copy(generating = false, streaming = null)
+                refreshMessages()
+            }
+        }
+    }
 
+    /**
+     * One assistant turn, and the tool loop around it.
+     *
+     * A model that asks for a tool has not finished its turn: it has to see the
+     * result and speak again. So this generates, and if the reply is a tool
+     * call, runs it, writes the result into the conversation as a `tool`
+     * message, and generates once more — up to [MAX_TOOL_ROUNDS], because a
+     * model that loops on a failing tool would otherwise run the battery flat.
+     * The cap is surfaced in the conversation rather than silently applied.
+     */
+    private suspend fun runTurn(
+        conversation: ConversationEntity,
+        params: SparseParams,
+        images: List<String>,
+        parentId: String?,
+    ) {
+        val engine = engines.llama ?: return
+        val toolsEnabled = prefs.toolsEnabled.first()
+        val registry = if (toolsEnabled) toolProviders.registry() else null
+        val enabledIds = if (toolsEnabled) prefs.enabledToolProviders.first() else emptySet()
+        val tools = registry?.specs(enabledIds).orEmpty()
+
+        var round = 0
+        var lastParent = parentId
+
+        while (true) {
             val assistantId = UUID.randomUUID().toString()
-            val startedAt = System.currentTimeMillis()
-            var content = StringBuilder()
-            var thinking = StringBuilder()
+            val content = StringBuilder()
+            val thinking = StringBuilder()
             var thinkingMillis: Long? = null
             var thinkingTokens: Int? = null
             var tps = 0f
             var backend: BackendId? = null
             var promptTokens = 0
+            val toolCalls = mutableListOf<ai.ondevice.engine.ToolCallRequest>()
 
             _state.value = _state.value.copy(
                 generating = true,
@@ -196,6 +354,7 @@ class ChatViewModel @Inject constructor(
                         params = params,
                         systemPrompt = _state.value.systemPrompt.takeIf { it.isNotBlank() },
                         imagePaths = images,
+                        tools = tools,
                     ),
                 ).collect { event ->
                     when (event) {
@@ -229,6 +388,13 @@ class ChatViewModel @Inject constructor(
                                 streaming = _state.value.streaming?.copy(content = content.toString()),
                             )
                         }
+                        is GenerationEvent.ToolCall -> {
+                            toolCalls += ai.ondevice.engine.ToolCallRequest(
+                                name = event.name,
+                                argumentsJson = event.argumentsJson,
+                                id = event.id.ifBlank { UUID.randomUUID().toString().take(8) },
+                            )
+                        }
                         is GenerationEvent.Stats -> {
                             tps = event.tokensPerSecond
                             backend = event.backend
@@ -245,12 +411,10 @@ class ChatViewModel @Inject constructor(
                     }
                 }
             } finally {
-                InferenceService.releaseWakeLock(context)
-
-                // Persist whatever was generated, including on cancellation —
-                // a half-finished reply is still the user's, and it carries the
+                // Persist whatever was generated, including on cancellation — a
+                // half-finished reply is still the user's, and it carries the
                 // parameters it was produced under.
-                if (content.isNotEmpty() || thinking.isNotEmpty()) {
+                if (content.isNotEmpty() || thinking.isNotEmpty() || toolCalls.isNotEmpty()) {
                     db.messages().upsert(
                         MessageEntity(
                             id = assistantId,
@@ -261,23 +425,103 @@ class ChatViewModel @Inject constructor(
                             thinkingMillis = thinkingMillis,
                             thinkingTokens = thinkingTokens,
                             imagePathsJson = "{}",
-                            toolCallsJson = null,
+                            toolCallsJson = toolCalls.takeIf { it.isNotEmpty() }?.let(::encodeToolCalls),
                             tokenCount = promptTokens,
                             imageTokenCount = null,
                             generationParamsJson = params.toJsonString(),
                             tokensPerSecond = tps,
                             backend = backend,
                             createdAt = System.currentTimeMillis(),
-                            parentMessageId = userMessage.id,
+                            parentMessageId = lastParent,
                         ),
                     )
+                    lastParent = assistantId
                 }
-                db.conversations().touch(conversation.id, System.currentTimeMillis())
-                _state.value = _state.value.copy(generating = false, streaming = null)
                 refreshMessages()
             }
+
+            if (toolCalls.isEmpty() || registry == null) return
+
+            round++
+            if (round > MAX_TOOL_ROUNDS) {
+                db.messages().upsert(
+                    toolMessage(
+                        conversation.id,
+                        name = "system",
+                        callId = "",
+                        text = "Stopped after $MAX_TOOL_ROUNDS rounds of tool calls. " +
+                            "Ask again if the model should keep going.",
+                        parentId = lastParent,
+                    ),
+                )
+                refreshMessages()
+                return
+            }
+
+            // Run them in order. Sequential rather than parallel on purpose: a
+            // later call's arguments routinely depend on an earlier result, and
+            // the model wrote them expecting to be read in order.
+            for (call in toolCalls) {
+                _state.value = _state.value.copy(runningTool = call.name)
+                val result = registry.call(call.name, call.argumentsJson, enabledIds)
+                db.messages().upsert(
+                    toolMessage(
+                        conversation.id,
+                        name = call.name,
+                        callId = call.id,
+                        text = result.text,
+                        parentId = lastParent,
+                        isError = result.isError,
+                    ),
+                )
+                refreshMessages()
+            }
+            _state.value = _state.value.copy(runningTool = null)
         }
     }
+
+    private fun toolMessage(
+        conversationId: String,
+        name: String,
+        callId: String,
+        text: String,
+        parentId: String?,
+        isError: Boolean = false,
+    ) = MessageEntity(
+        id = UUID.randomUUID().toString(),
+        conversationId = conversationId,
+        role = MessageRole.TOOL_RESULT,
+        content = text,
+        thinking = null,
+        thinkingMillis = null,
+        thinkingTokens = null,
+        imagePathsJson = "{}",
+        toolCallsJson = SparseParams.of(
+            "tool_name" to name,
+            "tool_call_id" to callId,
+            "is_error" to isError,
+        ).toJsonString(),
+        tokenCount = null,
+        imageTokenCount = null,
+        generationParamsJson = "{}",
+        tokensPerSecond = null,
+        backend = null,
+        createdAt = System.currentTimeMillis(),
+        parentMessageId = parentId,
+    )
+
+    private fun encodeToolCalls(calls: List<ai.ondevice.engine.ToolCallRequest>): String =
+        kotlinx.serialization.json.buildJsonArray {
+            calls.forEach { call ->
+                add(
+                    kotlinx.serialization.json.buildJsonObject {
+                        put("name", kotlinx.serialization.json.JsonPrimitive(call.name))
+                        put("arguments", kotlinx.serialization.json.JsonPrimitive(call.argumentsJson))
+                        put("id", kotlinx.serialization.json.JsonPrimitive(call.id))
+                    },
+                )
+            }
+        }.toString()
 
     /** Cancellation unwinds the engine Flow, whose teardown frees native memory. */
     fun stop() {
@@ -373,6 +617,37 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    /**
+     * SPEC §4.4 — "anything you add is yours and is kept per model". The
+     * template's own stops come back from the engine every render, so the user's
+     * live in `stop`, the manifest's own key, and are merged for display rather
+     * than rewritten into the template.
+     */
+    fun addStopSequence(value: String) {
+        val updated = _state.value.userStopSequences + value
+        applyStopSequences(updated)
+    }
+
+    fun removeStopSequence(index: Int) {
+        val updated = _state.value.userStopSequences.toMutableList()
+        if (index !in updated.indices) return
+        updated.removeAt(index)
+        applyStopSequences(updated)
+    }
+
+    private fun applyStopSequences(values: List<String>) {
+        _state.value = _state.value.copy(userStopSequences = values)
+        setLiveParam("stop", values)
+        val modelId = _state.value.model?.id ?: return
+        viewModelScope.launch {
+            val stored = SparseParams.parse(db.models().get(modelId)?.paramOverridesJson)
+            db.models().setParamOverrides(
+                modelId,
+                stored.overlaidWith(SparseParams.of("stop" to values)).toJsonString(),
+            )
+        }
+    }
+
     fun dismissError() {
         _state.value = _state.value.copy(error = null, errorSuggestion = null)
     }
@@ -382,14 +657,55 @@ class ChatViewModel @Inject constructor(
         _state.value = _state.value.copy(messages = db.messages().getFor(conversation.id))
     }
 
-    private fun MessageEntity.toEngineMessage() = EngineMessage(
-        role = role.name.lowercase(),
-        content = content,
-        imagePaths = SparseParams.parse(imagePathsJson).stringList("images").orEmpty(),
-    )
+    private fun MessageEntity.toEngineMessage(): EngineMessage {
+        val meta = SparseParams.parse(toolCallsJson)
+        return EngineMessage(
+            // The wire roles the chat templates know are user/assistant/system/
+            // tool. Our storage enum is finer-grained than that, so the mapping
+            // is explicit rather than a lowercased name that happens to match.
+            role = when (role) {
+                MessageRole.USER -> "user"
+                MessageRole.SYSTEM -> "system"
+                MessageRole.TOOL_RESULT -> "tool"
+                MessageRole.ASSISTANT, MessageRole.TOOL_CALL -> "assistant"
+            },
+            content = content,
+            imagePaths = SparseParams.parse(imagePathsJson).stringList("images").orEmpty(),
+            // An assistant message that asked for tools has to go back to the
+            // template *as* tool calls, not as text — the template renders each
+            // family's syntax, and re-feeding our rendering of it would teach
+            // the model a format it does not use.
+            toolCalls = if (role == MessageRole.ASSISTANT) decodeToolCalls(toolCallsJson) else emptyList(),
+            toolCallId = meta.string("tool_call_id")?.takeIf { role == MessageRole.TOOL_RESULT },
+            toolName = meta.string("tool_name")?.takeIf { role == MessageRole.TOOL_RESULT },
+        )
+    }
+
+    private fun decodeToolCalls(raw: String?): List<ai.ondevice.engine.ToolCallRequest> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return runCatching {
+            kotlinx.serialization.json.Json.parseToJsonElement(raw)
+                .let { it as? kotlinx.serialization.json.JsonArray }
+                ?.map { element ->
+                    val obj = element as kotlinx.serialization.json.JsonObject
+                    ai.ondevice.engine.ToolCallRequest(
+                        name = (obj["name"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty(),
+                        argumentsJson = (obj["arguments"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty(),
+                        id = (obj["id"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty(),
+                    )
+                }
+                .orEmpty()
+        }.getOrDefault(emptyList())
+    }
 
     private companion object {
         const val IMAGE_TOKEN_COST = 1456
+
+        /**
+         * A model stuck on a failing tool would otherwise call it forever. The
+         * cap is deliberately visible in the conversation when it is reached.
+         */
+        const val MAX_TOOL_ROUNDS = 5
     }
 }
 
@@ -400,7 +716,7 @@ data class ChatState(
     val messages: List<MessageEntity> = emptyList(),
     val streaming: StreamingMessage? = null,
     val input: String = "",
-    val pendingImages: List<String> = emptyList(),
+    val pendingAttachments: List<PendingAttachment> = emptyList(),
     val generating: Boolean = false,
     val loadingModel: Boolean = false,
     val tokensPerSecond: Float = 0f,
@@ -414,6 +730,12 @@ data class ChatState(
     val liveOverrides: SparseParams = SparseParams.EMPTY,
     val expandedThinking: Set<String> = emptySet(),
     val renderedPrompt: RenderedPrompt? = null,
+    /** Added by hand on S10, kept per model — the template's own are separate. */
+    val userStopSequences: List<String> = emptyList(),
+    /** Non-null while a tool call is actually running, for the chat spinner. */
+    val runningTool: String? = null,
+    /** What the engine says is resident — not what the conversation prefers. */
+    val loadedModelId: String? = null,
     val error: String? = null,
     val errorSuggestion: String? = null,
 ) {
@@ -429,6 +751,23 @@ data class ChatState(
             ?: 8192
     val presetName: String? get() = presets.firstOrNull { it.id == selectedPresetId }?.name
 }
+
+/**
+ * A file the user attached but has not sent yet.
+ *
+ * It carries its own token cost because the composer states the price *before*
+ * the send — SPEC §4.5: an image or a document that quietly consumes half the
+ * context is the kind of surprise this app is supposed to prevent.
+ */
+data class PendingAttachment(
+    val path: String,
+    val name: String,
+    val kind: ai.ondevice.data.AttachmentKind,
+    val text: String = "",
+    val tokenCost: Int = 0,
+    /** e.g. "only the first 512 kB was read". */
+    val note: String? = null,
+)
 
 data class StreamingMessage(
     val id: String,

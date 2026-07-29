@@ -8,6 +8,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModelStoreOwner
 import ai.ondevice.ui.vm.ChatViewModel
+import ai.ondevice.ui.vm.ImageViewModel
 import ai.ondevice.ui.vm.ParamsViewModel
 
 /**
@@ -31,6 +32,17 @@ fun activityParamsViewModel(): ParamsViewModel =
  */
 @Composable
 fun activityChatViewModel(): ChatViewModel =
+    hiltViewModel(viewModelStoreOwner = LocalContext.current.findActivity())
+
+/**
+ * The image form, its mask and the gallery are one workflow. The mask editor
+ * paints on the source image the Image screen picked, and the gallery's "reuse
+ * parameters" has to repopulate that same form — both are separate destinations,
+ * so a nav-scoped instance would paint on nothing and repopulate a copy nobody
+ * sees.
+ */
+@Composable
+fun activityImageViewModel(): ImageViewModel =
     hiltViewModel(viewModelStoreOwner = LocalContext.current.findActivity())
 
 private fun Context.findActivity(): ViewModelStoreOwner {

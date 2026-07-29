@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ai.ondevice.core.Tier
+import ai.ondevice.engine.RuntimeRegistry
 import ai.ondevice.params.ParamRow
 import ai.ondevice.params.ParamType
 import ai.ondevice.ui.components.NButton
@@ -57,11 +58,15 @@ fun AllParametersScreen(
     onBack: () -> Unit,
     onOpenSamplerChain: () -> Unit,
     initialTier: Tier = Tier.BASIC,
+    initialRuntime: String = RuntimeRegistry.LLAMA,
     // Activity-scoped: the sampler-chain screen edits the same parameter set, so
     // the two must see one instance rather than each loading its own copy.
     viewModel: ParamsViewModel = activityParamsViewModel(),
 ) {
-    LaunchedEffect(initialTier) { viewModel.setTier(initialTier) }
+    // Order matters: the runtime swap reloads the spec list, so the tier has to
+    // be applied after it or the first recompute filters the old set.
+    LaunchedEffect(initialRuntime) { viewModel.setRuntime(initialRuntime) }
+    LaunchedEffect(initialRuntime, initialTier) { viewModel.setTier(initialTier) }
 
     val state by viewModel.state.collectAsStateWithLifecycle()
 

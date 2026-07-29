@@ -248,8 +248,16 @@ fun AddModelScreen(
                     }
                 }
 
+                // The footnote has to describe the runtime that is actually
+                // installed. Promising a GPU fast path on a build with no GPU
+                // backend compiled in is the assertion SPEC §8.2 forbids.
                 NHelp(
-                    "Q4_0 hits the Adreno OpenCL fast path on this device. Other quants fall back to CPU.",
+                    if (resolved.quants.any { it.speedClass == SpeedClass.OPENCL_FAST }) {
+                        "Q4_0 hits the Adreno OpenCL fast path on this device. Other quants fall back to CPU."
+                    } else {
+                        "This runtime build has no GPU backend, so every quant runs on CPU. Smaller " +
+                            "quants are faster here for that reason alone."
+                    },
                     Modifier.padding(top = 8.dp),
                 )
 

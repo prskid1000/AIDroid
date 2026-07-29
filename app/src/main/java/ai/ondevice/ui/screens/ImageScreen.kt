@@ -17,7 +17,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,9 +30,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.compose.AsyncImage
 import ai.ondevice.core.Fmt
 import ai.ondevice.ui.BottomDestinations
 import ai.ondevice.ui.components.NBottomBar
@@ -46,6 +54,7 @@ import ai.ondevice.ui.components.NSwitch
 import ai.ondevice.ui.components.NTextArea
 import ai.ondevice.ui.components.PhoneScaffold
 import ai.ondevice.ui.components.RootToolbar
+import ai.ondevice.ui.components.SectionKicker
 import ai.ondevice.ui.components.nClickableFlat
 import ai.ondevice.ui.theme.NIcons
 import ai.ondevice.ui.theme.NocturneColors
@@ -77,9 +86,16 @@ fun ImageScreen(
     onOpenGallery: () -> Unit,
     onOpenRuntimes: () -> Unit,
     onAddModel: () -> Unit,
-    viewModel: ImageViewModel = hiltViewModel(),
+    onOpenAdvanced: () -> Unit,
+    viewModel: ImageViewModel = activityImageViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val pickSource = rememberSourceImagePicker(viewModel::setSourceImage)
+    val pickControl = rememberSourceImagePicker(viewModel::setControlImage)
+
+    // The Advanced screen writes to the same diffusion model row, so pick up
+    // anything it changed on the way back rather than showing a stale form.
+    LaunchedEffect(Unit) { viewModel.refreshFromOverrides() }
 
     PhoneScaffold(
         toolbar = {
@@ -106,6 +122,33 @@ fun ImageScreen(
 
             TaesdPreview(state)
 
+            // §1.2 — a model that cannot run says why, in the runtime's own
+            // words, instead of leaving a blank frame.
+            state.error?.let { message ->
+                NCard(Modifier.padding(top = 10.dp), ring = NocturneColors.Neutral700) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            NIcons.TriangleAlert,
+                            contentDescription = null,
+                            tint = NocturneColors.Neutral300,
+                            modifier = Modifier.size(15.dp),
+                        )
+                        Text(message, style = NocturneType.CardTitleSm, modifier = Modifier.weight(1f))
+                    }
+                    state.errorHint?.let {
+                        Text(
+                            it,
+                            style = NocturneType.CardBody,
+                            color = NocturneColors.Text.copy(alpha = 0.8f),
+                        )
+                    }
+                }
+            }
+
             NButton(
                 text = state.actionLabel,
                 onClick = {
@@ -114,6 +157,7 @@ fun ImageScreen(
                         ImageAction.GENERATE -> viewModel.generate()
                         ImageAction.INSTALL_RUNTIME -> onOpenRuntimes()
                         ImageAction.ADD_MODEL -> onAddModel()
+                        ImageAction.PICK_SOURCE -> pickSource()
                     }
                 },
                 style = if (state.action == ImageAction.CANCEL) {
@@ -141,7 +185,45 @@ fun ImageScreen(
                 )
             }
 
-            // The key dial in img2img and inpaint, surfaced only in those modes.
+            // The source image. Optional in Generate — attaching one is what
+            // makes it img2img — and required by Inpaint and Extend.
+            SourceImageField(
+                label = if (state.requiresSource) "Source image" else "Source image · optional",
+                uri = state.sourceImageUri,
+                emptyLabel = if (state.requiresSource) {
+                    "Choose the image to edit"
+                } else {
+                    "Add a source image to transform one instead"
+                },
+                onPick = pickSource,
+                onClear = { viewModel.setSourceImage(null) },
+            )
+
+            // ControlNet's reference is a different input, not a second source:
+            // it contributes structure, never pixels.
+            SourceImageField(
+                label = "Control image · optional",
+                uri = state.controlImageUri,
+                emptyLabel = "Add a pose, depth or edge map to steer composition",
+                onPick = pickControl,
+                onClear = { viewModel.setControlImage(null) },
+            )
+            if (state.controlImageUri != null) {
+                LabeledSlider(
+                    label = "Control strength",
+                    value = state.controlStrength,
+                    display = String.format("%.2f", state.controlStrength),
+                    range = 0f..1f,
+                    onChange = viewModel::setControlStrength,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+
+            if (state.mode == ImageMode.OUTPAINT) {
+                ExtendField(state, viewModel)
+            }
+
+            // The key dial: only meaningful once there is something to denoise.
             if (state.showStrength) {
                 Column(
                     Modifier
@@ -272,9 +354,14 @@ fun ImageScreen(
                 }
             }
 
+            AttachmentsSection(state, viewModel)
+
+            // The same manifest renderer S8 uses, pointed at the sd.cpp block —
+            // schedule and clip_skip are Advanced there, SLG is Expert, and all
+            // 41 of them come from the manifest rather than this file.
             NButton(
                 "Advanced · schedule, clip_skip, SLG",
-                onClick = { },
+                onClick = onOpenAdvanced,
                 style = NButtonStyle.Secondary,
                 block = true,
                 modifier = Modifier.padding(top = 14.dp),
@@ -288,6 +375,266 @@ fun ImageScreen(
                 )
             }
         }
+    }
+}
+
+/**
+ * The system photo picker.
+ *
+ * `PickVisualMedia` is the right contract even at minSdk 31: where the platform
+ * picker exists it runs without any storage permission at all, and where it
+ * does not it falls back to `OPEN_DOCUMENT` on its own. Either way the app
+ * never asks for READ_MEDIA_IMAGES, which is the whole point — SPEC §13 says
+ * the app should hold no permission it can avoid.
+ */
+@Composable
+private fun rememberSourceImagePicker(onPicked: (String) -> Unit): () -> Unit {
+    val context = LocalContext.current
+    val launcher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        // The picker's grant dies with the process. Persisting it when the
+        // provider allows keeps a chosen source valid across a restart; when it
+        // does not, the URI still works for this session.
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        }
+        onPicked(uri.toString())
+    }
+    return {
+        launcher.launch(
+            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+        )
+    }
+}
+
+/**
+ * The img2img / inpaint source. SPEC §5.2 — the mode is meaningless without one,
+ * so it sits in the form above the dial that acts on it rather than being
+ * discovered at generate time.
+ */
+@Composable
+private fun SourceImageField(
+    label: String,
+    uri: String?,
+    emptyLabel: String,
+    onPick: () -> Unit,
+    onClear: () -> Unit,
+) {
+    NField(label, Modifier.padding(top = 12.dp)) {
+        if (uri == null) {
+            NButton(
+                emptyLabel,
+                onClick = onPick,
+                style = NButtonStyle.Secondary,
+                block = true,
+            )
+        } else {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                AsyncImage(
+                    model = uri,
+                    contentDescription = "Source image",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(Radius.Sm)
+                        .background(NocturneColors.Neutral900)
+                        .ring(NocturneColors.Divider, Radius.Sm),
+                )
+                Column(Modifier.weight(1f)) {
+                    Text("Picked", style = NocturneType.Row)
+                    Text(
+                        uri.substringAfterLast('/'),
+                        style = NocturneType.MonoXs,
+                        color = NocturneColors.TextMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Text(
+                    "Replace",
+                    style = NocturneType.Meta,
+                    color = NocturneColors.Accent,
+                    modifier = Modifier.nClickableFlat(onClick = onPick).padding(6.dp),
+                )
+                Text(
+                    "Remove",
+                    style = NocturneType.Meta,
+                    color = NocturneColors.TextMuted,
+                    modifier = Modifier.nClickableFlat(onClick = onClear).padding(6.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * LoRAs, ControlNets, IP-Adapters, VAEs — whatever is installed.
+ *
+ * There is no per-family logic here and there is not supposed to be. Each
+ * installed auxiliary declares a *role*, the role knows which manifest key
+ * carries its path, and the runtime decides whether the file is usable against
+ * the loaded base model. That is what makes this work for SD 1.5, SDXL, Flux
+ * and something released next month without an app update — the same bargain
+ * §1.5 strikes for parameters, one level up.
+ */
+@Composable
+private fun AttachmentsSection(
+    state: ImageState,
+    viewModel: ImageViewModel,
+) {
+    if (state.availableAttachments.isEmpty()) {
+        NHelp(
+            "No LoRAs or ControlNets installed. Add one on the Models screen and it appears here — " +
+                "the app pairs it with a role rather than a model family, so anything the runtime " +
+                "can load will work.",
+            Modifier.padding(top = 14.dp),
+        )
+        return
+    }
+
+    SectionKicker(
+        "Attachments · ${state.attachments.size} of ${state.availableAttachments.size} on",
+        Modifier.padding(top = 20.dp, bottom = 8.dp),
+    )
+
+    state.availableAttachments
+        .groupBy { it.role }
+        .forEach { (role, items) ->
+            NHelp(role.label, Modifier.padding(top = 4.dp, bottom = 4.dp))
+            items.forEach { attachment ->
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 6.dp)
+                        .background(
+                            if (attachment.enabled) NocturneColors.Accent900 else NocturneColors.Surface,
+                            Radius.Md,
+                        )
+                        .ring(
+                            if (attachment.enabled) NocturneColors.Accent else NocturneColors.Divider,
+                            Radius.Md,
+                        )
+                        .nClickableFlat { viewModel.toggleAttachment(attachment.modelId) }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            attachment.displayName,
+                            style = NocturneType.Row,
+                            color = if (attachment.enabled) NocturneColors.Accent200 else NocturneColors.Text,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            if (attachment.enabled) "on" else "off",
+                            style = NocturneType.Mono2Xs,
+                            color = if (attachment.enabled) NocturneColors.Accent else NocturneColors.TextMuted,
+                        )
+                    }
+                    // Only the roles the runtime actually weights get a dial.
+                    if (attachment.enabled && role.weighted) {
+                        LabeledSlider(
+                            label = "Weight",
+                            value = attachment.weight,
+                            display = String.format("%.2f", attachment.weight),
+                            range = 0f..2f,
+                            onChange = { viewModel.setAttachmentWeight(attachment.modelId, it) },
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
+                }
+            }
+        }
+}
+
+/**
+ * Outpainting margins.
+ *
+ * The mask is derived, not painted: the original is composited into a larger
+ * canvas and the new border is what gets filled. So the control the user needs
+ * is "how much further, on which edges" — and the output size is shown because
+ * an extend that quietly doubles the pixel count is the sort of thing that
+ * turns a 30-second run into a five-minute one.
+ */
+@Composable
+private fun ExtendField(
+    state: ImageState,
+    viewModel: ImageViewModel,
+) {
+    NField("Extend by", Modifier.padding(top = 12.dp)) {
+        val presets = listOf(0, 64, 128, 256)
+        NSeg(
+            options = presets.map { if (it == 0) "none" else "$it px" },
+            selectedIndex = presets.indexOfFirst { it == state.extendLeft }.coerceAtLeast(0),
+            onSelect = { viewModel.setExtendAll(presets[it]) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(
+            Modifier.fillMaxWidth().padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            EdgeStepper("L", state.extendLeft) { viewModel.setExtend(left = it) }
+            EdgeStepper("T", state.extendTop) { viewModel.setExtend(top = it) }
+            EdgeStepper("R", state.extendRight) { viewModel.setExtend(right = it) }
+            EdgeStepper("B", state.extendBottom) { viewModel.setExtend(bottom = it) }
+        }
+        NHelp(
+            if (state.extendLeft + state.extendTop + state.extendRight + state.extendBottom == 0) {
+                "Set a margin on at least one edge — there is nothing to fill otherwise."
+            } else {
+                "Output ${state.outputWidth} × ${state.outputHeight}. The original is kept and only " +
+                    "the new border is generated."
+            },
+            Modifier.padding(top = 6.dp),
+        )
+    }
+}
+
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.EdgeStepper(
+    label: String,
+    value: Int,
+    onChange: (Int) -> Unit,
+) {
+    Row(
+        Modifier
+            .weight(1f)
+            .ring(NocturneColors.Divider, Radius.Md)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = NocturneType.Mono2Xs, color = NocturneColors.TextMuted)
+        Text(
+            "−",
+            style = NocturneType.Row,
+            color = NocturneColors.Accent,
+            modifier = Modifier.nClickableFlat { onChange((value - 64).coerceAtLeast(0)) },
+        )
+        Text(
+            "$value",
+            style = NocturneType.MonoXs,
+            modifier = Modifier.weight(1f),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+        Text(
+            "+",
+            style = NocturneType.Row,
+            color = NocturneColors.Accent,
+            modifier = Modifier.nClickableFlat { onChange((value + 64).coerceAtMost(512)) },
+        )
     }
 }
 
@@ -307,10 +654,36 @@ private fun TaesdPreview(state: ImageState) {
             .ring(NocturneColors.Divider, Radius.Md),
         contentAlignment = Alignment.Center,
     ) {
+        // The real thing, in priority order: the decoded latent while sampling,
+        // then the finished image, then the source it will act on. Every one of
+        // these is actual pixels — SPEC §5.4's objection is to a spinner
+        // standing in for state the engine already has.
+        val preview = state.previewBitmap
+        val showingSource = preview == null && state.sourceImageUri != null
+        if (preview != null) {
+            androidx.compose.foundation.Image(
+                bitmap = preview.asImageBitmap(),
+                contentDescription = if (state.generating) "Live preview" else "Generated image",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else if (showingSource) {
+            AsyncImage(
+                model = state.sourceImageUri,
+                contentDescription = "Source image",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+
         // The latent field only blooms while sampling. Idle, it stays on the
         // neutral ramp — the readme forbids flooding a large area with a
         // saturated fill, and an idle preview has nothing to say anyway.
-        val bloom = if (state.generating) 1f else 0.12f
+        val bloom = when {
+            preview != null || showingSource -> 0f
+            state.generating -> 1f
+            else -> 0.12f
+        }
 
         androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
             drawRect(
@@ -339,15 +712,17 @@ private fun TaesdPreview(state: ImageState) {
             }
         }
 
-        Text(
-            if (state.generating) "TAESD preview" else "No preview yet",
-            style = NocturneType.MonoSm,
-            color = if (state.generating) {
-                NocturneColors.Accent200.copy(alpha = 0.9f)
-            } else {
-                NocturneColors.TextMuted
-            },
-        )
+        if (!showingSource && preview == null) {
+            Text(
+                if (state.generating) "warming up…" else "No preview yet",
+                style = NocturneType.MonoSm,
+                color = if (state.generating) {
+                    NocturneColors.Accent200.copy(alpha = 0.9f)
+                } else {
+                    NocturneColors.TextMuted
+                },
+            )
+        }
 
         if (state.generating) {
             Column(

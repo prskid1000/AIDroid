@@ -48,12 +48,19 @@ object Routes {
     const val RESOLVE_RESULTS = "models/resolve"
     const val MODEL_DETAIL = "models/detail/{modelId}"
     const val DOWNLOADS = "models/downloads"
-    const val ALL_PARAMETERS = "params/all?tier={tier}"
+    const val ALL_PARAMETERS = "params/all?tier={tier}&runtime={runtime}"
     const val SAMPLER_CHAIN = "params/samplers"
 
-    /** S7's two buttons land on the same screen at different tiers. */
-    fun parameters(tier: ai.ondevice.core.Tier = ai.ondevice.core.Tier.BASIC) =
-        "params/all?tier=${tier.name}"
+    /**
+     * S7's two buttons land on the same screen at different tiers, and S11's
+     * "Advanced" lands on it at a different *runtime* — the renderer is generic,
+     * so the route carries which manifest block to read rather than there being
+     * a second screen.
+     */
+    fun parameters(
+        tier: ai.ondevice.core.Tier = ai.ondevice.core.Tier.BASIC,
+        runtime: String = ai.ondevice.engine.RuntimeRegistry.LLAMA,
+    ) = "params/all?tier=${tier.name}&runtime=${android.net.Uri.encode(runtime)}"
     const val PROMPT_INSPECTOR = "chat/prompt"
     const val MASK_EDITOR = "image/mask"
     const val GALLERY = "image/gallery"
@@ -110,12 +117,28 @@ fun OnDeviceApp(
                 onOpenGallery = { navController.navigate(Routes.GALLERY) },
                 onOpenRuntimes = { navController.navigate(Routes.RUNTIMES) },
                 onAddModel = { navController.navigate(Routes.ADD_MODEL) },
+                onOpenAdvanced = {
+                    navController.navigate(
+                        Routes.parameters(
+                            tier = ai.ondevice.core.Tier.ADVANCED,
+                            runtime = ai.ondevice.engine.RuntimeRegistry.STABLE_DIFFUSION,
+                        ),
+                    )
+                },
             )
         }
         composable(Routes.VOICE) {
             VoiceScreen(
                 currentRoute = currentRoute,
                 onNavigate = { navController.navigateToRoot(it) },
+                onOpenAdvanced = {
+                    navController.navigate(
+                        Routes.parameters(
+                            tier = ai.ondevice.core.Tier.ADVANCED,
+                            runtime = ai.ondevice.engine.RuntimeRegistry.KOKORO,
+                        ),
+                    )
+                },
             )
         }
         composable(Routes.MODELS) {
@@ -167,6 +190,10 @@ fun OnDeviceApp(
                     type = NavType.StringType
                     defaultValue = ai.ondevice.core.Tier.BASIC.name
                 },
+                navArgument("runtime") {
+                    type = NavType.StringType
+                    defaultValue = ai.ondevice.engine.RuntimeRegistry.LLAMA
+                },
             ),
         ) { entry ->
             val tier = entry.arguments?.getString("tier")
@@ -176,6 +203,8 @@ fun OnDeviceApp(
                 onBack = { navController.popBackStack() },
                 onOpenSamplerChain = { navController.navigate(Routes.SAMPLER_CHAIN) },
                 initialTier = tier,
+                initialRuntime = entry.arguments?.getString("runtime")
+                    ?: ai.ondevice.engine.RuntimeRegistry.LLAMA,
             )
         }
         composable(Routes.SAMPLER_CHAIN) {

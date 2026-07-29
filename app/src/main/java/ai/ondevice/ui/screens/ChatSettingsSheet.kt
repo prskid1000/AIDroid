@@ -18,6 +18,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -100,11 +105,15 @@ fun ChatSettingsSheet(
                 ) {
                     // — model —
                     SectionKicker("Model", Modifier.padding(bottom = 8.dp))
+                    var modelsExpanded by remember { mutableStateOf(false) }
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .background(NocturneColors.Bg, Radius.Md)
                             .ring(NocturneColors.Accent700, Radius.Md)
+                            // The row *is* the control. It has always looked
+                            // like a dropdown; it now behaves like one.
+                            .nClickableFlat { modelsExpanded = !modelsExpanded }
                             .padding(horizontal = 12.dp, vertical = 11.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -117,18 +126,33 @@ fun ChatSettingsSheet(
                             Text(
                                 listOfNotNull(
                                     state.model?.quant,
-                                    if (state.model != null) "loaded" else null,
+                                    // Only claim "loaded" when the engine
+                                    // actually holds it. The conversation's
+                                    // preferred model is not the resident one.
+                                    when {
+                                        state.loadingModel -> "loading…"
+                                        state.model != null && state.loadedModelId == state.model.id -> "loaded"
+                                        state.model != null -> "not loaded"
+                                        else -> null
+                                    },
                                     state.tokensPerSecond.takeIf { it > 0 }?.let { Fmt.tokensPerSecond(it) },
                                 ).joinToString(" · "),
                                 style = NocturneType.MonoXs,
                                 color = NocturneColors.TextMuted,
                             )
                         }
+                        Text(
+                            "${state.availableModels.size}",
+                            style = NocturneType.MonoXs,
+                            color = NocturneColors.TextMuted,
+                        )
                         Icon(
                             NIcons.ChevronDown,
-                            contentDescription = null,
+                            contentDescription = if (modelsExpanded) "Collapse" else "Choose a model",
                             tint = NocturneColors.Text,
-                            modifier = Modifier.size(16.dp),
+                            modifier = Modifier
+                                .size(16.dp)
+                                .rotate(if (modelsExpanded) 180f else 0f),
                         )
                     }
                     NHelp(
@@ -136,18 +160,22 @@ fun ChatSettingsSheet(
                         Modifier.padding(top = 6.dp),
                     )
 
-                    if (state.availableModels.size > 1) {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                                .padding(top = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    if (modelsExpanded) {
+                        if (state.availableModels.isEmpty()) {
+                            NHelp(
+                                "No text models installed. Models → Add.",
+                                Modifier.padding(top = 8.dp),
+                            )
+                        }
+                        Column(
+                            Modifier.fillMaxWidth().padding(top = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(5.dp),
                         ) {
                             state.availableModels.forEach { model ->
                                 val selected = model.id == state.model?.id
-                                Box(
+                                Row(
                                     Modifier
+                                        .fillMaxWidth()
                                         .background(
                                             if (selected) NocturneColors.Accent900 else NocturneColors.Bg,
                                             Radius.Md,
@@ -156,13 +184,31 @@ fun ChatSettingsSheet(
                                             if (selected) NocturneColors.Accent else NocturneColors.Divider,
                                             Radius.Md,
                                         )
-                                        .nClickableFlat { onSelectModel(model) }
-                                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                                        .nClickableFlat {
+                                            onSelectModel(model)
+                                            modelsExpanded = false
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
                                 ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            model.displayName,
+                                            style = NocturneType.Row,
+                                            color = if (selected) NocturneColors.Accent200 else NocturneColors.Text,
+                                        )
+                                        Text(
+                                            listOfNotNull(model.quant, model.architecture)
+                                                .joinToString(" · "),
+                                            style = NocturneType.MonoXs,
+                                            color = NocturneColors.TextMuted,
+                                        )
+                                    }
                                     Text(
-                                        model.displayName,
-                                        style = NocturneType.Row,
-                                        color = if (selected) NocturneColors.Accent200 else NocturneColors.Text,
+                                        Fmt.bytes(model.sizeBytes),
+                                        style = NocturneType.MonoXs,
+                                        color = NocturneColors.TextMuted,
                                     )
                                 }
                             }

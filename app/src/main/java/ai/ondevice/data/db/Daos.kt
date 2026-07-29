@@ -87,6 +87,9 @@ interface PresetDao {
     @Query("SELECT * FROM presets WHERE id = :id")
     suspend fun get(id: String): PresetEntity?
 
+    @Query("SELECT * FROM presets ORDER BY rowid")
+    suspend fun getAll(): List<PresetEntity>
+
     @Query("SELECT COUNT(*) FROM presets")
     suspend fun count(): Int
 
@@ -108,6 +111,9 @@ interface PersonaDao {
     @Query("SELECT * FROM personas WHERE id = :id")
     suspend fun get(id: String): PersonaEntity?
 
+    @Query("SELECT * FROM personas ORDER BY rowid")
+    suspend fun getAll(): List<PersonaEntity>
+
     @Query("SELECT COUNT(*) FROM personas")
     suspend fun count(): Int
 
@@ -118,6 +124,24 @@ interface PersonaDao {
     suspend fun insertAll(personas: List<PersonaEntity>)
 
     @Query("DELETE FROM personas WHERE id = :id")
+    suspend fun deleteById(id: String)
+}
+
+@Dao
+interface McpServerDao {
+    @Query("SELECT * FROM mcp_servers ORDER BY createdAt")
+    fun observeAll(): Flow<List<McpServerEntity>>
+
+    @Query("SELECT * FROM mcp_servers ORDER BY createdAt")
+    suspend fun getAll(): List<McpServerEntity>
+
+    @Query("SELECT * FROM mcp_servers WHERE id = :id")
+    suspend fun get(id: String): McpServerEntity?
+
+    @Upsert
+    suspend fun upsert(server: McpServerEntity)
+
+    @Query("DELETE FROM mcp_servers WHERE id = :id")
     suspend fun deleteById(id: String)
 }
 
@@ -134,6 +158,9 @@ interface ConversationDao {
 
     @Query("SELECT * FROM conversations ORDER BY updatedAt DESC LIMIT 1")
     suspend fun mostRecent(): ConversationEntity?
+
+    @Query("SELECT * FROM conversations ORDER BY updatedAt DESC")
+    suspend fun getAll(): List<ConversationEntity>
 
     @Upsert
     suspend fun upsert(conversation: ConversationEntity)
@@ -221,6 +248,21 @@ interface DownloadDao {
 
     @Query("SELECT COUNT(*) FROM download_jobs WHERE state IN ('QUEUED','RUNNING','VERIFYING')")
     fun observeActiveCount(): Flow<Int>
+
+    /**
+     * Jobs that believe they are in flight.
+     *
+     * Spelled with literals rather than a bound `IN (:states)` list: binding a
+     * list of enums through the type converter silently matched nothing here,
+     * and a resume query that quietly returns zero rows is indistinguishable
+     * from "there was nothing to resume" — which is exactly the failure it
+     * exists to prevent.
+     */
+    @Query("SELECT * FROM download_jobs WHERE state IN ('QUEUED','RUNNING','VERIFYING') ORDER BY createdAt")
+    suspend fun getActive(): List<DownloadJobEntity>
+
+    @Query("SELECT * FROM download_jobs WHERE state IN ('QUEUED','RUNNING','PAUSED','VERIFYING') ORDER BY createdAt")
+    suspend fun getUnfinished(): List<DownloadJobEntity>
 }
 
 @Dao

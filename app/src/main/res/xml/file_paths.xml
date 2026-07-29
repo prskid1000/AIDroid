@@ -5,5 +5,7 @@
     <external-files-path name="models" path="models/" />
     <external-files-path name="gallery" path="gallery/" />
     <external-files-path name="transcripts" path="transcripts/" />
+    <external-files-path name="attachments" path="attachments/" />
+    <external-files-path name="exports" path="exports/" />
     <cache-path name="downloads" path="downloads/" />
 </paths>

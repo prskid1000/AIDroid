@@ -43,6 +43,8 @@ import ai.ondevice.ui.components.nClickableFlat
 import ai.ondevice.ui.theme.NIcons
 import ai.ondevice.ui.theme.NocturneColors
 import ai.ondevice.ui.theme.NocturneType
+import ai.ondevice.ui.theme.Radius
+import ai.ondevice.ui.theme.ring
 import ai.ondevice.ui.vm.ModelsViewModel
 
 /**
@@ -90,6 +92,40 @@ fun ModelsScreen(
         )
 
         Column(Modifier.verticalScroll(rememberScrollState())) {
+
+            // The download queue, always reachable. A job that failed its
+            // checksum has a real remedy behind this row, and hiding the way
+            // to it turns a recoverable error into a dead end.
+            if (state.hasDownloadNews) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 10.dp)
+                        .background(NocturneColors.Surface, Radius.Md)
+                        .ring(
+                            if (state.failedDownloads > 0) NocturneColors.Neutral700 else NocturneColors.Accent700,
+                            Radius.Md,
+                        )
+                        .nClickableFlat(onClick = onOpenDownloads)
+                        .padding(horizontal = 12.dp, vertical = 11.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Downloads", style = NocturneType.Row)
+                        Text(
+                            state.downloadSummary,
+                            style = NocturneType.MonoXs,
+                            color = if (state.failedDownloads > 0) {
+                                NocturneColors.Neutral300
+                            } else {
+                                NocturneColors.Accent300
+                            },
+                        )
+                    }
+                    Text("→", style = NocturneType.Row, color = NocturneColors.Accent)
+                }
+            }
 
             // Disk usage grouped by modality (SPEC §3.5).
             val textBytes = state.byModality.filterKeys {

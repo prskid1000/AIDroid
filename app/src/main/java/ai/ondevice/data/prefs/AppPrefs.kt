@@ -41,6 +41,8 @@ class AppPrefs(private val context: Context) {
         val preloadPinned = booleanPreferencesKey("preload_pinned")
         val blockPickle = booleanPreferencesKey("block_pickle")
         val lastConversationId = stringPreferencesKey("last_conversation_id")
+        val toolsEnabled = booleanPreferencesKey("tools_enabled")
+        val enabledToolProviders = androidx.datastore.preferences.core.stringSetPreferencesKey("enabled_tool_providers")
     }
 
     /** "auto" means benchmark-driven selection (SPEC §8.1). */
@@ -78,6 +80,21 @@ class AppPrefs(private val context: Context) {
 
     val lastConversationId: Flow<String?> = context.dataStore.data.map { it[Keys.lastConversationId] }
 
+    /**
+     * Tool use is off until asked for. A model that is never told tools exist
+     * cannot call one, and that is the safe default when some of them reach a
+     * third-party server.
+     */
+    val toolsEnabled: Flow<Boolean> = context.dataStore.data.map { it[Keys.toolsEnabled] ?: false }
+
+    /**
+     * Which providers are offered. The built-in set is pre-selected because it
+     * touches nothing but this device; an MCP server has to be ticked by hand.
+     */
+    val enabledToolProviders: Flow<Set<String>> = context.dataStore.data.map {
+        it[Keys.enabledToolProviders] ?: setOf(ai.ondevice.tools.BuiltInToolProvider.ID)
+    }
+
     suspend fun setBackendMode(v: String) = edit { it[Keys.backendMode] = v }
     suspend fun setThreadCount(v: Int) = edit { it[Keys.threadCount] = v }
     suspend fun setThermalPolicy(v: ThermalPolicy) = edit { it[Keys.thermalPolicy] = v.name }
@@ -94,6 +111,8 @@ class AppPrefs(private val context: Context) {
     suspend fun setManifestLastChecked(v: Long) = edit { it[Keys.manifestLastChecked] = v }
     suspend fun setPreloadPinned(v: Boolean) = edit { it[Keys.preloadPinned] = v }
     suspend fun setBlockPickle(v: Boolean) = edit { it[Keys.blockPickle] = v }
+    suspend fun setToolsEnabled(v: Boolean) = edit { it[Keys.toolsEnabled] = v }
+    suspend fun setEnabledToolProviders(v: Set<String>) = edit { it[Keys.enabledToolProviders] = v }
     suspend fun setLastConversationId(v: String?) =
         edit { p -> if (v == null) p.remove(Keys.lastConversationId) else p[Keys.lastConversationId] = v }
 

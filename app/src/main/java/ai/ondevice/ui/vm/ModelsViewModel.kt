@@ -44,7 +44,8 @@ class ModelsViewModel @Inject constructor(
         filter,
         orphans,
         engines.state,
-    ) { models, query, orphanReport, engineState ->
+        db.downloads().observeAll(),
+    ) { models, query, orphanReport, engineState, jobs ->
         val filtered = if (query.isBlank()) {
             models
         } else {
@@ -63,6 +64,17 @@ class ModelsViewModel @Inject constructor(
             freeStorageBytes = capabilities.freeStorageBytes,
             byModality = models.groupBy { it.modality }.mapValues { (_, v) -> v.sumOf { it.sizeBytes } },
             orphans = orphanReport,
+            // A download that failed used to be invisible from here: the queue
+            // was only reachable from the orphan card, which is not shown when
+            // there are no orphans. A failed install with no way back to it is
+            // the opposite of §1.2's "say what went wrong and offer the remedy".
+            activeDownloads = jobs.count {
+                it.state == ai.ondevice.core.DownloadState.RUNNING ||
+                    it.state == ai.ondevice.core.DownloadState.QUEUED ||
+                    it.state == ai.ondevice.core.DownloadState.VERIFYING
+            },
+            pausedDownloads = jobs.count { it.state == ai.ondevice.core.DownloadState.PAUSED },
+            failedDownloads = jobs.count { it.state == ai.ondevice.core.DownloadState.FAILED },
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ModelsState())
 
@@ -117,7 +129,20 @@ data class ModelsState(
     val freeStorageBytes: Long = 0,
     val byModality: Map<Modality, Long> = emptyMap(),
     val orphans: OrphanReport? = null,
-)
+    val activeDownloads: Int = 0,
+    val pausedDownloads: Int = 0,
+    val failedDownloads: Int = 0,
+) {
+    val hasDownloadNews: Boolean get() = activeDownloads + pausedDownloads + failedDownloads > 0
+
+    /** What the Downloads row says, in the order that matters most. */
+    val downloadSummary: String
+        get() = buildList {
+            if (activeDownloads > 0) add("$activeDownloads in progress")
+            if (pausedDownloads > 0) add("$pausedDownloads paused")
+            if (failedDownloads > 0) add("$failedDownloads failed")
+        }.joinToString(" · ").ifBlank { "Nothing queued" }
+}
 
 data class ModelGroup(val modality: Modality, val models: List<ModelEntity>)
 
@@ -129,6 +154,7 @@ class ModelDetailViewModel @Inject constructor(
     private val benchmarker: Benchmarker,
     private val storage: ModelStorage,
     private val capabilities: DeviceCapabilities,
+    private val registry: ai.ondevice.engine.RuntimeRegistry,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ModelDetailState())
@@ -182,7 +208,7 @@ class ModelDetailViewModel @Inject constructor(
             storageReserveBytes = 1_000_000_000L,
             archSupported = true,
             hasRuntimeForFormat = true,
-            speedClass = CompatibilityGate.speedClassFor(model.quant),
+            speedClass = CompatibilityGate.speedClassFor(model.quant, registry.hasOpenClBackend),
         )
         _state.value = _state.value.copy(estimate = estimate, verdict = verdict)
     }

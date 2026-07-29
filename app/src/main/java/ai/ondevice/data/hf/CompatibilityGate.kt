@@ -116,13 +116,21 @@ object CompatibilityGate {
     }
 
     /**
-     * Q4_0 is the only quant with an Adreno OpenCL kernel on this hardware, so
-     * everything else falls back to CPU. The canvas states this verbatim under
-     * the variant list: "Q4_0 hits the Adreno OpenCL fast path on this device.
-     * Other quants fall back to CPU."
+     * Q4_0 is the only quant with an Adreno OpenCL kernel, so everything else
+     * falls back to CPU — *when there is an OpenCL backend at all*.
+     *
+     * That second clause is not a detail. The quant list is the screen where
+     * the app tells the user which file will be fast on their handset, and a
+     * build with no OpenCL backend compiled in that still prints "Adreno fast
+     * path" is making a performance promise it cannot keep. SPEC §8.2 is about
+     * exactly this: do not assert backend performance, report it. So the caller
+     * passes what the runtime *actually registered*, read back from ggml.
      */
-    fun speedClassFor(quant: String?): SpeedClass =
-        if (quant?.uppercase()?.contains("Q4_0") == true) SpeedClass.OPENCL_FAST else SpeedClass.CPU_PATH
+    fun speedClassFor(quant: String?, openClAvailable: Boolean): SpeedClass = when {
+        !openClAvailable -> SpeedClass.CPU_PATH
+        quant?.uppercase()?.contains("Q4_0") == true -> SpeedClass.OPENCL_FAST
+        else -> SpeedClass.CPU_PATH
+    }
 
     /** "fits, but headroom drops under 1 GB" is a warning, not a pass. */
     private const val TIGHT_HEADROOM_BYTES = 1_000_000_000L
@@ -150,11 +158,26 @@ data class FitEstimate(
     fun headroomBytes(availableRam: Long): Long = availableRam - totalBytes
 
     /** "≈ 5.20 GB at 8K context". */
-    fun summary(): String = "≈ ${Fmt.gb(totalBytes)} GB at ${Fmt.contextLabel(contextTokens)} context"
+    /**
+     * A KV cache is a property of autoregressive attention over a context. A
+     * diffusion model has neither, so quoting "at 8K context · KV 0.39" for one
+     * is not a rounding error — it is a number the user could act on that means
+     * nothing. Where there is no context, the summary says so instead.
+     */
+    val hasContext: Boolean get() = contextTokens > 0 && kvCacheBytes > 0
+
+    fun summary(): String = if (hasContext) {
+        "≈ ${Fmt.gb(totalBytes)} GB at ${Fmt.contextLabel(contextTokens)} context"
+    } else {
+        "≈ ${Fmt.gb(totalBytes)} GB resident"
+    }
 
     /** "model 2.50 + KV 0.60 + compute 0.25" — the S1 one-liner. */
-    fun shortWorking(): String =
+    fun shortWorking(): String = if (hasContext) {
         "model ${Fmt.gb(weightsBytes)}   +   KV ${Fmt.gb(kvCacheBytes)}   +   compute ${Fmt.gb(computeBufferBytes)}"
+    } else {
+        "weights ${Fmt.gb(weightsBytes)}   +   working set ${Fmt.gb(computeBufferBytes)}"
+    }
 
     /**
      * The three-line breakdown S2 prints, with the KV line showing the actual

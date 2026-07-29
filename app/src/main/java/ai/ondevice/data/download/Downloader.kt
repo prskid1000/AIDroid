@@ -71,6 +71,27 @@ class Downloader(
         activeJobs[jobId] = scope.launch(Dispatchers.IO) { runJob(jobId) }
     }
 
+    /**
+     * Pick up jobs whose process died mid-flight.
+     *
+     * SPEC §3.4 promises a download survives the app being killed, and the
+     * foreground service covers the ordinary cases — but a crash, a force-stop
+     * or a reinstall leaves a row saying RUNNING with nothing running. Without
+     * this the job sits at 87% forever and the promise is false. Restarting is
+     * cheap because the `.part` is still there and the Range request resumes
+     * from its length; if the file went too, it starts over rather than
+     * trusting a byte count nothing backs up.
+     */
+    suspend fun resumeInterrupted() {
+        val stalled = db.downloads().getActive()
+        android.util.Log.i(TAG, "resumeInterrupted: ${stalled.size} stalled job(s)")
+        stalled.forEach { entity ->
+            if (activeJobs[entity.id]?.isActive == true) return@forEach
+            android.util.Log.i(TAG, "resuming ${entity.displayName} at ${entity.bytesDone}/${entity.bytesTotal}")
+            start(entity.id)
+        }
+    }
+
     fun pause(jobId: String) {
         activeJobs.remove(jobId)?.cancel()
         scope.launch {
@@ -96,6 +117,7 @@ class Downloader(
     private suspend fun runJob(jobId: String) {
         var entity = db.downloads().get(jobId) ?: return
         var job = entity.toJob()
+        android.util.Log.i(TAG, "runJob ${job.displayName} wifiOnly=${job.wifiOnly} unmetered=${isUnmetered()}")
 
         if (job.wifiOnly && !isUnmetered()) {
             update(entity.copy(state = DownloadState.PAUSED, error = "Waiting for Wi-Fi", updatedAt = now()))
@@ -128,7 +150,16 @@ class Downloader(
                 }.onFailure { throwable ->
                     lastError = classify(throwable)
                     attempt++
-                    if (attempt <= maxRetries && lastError?.kind == DownloadErrorKind.NETWORK_LOST) {
+                    // A checksum failure after a *resume* is far more often a
+                    // bad resume than a bad file on the server, and the partial
+                    // has already been deleted — so one clean attempt from zero
+                    // is worth making before telling the user the repo is
+                    // wrong. A second failure is reported as-is.
+                    if (attempt == 1 && lastError?.kind == DownloadErrorKind.CHECKSUM_MISMATCH) {
+                        android.util.Log.w(TAG, "${file.filename}: checksum failed, retrying from zero")
+                        files[index] = files[index].copy(bytesDone = 0)
+                        persistProgress(jobId, files)
+                    } else if (attempt <= maxRetries && lastError?.kind == DownloadErrorKind.NETWORK_LOST) {
                         // Exponential backoff, capped so a long outage doesn't
                         // turn into a busy loop.
                         kotlinx.coroutines.delay(min(30_000L, (2.0.pow(attempt) * 1000).toLong()))
@@ -206,12 +237,30 @@ class Downloader(
                     throw java.io.IOException("HTTP ${response.code}")
                 }
                 val body = response.body ?: throw java.io.IOException("Empty body")
-                val total = if (startAt > 0) startAt + body.contentLength() else body.contentLength()
+
+                // A Range request that comes back 200 instead of 206 is the
+                // whole file, not the tail. Writing it at the resume offset
+                // produces a file of the right *length* whose middle is
+                // garbage — which then fails the sha256 check with no clue why.
+                // A redirect or a proxy can drop the header, so this is checked
+                // rather than assumed.
+                val resumed = startAt > 0 && response.code == 206
+                val writeFrom = if (resumed) startAt else 0L
+                if (startAt > 0 && !resumed) {
+                    android.util.Log.w(
+                        TAG,
+                        "${file.filename}: server ignored Range (HTTP ${response.code}), restarting from 0",
+                    )
+                    partFile.delete()
+                }
+
+                val total = if (resumed) startAt + body.contentLength() else body.contentLength()
 
                 RandomAccessFile(partFile, "rw").use { out ->
-                    out.seek(startAt)
+                    out.setLength(writeFrom)
+                    out.seek(writeFrom)
                     val buffer = ByteArray(BUFFER_BYTES)
-                    var done = startAt
+                    var done = writeFrom
                     var lastPersist = System.currentTimeMillis()
                     var windowBytes = 0L
                     var windowStart = lastPersist
@@ -310,9 +359,12 @@ class Downloader(
      * job row, and job rows whose files have vanished.
      */
     suspend fun sweepOrphans(modelsDir: File): List<File> = withContext(Dispatchers.IO) {
-        val known = db.downloads().getByState(
-            listOf(DownloadState.QUEUED, DownloadState.RUNNING, DownloadState.PAUSED, DownloadState.VERIFYING),
-        ).flatMap { it.toJob().files.map { f -> f.destPath + PART_SUFFIX } }.toSet()
+        // Same literal-query reason as the resume above: a bound enum list
+        // matched nothing, which would have made this sweep delete the partial
+        // file of every *live* download it was supposed to protect.
+        val known = db.downloads().getUnfinished()
+            .flatMap { it.toJob().files.map { f -> f.destPath + PART_SUFFIX } }
+            .toSet()
 
         modelsDir.walkTopDown()
             .filter { it.isFile && it.name.endsWith(PART_SUFFIX) && it.absolutePath !in known }
@@ -339,6 +391,7 @@ class Downloader(
         java.io.IOException("sha256 mismatch")
 
     companion object {
+        private const val TAG = "ondevice.download"
         const val PART_SUFFIX = ".part"
         private const val BUFFER_BYTES = 64 * 1024
         private const val PERSIST_INTERVAL_MS = 750L

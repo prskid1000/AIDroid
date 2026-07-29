@@ -55,7 +55,14 @@ class EngineManager(
     private fun engineFor(runtimeId: String): InferenceEngine? {
         val descriptor = registry.descriptor(runtimeId)?.takeIf { it.installed } ?: return null
         if (!registry.contractSatisfied(descriptor)) return null
-        return engines.getOrPut(runtimeId) { FakeLlamaEngine(descriptor) }
+        return engines.getOrPut(runtimeId) {
+            when (runtimeId) {
+                RuntimeRegistry.LLAMA -> LlamaEngine(descriptor)
+                // The remaining runtimes are not text engines and are driven
+                // through their own managers; nothing asks this for them.
+                else -> LlamaEngine(descriptor)
+            }
+        }
     }
 
     val llama: InferenceEngine? get() = engineFor(RuntimeRegistry.LLAMA)
@@ -199,7 +206,7 @@ class Benchmarker(
         onProgress: (BackendId) -> Unit = {},
     ): List<BenchmarkEntity> {
         val descriptor = registry.descriptor(RuntimeRegistry.LLAMA) ?: return emptyList()
-        val engine = FakeLlamaEngine(descriptor)
+        val engine = LlamaEngine(descriptor)
         val results = mutableListOf<BenchmarkEntity>()
 
         for (backend in backends) {

@@ -4,6 +4,8 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import ai.ondevice.core.BackendId
 import ai.ondevice.core.DownloadState
 import ai.ondevice.core.MessageRole
@@ -49,8 +51,9 @@ class Converters {
         DownloadJobEntity::class,
         RuntimeBundleEntity::class,
         ParamManifestEntity::class,
+        McpServerEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -66,8 +69,31 @@ abstract class OnDeviceDatabase : RoomDatabase() {
     abstract fun downloads(): DownloadDao
     abstract fun runtimes(): RuntimeDao
     abstract fun manifests(): ParamManifestDao
+    abstract fun mcpServers(): McpServerDao
 
     companion object {
         const val NAME = "ondevice.db"
+
+        /** v2 adds the MCP server list. Nothing existing changes shape. */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `mcp_servers` (
+                        `id` TEXT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `url` TEXT NOT NULL,
+                        `authHeader` TEXT,
+                        `enabled` INTEGER NOT NULL,
+                        `lastToolsJson` TEXT,
+                        `lastCheckedAt` INTEGER,
+                        `lastError` TEXT,
+                        `createdAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent(),
+                )
+            }
+        }
     }
 }

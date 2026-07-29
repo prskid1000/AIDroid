@@ -26,6 +26,18 @@ class ModelStorage(private val context: Context, private val db: OnDeviceDatabas
     fun transcriptsDir(): File = File(root(), "transcripts").apply { mkdirs() }
 
     /**
+     * Images, audio and documents attached to a conversation.
+     *
+     * They are *copied* here rather than referenced by content URI: a picker
+     * grant dies with the process, and a conversation that renders its
+     * attachments only until the next reboot is not a conversation you can
+     * keep. It also makes the export in [ConversationArchive] possible at all.
+     */
+    fun attachmentsDir(): File = File(root(), "attachments").apply { mkdirs() }
+
+    fun exportsDir(): File = File(root(), "exports").apply { mkdirs() }
+
+    /**
      * A model id carries both a repo path and a quant (`owner/repo:Q4_0`), and
      * neither `/` nor `:` survives every filesystem the user might point us at —
      * SPEC §3.4 allows an SD card over SAF, which can be FAT32. So the whole id
