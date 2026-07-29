@@ -55,14 +55,38 @@ class ModelStorage(private val context: Context, private val db: OnDeviceDatabas
     /**
      * Orphan cleanup, the other direction from the boot sweep: files on disk
      * with no library record, and records whose file has gone.
+     *
+     * A model is a *directory*, not a file. Matching only against each record's
+     * `localPath` treats every companion as a stray, and companions are not
+     * exotic: a Kokoro install is one graph plus 55 voice packs, so the screen
+     * offered to "clean up" 55 orphans and one tap would have left Kokoro
+     * installed, listed, selectable — and unable to speak in any voice, failing
+     * at synthesis time with a missing pack rather than at the moment the files
+     * were destroyed. Anything inside a known model's own directory belongs to
+     * that model whether or not it is the file the record happens to name.
      */
     suspend fun findOrphans(): OrphanReport = withContext(Dispatchers.IO) {
         val records = db.models().getAll()
         val knownPaths = records.map { it.localPath }.toSet()
+        // Canonical, because the walk yields canonical paths and a record could
+        // have been written with a symlinked or differently-cased parent.
+        val ownedDirs = records
+            .mapNotNull { runCatching { modelDir(it.id).canonicalPath }.getOrNull() }
+            .toSet()
+
+        fun isOwned(file: File): Boolean {
+            if (file.absolutePath in knownPaths) return true
+            var parent = runCatching { file.canonicalFile.parentFile }.getOrNull()
+            while (parent != null) {
+                if (parent.path in ownedDirs) return true
+                parent = parent.parentFile
+            }
+            return false
+        }
 
         val strayFiles = modelsDir().walkTopDown()
             .filter { it.isFile && (it.extension == "gguf" || it.extension == "bin" || it.extension == "onnx") }
-            .filter { it.absolutePath !in knownPaths }
+            .filterNot(::isOwned)
             .toList()
 
         val missingFiles = records.filter { !File(it.localPath).exists() }
