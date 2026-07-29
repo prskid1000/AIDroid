@@ -193,8 +193,8 @@
     },
     {
       "id": "kokoro",
-      "buildTag": "v0.19",
-      "upstreamCommit": "sherpa-onnx",
+      "buildTag": "1.52.0",
+      "upstreamCommit": "4870adf",
       "jniContract": 3,
       "installed": true,
       "sizeBytes": 42991616,
@@ -208,7 +208,12 @@
         "CPU"
       ],
       "architectures": [
-        "kokoro"
+        "en",
+        "es",
+        "fr",
+        "hi",
+        "it",
+        "pt"
       ]
     },
     {

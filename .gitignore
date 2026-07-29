@@ -16,3 +16,8 @@ captures/
 native/llama.cpp/
 native/whisper.cpp/
 native/stable-diffusion.cpp/
+native/espeak-ng/
+
+# The staged espeak-ng data tables under app/src/main/assets/ are NOT ignored:
+# they are compiled artifacts that need the espeak-ng binary to produce, which a
+# cross-compile to Android never builds. See tools/stage-espeak-data.py.

@@ -286,9 +286,17 @@ fun AddModelScreen(
 
                 val selectedQuant = resolved.quants.firstOrNull { it.name == state.selectedQuant }
                 val runnable = state.verdict?.verdict?.runnable == true
+                // The required companions are downloaded with the weights, so
+                // they belong in the figure on the button. Kokoro's 55 voice
+                // packs are 28 MB against a 92 MB graph — quoting the weights
+                // alone understates the download by a quarter, and the number a
+                // user agrees to should be the number that gets transferred.
+                val downloadBytes = (selectedQuant?.totalBytes ?: 0) +
+                    resolved.companions.filter { it.role.required || it.autoSelected }
+                        .sumOf { it.file.sizeBytes }
                 NButton(
                     text = if (runnable) {
-                        "Download ${Fmt.bytes(selectedQuant?.totalBytes ?: 0)}"
+                        "Download ${Fmt.bytes(downloadBytes)}"
                     } else {
                         state.verdict?.verdict?.label ?: "Not runnable"
                     },

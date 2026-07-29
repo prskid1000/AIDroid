@@ -17,3 +17,15 @@
 llama.cpp             https://github.com/ggml-org/llama.cpp              b10175  60bccc3763395e01b039aa1ddeacc8cc0ea69f70
 whisper.cpp           https://github.com/ggml-org/whisper.cpp            v1.9.1  f049fff95a089aa9969deb009cdd4892b3e74916
 stable-diffusion.cpp  https://github.com/leejet/stable-diffusion.cpp     master  22516991cbdf725e69b0b4a87e52ca16cce07c2d
+espeak-ng             https://github.com/espeak-ng/espeak-ng             1.52.0  4870adfa25b1a32b4361592f1be8a40337c58d6c
+
+# espeak-ng is Kokoro's front end, and it needs *compiled* data tables that its
+# own build produces by running the espeak-ng binary — impossible when
+# cross-compiling to Android. The tables are staged into assets instead, by
+# tools/stage-espeak-data.py, which asserts their format version against the
+# constant in this checkout's synthdata.c. Bumping the ref above means
+# restaging: espeak refuses to load tables it did not compile.
+#
+# Kokoro's weights are not vendored at all. They are an ONNX graph downloaded
+# through the in-app resolver like any other model, and ONNX Runtime arrives as
+# a Maven AAR rather than a source checkout.

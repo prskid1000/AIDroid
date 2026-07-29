@@ -570,11 +570,17 @@ class VoiceViewModel @Inject constructor(
      * silently swapped for a system voice at speak time.
      */
     private suspend fun loadVoices() {
-        val kokoroInstalled = db.runtimes().get(ai.ondevice.engine.RuntimeRegistry.KOKORO)?.state !=
-            RuntimeState.NOT_INSTALLED &&
-            _state.value.ttsModel != null
+        // Point the synthesiser at the installed weights *before* asking what
+        // it can do — `kokoroReady` is a statement about this device right now,
+        // not a capability the build declares.
+        val modelDirectory = _state.value.ttsModel
+            ?.let { java.io.File(it.localPath) }
+            ?.let { if (it.isDirectory) it else it.parentFile }
+        synthesizer.useKokoroModel(modelDirectory)
+
         val system = synthesizer.systemVoices()
-        val kokoro = ai.ondevice.speech.KokoroVoices.catalogue(available = kokoroInstalled)
+        val kokoro = synthesizer.kokoroVoices()
+        val kokoroInstalled = synthesizer.kokoroReady
         _state.value = _state.value.copy(
             voices = kokoro + system,
             systemEngineAvailable = system.isNotEmpty(),
@@ -625,9 +631,19 @@ class VoiceViewModel @Inject constructor(
     fun selectVoice(id: String) {
         val voice = _state.value.voices.firstOrNull { it.id == id } ?: return
         if (!voice.available) {
+            // Two different reasons, and conflating them sends the user to the
+            // wrong screen: a missing model is fixable by downloading one, a
+            // missing phonemiser is not fixable at all in this build.
             _state.value = _state.value.copy(
-                speakError = "${voice.displayName} needs the Kokoro runtime and a voice pack. " +
-                    "Settings → Runtimes installs it.",
+                speakError = when {
+                    !ai.ondevice.speech.KokoroVoices.hasPhonemiser(voice.id) ->
+                        "${voice.displayName} speaks ${ai.ondevice.speech.KokoroVoices.languageOf(voice.id)}, " +
+                            "and this build has no phonemiser for it — Kokoro uses a different front end " +
+                            "for that language than espeak-ng."
+                    else ->
+                        "${voice.displayName} needs Kokoro's weights installed. " +
+                            "Models → Add a model, and search for Kokoro."
+                },
             )
             return
         }
@@ -694,15 +710,26 @@ class VoiceViewModel @Inject constructor(
         }
     }
 
-    private fun currentRequest(text: String) = ai.ondevice.speech.SpeechRequest(
-        text = text,
-        voiceId = _state.value.voices.firstOrNull { it.id == _state.value.voice }
-            ?.takeIf { it.provider == ai.ondevice.speech.SynthProvider.SYSTEM }
-            ?.id,
-        speed = _state.value.speed,
-        pitch = _state.value.pitch,
-        volume = _state.value.volume,
-    )
+    /**
+     * The request carries the *provider the user chose*, so the synthesiser
+     * routes on intent rather than on what happens to be loadable. Picking a
+     * Kokoro voice and hearing the system engine would be the substitution the
+     * whole voice screen is built to avoid.
+     */
+    private fun currentRequest(text: String): ai.ondevice.speech.SpeechRequest {
+        val voice = _state.value.voices.firstOrNull { it.id == _state.value.voice }
+        return ai.ondevice.speech.SpeechRequest(
+            text = text,
+            voiceId = voice?.id,
+            speed = _state.value.speed,
+            pitch = _state.value.pitch,
+            volume = _state.value.volume,
+            provider = voice?.provider ?: ai.ondevice.speech.SynthProvider.SYSTEM,
+            blendVoiceId = _state.value.blendVoice
+                ?.takeIf { voice?.provider == ai.ondevice.speech.SynthProvider.KOKORO },
+            blendRatio = _state.value.blendRatio,
+        )
+    }
 
     fun setMode(mode: VoiceMode) {
         _state.value = _state.value.copy(mode = mode, error = null, errorHint = null)

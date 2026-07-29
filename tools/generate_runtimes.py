@@ -67,6 +67,21 @@ def whisper_architectures(repo: pathlib.Path) -> list[str]:
     return ["whisper"]
 
 
+def kokoro_architectures(repo: pathlib.Path) -> list[str]:
+    """Kokoro's front end is espeak-ng, and that is what is vendored.
+
+    The "architecture" a Kokoro install is gated on is not the ONNX graph --
+    every published Kokoro export is the same graph -- it is whether this build
+    can turn text into the phonemes the graph expects. So the allowlist is the
+    set of languages the staged espeak data can pronounce, read from the
+    dictionaries actually present in assets rather than from a list here.
+    """
+    staged = ROOT / "app" / "src" / "main" / "assets" / "espeak-ng-data"
+    if not staged.is_dir():
+        return []
+    return sorted(p.name[: -len("_dict")] for p in staged.glob("*_dict"))
+
+
 def sd_architectures(repo: pathlib.Path) -> list[str]:
     """Read the SDVersion enum out of stable-diffusion.cpp's model.h."""
     header = repo / "model.h"
@@ -88,6 +103,7 @@ def main() -> int:
         "llama.cpp": (NATIVE / "llama.cpp", llama_architectures),
         "whisper.cpp": (NATIVE / "whisper.cpp", whisper_architectures),
         "stable-diffusion.cpp": (NATIVE / "stable-diffusion.cpp", sd_architectures),
+        "kokoro": (NATIVE / "espeak-ng", kokoro_architectures),
     }
 
     removed_any = False

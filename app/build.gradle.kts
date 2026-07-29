@@ -124,6 +124,10 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
 
+    // Kokoro's weights are an ONNX graph. ggml cannot load it, so this is the
+    // one place the app runs a second inference runtime.
+    implementation(libs.onnxruntime.android)
+
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
 

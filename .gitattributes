@@ -1,0 +1,5 @@
+# The staged espeak-ng data tables are compiled binary artifacts with no
+# extension, so git's heuristics read them as text and "fix" their line endings
+# on checkout. A CRLF byte inserted into phondata is silent corruption: espeak
+# loads it, mis-seeks, and produces wrong phonemes rather than an error.
+app/src/main/assets/espeak-ng-data/** binary

@@ -143,8 +143,20 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideSpeechSynthesizer(@ApplicationContext context: Context) =
-        ai.ondevice.speech.SpeechSynthesizer(context)
+    fun providePhonemizer(@ApplicationContext context: Context) =
+        ai.ondevice.speech.Phonemizer(context)
+
+    @Provides
+    @Singleton
+    fun provideKokoroEngine(phonemizer: ai.ondevice.speech.Phonemizer) =
+        ai.ondevice.speech.KokoroEngine(phonemizer)
+
+    @Provides
+    @Singleton
+    fun provideSpeechSynthesizer(
+        @ApplicationContext context: Context,
+        kokoro: ai.ondevice.speech.KokoroEngine,
+    ) = ai.ondevice.speech.SpeechSynthesizer(context, kokoro)
 
     @Provides
     @Singleton

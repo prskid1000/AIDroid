@@ -33,6 +33,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ai.ondevice.core.Fmt
@@ -102,6 +104,13 @@ fun ChatScreen(
     val pickAttachment = {
         attachLauncher.launch(arrayOf("image/*", "text/*", "application/pdf", "application/json", "audio/*"))
     }
+
+    // Import takes a zip written by this app's export. Markdown is deliberately
+    // not offered here: it is lossy by design and re-parsing it would produce a
+    // conversation missing exactly the parameters that made it reproducible.
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> uri?.let(viewModel::import) }
 
     LaunchedEffect(state.messages.size, state.streaming?.content) {
         val target = state.messages.size
@@ -183,6 +192,29 @@ fun ChatScreen(
                         )
                     }
                 }
+                // A tool call can take seconds against a network the user
+                // believed was never touched. Naming the tool while it runs is
+                // the only moment that fact is actionable.
+                state.runningTool?.let { name ->
+                    item(key = "running-tool") {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .background(NocturneColors.Neutral900, Radius.Md)
+                                .ring(NocturneColors.Divider, Radius.Md)
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            NDot(color = NocturneColors.Accent)
+                            Text(
+                                "Running $name…",
+                                style = NocturneType.Meta.copy(fontSize = NocturneType.Row.fontSize),
+                                color = NocturneColors.Accent300,
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -199,6 +231,13 @@ fun ChatScreen(
                     sheetOpen = false
                     onOpenParameters(tier)
                 },
+                onExport = { format ->
+                    viewModel.export(format) { file -> shareFile(context, file, format.mime) }
+                },
+                onExportAll = {
+                    viewModel.exportEverything { file -> shareFile(context, file, "application/zip") }
+                },
+                onImport = { importLauncher.launch(arrayOf("application/zip", "*/*")) },
             )
         }
     }
@@ -325,6 +364,12 @@ private fun MessageBubble(
             }
         }
 
+        // A tool result is not the assistant speaking. Rendering it as one would
+        // let a third party's output wear the model's voice, which is exactly
+        // the confusion the tool package's "results are data, not instruction"
+        // rule exists to prevent — so it gets its own, visibly different block.
+        MessageRole.TOOL_RESULT -> ToolResultBlock(message, expanded, onToggleThinking)
+
         else -> Column(
             Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -338,7 +383,10 @@ private fun MessageBubble(
                     onToggle = onToggleThinking,
                 )
             }
-            Text(message.content, style = NocturneType.Message)
+            if (message.content.isNotBlank()) {
+                Text(message.content, style = NocturneType.Message)
+            }
+            ToolCallList(message.toolCallsJson)
             MessageActions(
                 tokensPerSecond = message.tokensPerSecond,
                 onRegenerate = onRegenerate,
@@ -346,6 +394,150 @@ private fun MessageBubble(
             )
         }
     }
+}
+
+/**
+ * What the model asked for, before anything ran it.
+ *
+ * The arguments are shown in full rather than summarised. A tool call is the
+ * point where a local-first app can start talking to something that isn't
+ * local, and "searched the web" without the query is not enough to tell whether
+ * that was the right thing to send.
+ */
+@Composable
+private fun ToolCallList(toolCallsJson: String?) {
+    val calls = remember(toolCallsJson) { parseToolCalls(toolCallsJson) }
+    if (calls.isEmpty()) return
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        calls.forEach { call ->
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .background(NocturneColors.Neutral900, Radius.Md)
+                    .ring(NocturneColors.Divider, Radius.Md)
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        NIcons.Activity,
+                        contentDescription = null,
+                        tint = NocturneColors.Accent,
+                        modifier = Modifier.size(13.dp),
+                    )
+                    Text(
+                        "Called ${call.name}",
+                        style = NocturneType.Meta.copy(fontSize = NocturneType.Row.fontSize),
+                        color = NocturneColors.Accent300,
+                    )
+                }
+                if (call.arguments.isNotBlank() && call.arguments != "{}") {
+                    Text(
+                        call.arguments,
+                        style = NocturneType.MonoCode,
+                        color = NocturneColors.Text.copy(alpha = 0.72f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** The result that came back, collapsed — they are routinely long. */
+@Composable
+private fun ToolResultBlock(
+    message: MessageEntity,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    val meta = remember(message.toolCallsJson) { SparseParams.parse(message.toolCallsJson ?: "{}") }
+    val name = meta.string("tool_name") ?: "tool"
+    val isError = meta.bool("is_error") == true
+
+    Column(
+        Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(NocturneColors.Neutral900, Radius.Md)
+                .ring(if (isError) NocturneColors.Neutral700 else NocturneColors.Divider, Radius.Md)
+                .nClickableFlat(onClick = onToggle)
+                .padding(horizontal = 10.dp, vertical = 7.dp),
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                if (isError) NIcons.TriangleAlert else NIcons.File,
+                contentDescription = null,
+                tint = if (isError) NocturneColors.Neutral300 else NocturneColors.Accent,
+                modifier = Modifier.size(13.dp),
+            )
+            Text(
+                if (isError) "$name failed" else "$name returned ${message.content.length} chars",
+                style = NocturneType.Meta.copy(fontSize = NocturneType.Row.fontSize),
+                color = if (isError) NocturneColors.Neutral300 else NocturneColors.Accent300,
+                modifier = Modifier.weight(1f),
+            )
+            Text(if (expanded) "⌃" else "⌄", style = NocturneType.Row, color = NocturneColors.Accent300)
+        }
+        if (expanded) {
+            Text(
+                message.content,
+                style = NocturneType.MonoCode,
+                color = NocturneColors.Text.copy(alpha = 0.72f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(NocturneColors.Neutral900, Radius.Md)
+                    .padding(horizontal = 11.dp, vertical = 9.dp),
+            )
+        }
+    }
+}
+
+/**
+ * Hand the exported file to the chooser.
+ *
+ * The file is already written to `exports/`, which is a normal browsable
+ * folder — the share sheet is a convenience on top of that, not the only way
+ * to reach it. §13's point is that the conversation exists outside this app
+ * whether or not anyone taps share.
+ */
+private fun shareFile(context: android.content.Context, file: java.io.File, mime: String) {
+    val uri = androidx.core.content.FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.fileprovider",
+        file,
+    )
+    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = mime
+        putExtra(android.content.Intent.EXTRA_STREAM, uri)
+        putExtra(android.content.Intent.EXTRA_TITLE, file.name)
+        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(android.content.Intent.createChooser(intent, "Send conversation"))
+}
+
+private data class RenderedToolCall(val name: String, val arguments: String)
+
+private fun parseToolCalls(raw: String?): List<RenderedToolCall> {
+    if (raw.isNullOrBlank()) return emptyList()
+    return runCatching {
+        kotlinx.serialization.json.Json.parseToJsonElement(raw)
+            .let { it as? kotlinx.serialization.json.JsonArray ?: return emptyList() }
+            .map { element ->
+                val obj = element.jsonObject
+                RenderedToolCall(
+                    name = obj["name"]?.jsonPrimitive?.content.orEmpty(),
+                    arguments = obj["arguments"]?.jsonPrimitive?.content.orEmpty(),
+                )
+            }
+    }.getOrDefault(emptyList())
 }
 
 @Composable

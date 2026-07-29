@@ -13,6 +13,14 @@ package ai.ondevice.speech
  */
 object KokoroVoices {
 
+    /**
+     * [available] is whether Kokoro's runtime and weights are installed. A
+     * voice also needs a *front end* for its language, and this build's
+     * phonemiser is espeak-ng, which is not what Kokoro's own pipeline uses for
+     * Japanese or Mandarin. Those voices are listed and marked rather than
+     * quietly offered, because producing espeak's guess at Japanese and calling
+     * it Kokoro would be exactly the substitution §1.2 forbids.
+     */
     fun catalogue(available: Boolean): List<SynthVoice> = NAMES.map { id ->
         SynthVoice(
             id = id,
@@ -21,9 +29,17 @@ object KokoroVoices {
             localeLabel = "${languageLabel(id)} · ${genderLabel(id)}",
             quality = 400,
             provider = SynthProvider.KOKORO,
-            available = available,
+            available = available && hasPhonemiser(id),
         )
     }
+
+    /** Whether espeak-ng can pronounce this voice's language in this build. */
+    fun hasPhonemiser(id: String): Boolean = id.firstOrNull() in setOf('a', 'b', 'e', 'f', 'h', 'i', 'p')
+
+    fun languageOf(id: String): String = languageLabel(id)
+
+    /** The voice pack filename inside a Kokoro model directory. */
+    fun packName(id: String): String = "$id.bin"
 
     private fun languageLabel(id: String): String = when (id.first()) {
         'a' -> "American English"

@@ -49,6 +49,8 @@ class ChatViewModel @Inject constructor(
     private val prefs: AppPrefs,
     private val toolProviders: ai.ondevice.tools.ToolProviderFactory,
     private val attachments: ai.ondevice.data.AttachmentStore,
+    private val archive: ai.ondevice.data.ConversationArchive,
+    private val storage: ai.ondevice.data.ModelStorage,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ChatState())
@@ -523,6 +525,98 @@ class ChatViewModel @Inject constructor(
             }
         }.toString()
 
+    // — export and import (SPEC §13) —
+
+    /**
+     * Write this conversation out and hand the file back for sharing.
+     *
+     * Two formats because they answer different questions: the `.zip`
+     * round-trips losslessly, and the `.md` is what you paste into a bug
+     * report. Offering only the readable one would make the app the only place
+     * a conversation can fully exist, which §13 rules out.
+     */
+    fun export(format: ExportFormat, onReady: (java.io.File) -> Unit) {
+        val conversation = _state.value.conversation ?: run {
+            _state.value = _state.value.copy(error = "There is no conversation to export.")
+            return
+        }
+        viewModelScope.launch {
+            val slug = conversation.title
+                .lowercase()
+                .replace(Regex("[^a-z0-9]+"), "-")
+                .trim('-')
+                .ifBlank { "conversation" }
+            val result = runCatching {
+                when (format) {
+                    ExportFormat.ARCHIVE -> archive.exportArchive(
+                        conversationIds = listOf(conversation.id),
+                        destination = java.io.File(storage.exportsDir(), "$slug.zip"),
+                    )
+                    ExportFormat.MARKDOWN -> archive.exportMarkdown(
+                        conversationId = conversation.id,
+                        destination = java.io.File(storage.exportsDir(), "$slug.md"),
+                    )
+                }
+            }
+            result.fold(
+                onSuccess = { file ->
+                    _state.value = _state.value.copy(lastExport = file.absolutePath, error = null)
+                    onReady(file)
+                },
+                onFailure = {
+                    _state.value = _state.value.copy(
+                        error = "The export failed: ${it.message}",
+                        errorSuggestion = "Check there is free space in ${storage.exportsDir().name}.",
+                    )
+                },
+            )
+        }
+    }
+
+    /** Export the whole library, not just the open conversation. */
+    fun exportEverything(onReady: (java.io.File) -> Unit) {
+        viewModelScope.launch {
+            runCatching {
+                archive.exportArchive(destination = java.io.File(storage.exportsDir(), "conversations.zip"))
+            }.fold(
+                onSuccess = { file ->
+                    _state.value = _state.value.copy(lastExport = file.absolutePath, error = null)
+                    onReady(file)
+                },
+                onFailure = {
+                    _state.value = _state.value.copy(error = "The export failed: ${it.message}")
+                },
+            )
+        }
+    }
+
+    fun import(uri: android.net.Uri) {
+        viewModelScope.launch {
+            val report = runCatching {
+                context.contentResolver.openInputStream(uri)?.use { archive.importArchive(it) }
+                    ?: ai.ondevice.data.ImportReport(error = "That file could not be opened.")
+            }.getOrElse { ai.ondevice.data.ImportReport(error = "That file could not be read: ${it.message}") }
+
+            if (report.ok) {
+                _state.value = _state.value.copy(
+                    error = null,
+                    importSummary = "Imported ${report.conversations} conversation(s), " +
+                        "${report.messages} message(s), ${report.attachments} attachment(s).",
+                )
+                restore()
+            } else {
+                _state.value = _state.value.copy(
+                    error = report.error,
+                    errorSuggestion = "Pick a .zip written by this app's export.",
+                )
+            }
+        }
+    }
+
+    fun dismissImportSummary() {
+        _state.value = _state.value.copy(importSummary = null)
+    }
+
     /** Cancellation unwinds the engine Flow, whose teardown frees native memory. */
     fun stop() {
         generationJob?.cancel()
@@ -734,6 +828,9 @@ data class ChatState(
     val userStopSequences: List<String> = emptyList(),
     /** Non-null while a tool call is actually running, for the chat spinner. */
     val runningTool: String? = null,
+    /** Where the last export landed, so the screen can name the file. */
+    val lastExport: String? = null,
+    val importSummary: String? = null,
     /** What the engine says is resident — not what the conversation prefers. */
     val loadedModelId: String? = null,
     val error: String? = null,
@@ -777,3 +874,15 @@ data class StreamingMessage(
     val thinkingTokens: Int? = null,
     val thinkingComplete: Boolean = false,
 )
+
+/**
+ * The two shapes a conversation can leave the app in.
+ *
+ * [ARCHIVE] round-trips — every generation parameter, measured tok/s, backend
+ * and attachment comes back on import. [MARKDOWN] does not, and is not meant
+ * to: it is for reading.
+ */
+enum class ExportFormat(val label: String, val mime: String) {
+    ARCHIVE("Archive (.zip)", "application/zip"),
+    MARKDOWN("Markdown (.md)", "text/markdown"),
+}
