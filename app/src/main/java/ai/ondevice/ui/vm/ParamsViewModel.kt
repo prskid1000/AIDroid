@@ -115,8 +115,8 @@ class ParamsViewModel @Inject constructor(
     private suspend fun modelFor(runtimeId: String) = when (runtimeId) {
         RuntimeRegistry.LLAMA ->
             engines.state.value.loaded?.modelId?.let { db.models().get(it) }
-                ?: db.models().observeByModality(Modality.TEXT).first().firstOrNull()
-        else -> db.models().observeByModality(modalityOf(runtimeId)).first().firstOrNull()
+                ?: db.models().observeInstalledByModality(Modality.TEXT).first().firstOrNull()
+        else -> db.models().observeInstalledByModality(modalityOf(runtimeId)).first().firstOrNull()
     }
 
     /**
@@ -128,7 +128,7 @@ class ParamsViewModel @Inject constructor(
      * actually choosing by — "the ControlNet", not "a .safetensors".
      */
     private suspend fun installedFiles(): List<ai.ondevice.params.PathChoice> =
-        db.models().getAll().mapNotNull { model ->
+        db.models().getInstalled().mapNotNull { model ->
             val file = java.io.File(model.localPath)
             if (!file.isFile) return@mapNotNull null
             val role = ai.ondevice.core.AttachmentRole.classify(model.localPath)

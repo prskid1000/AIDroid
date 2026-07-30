@@ -213,15 +213,29 @@ fun ModelsScreen(
                                     modifier = Modifier.padding(top = 2.dp),
                                 )
                             }
+                            val pending = state.pending[model.id]
                             when {
+                                pending != null -> NTag(
+                                    if (pending.paused) "paused" else "downloading",
+                                    style = NTagStyle.Outline,
+                                )
                                 loaded -> NTag("loaded", style = NTagStyle.Accent)
                                 model.modality == Modality.VISION -> NTag("vision", style = NTagStyle.Outline)
                                 model.modality == Modality.DIFFUSION -> NTag("CPU only", style = NTagStyle.Neutral)
                                 else -> Unit
                             }
                         }
+                        // While the bytes are still arriving, say so instead of
+                        // "never used" — which read as installed-but-unopened.
+                        state.pending[model.id]?.let { pending: ai.ondevice.ui.vm.PendingInstall ->
+                            ai.ondevice.ui.components.NProgressBar(
+                                fraction = pending.fraction,
+                                modifier = Modifier.padding(top = 8.dp),
+                            )
+                        }
                         NCardMeta(gap = 10.dp) {
-                            model.lastUsedAt?.let { NMetaText("used ${Fmt.relative(it)}") }
+                            state.pending[model.id]?.let { NMetaText(it.label) }
+                                ?: model.lastUsedAt?.let { NMetaText("used ${Fmt.relative(it)}") }
                                 ?: NMetaText("never used")
                             if (model.pinned) {
                                 Box(Modifier.weight(1f))

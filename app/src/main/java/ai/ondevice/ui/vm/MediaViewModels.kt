@@ -59,7 +59,7 @@ class ImageViewModel @Inject constructor(
             // fixes, and SPEC §1.2 says a refusal has to name which one it is.
             val runtimeInstalled = db.runtimes().get(RUNTIME_ID)?.state != RuntimeState.NOT_INSTALLED
             _state.value = _state.value.copy(
-                model = db.models().observeByModality(Modality.DIFFUSION).first().firstOrNull(),
+                model = db.models().observeInstalledByModality(Modality.DIFFUSION).first().firstOrNull(),
                 presets = db.presets().observeFor(Modality.DIFFUSION).first(),
                 runtimeInstalled = runtimeInstalled,
             )
@@ -69,7 +69,7 @@ class ImageViewModel @Inject constructor(
         // Live, so a model that finishes downloading while this screen is open
         // appears — the same mistake the chat picker used to make.
         viewModelScope.launch {
-            db.models().observeByModality(Modality.DIFFUSION).collect { models ->
+            db.models().observeInstalledByModality(Modality.DIFFUSION).collect { models ->
                 _state.value = _state.value.copy(
                     availableModels = models,
                     model = _state.value.model?.let { current ->
@@ -138,7 +138,7 @@ class ImageViewModel @Inject constructor(
      */
     fun refreshFromOverrides() {
         viewModelScope.launch {
-            val model = db.models().observeByModality(Modality.DIFFUSION).first().firstOrNull()
+            val model = db.models().observeInstalledByModality(Modality.DIFFUSION).first().firstOrNull()
             val runtimeInstalled = db.runtimes().get(RUNTIME_ID)?.state != RuntimeState.NOT_INSTALLED
             val p = SparseParams.parse(model?.paramOverridesJson)
             _state.value = _state.value.copy(
@@ -302,7 +302,7 @@ class ImageViewModel @Inject constructor(
      * update. Whether it actually *loads* is the runtime's answer, not ours.
      */
     private suspend fun refreshAttachmentLibrary() {
-        val installed = db.models().getAll()
+        val installed = db.models().getInstalled()
         val available = installed.mapNotNull { entity ->
             val role = ai.ondevice.core.AttachmentRole.classify(entity.localPath)
                 ?: return@mapNotNull null
@@ -634,10 +634,10 @@ class VoiceViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            val ttsModel = db.models().observeByModality(Modality.TEXT_TO_SPEECH).first().firstOrNull()
+            val ttsModel = db.models().observeInstalledByModality(Modality.TEXT_TO_SPEECH).first().firstOrNull()
             _state.value = _state.value.copy(
-                sttModel = db.models().observeByModality(Modality.SPEECH_TO_TEXT).first().firstOrNull(),
-                sttModels = db.models().observeByModality(Modality.SPEECH_TO_TEXT).first(),
+                sttModel = db.models().observeInstalledByModality(Modality.SPEECH_TO_TEXT).first().firstOrNull(),
+                sttModels = db.models().observeInstalledByModality(Modality.SPEECH_TO_TEXT).first(),
                 ttsModel = ttsModel,
                 transcripts = db.transcripts().observeAll().first(),
             )
@@ -683,7 +683,7 @@ class VoiceViewModel @Inject constructor(
         // either or both. Each directory is offered to each engine and the
         // engine decides: Kokoro wants a graph plus voice packs, OmniVoice wants
         // its four graphs and a tokenizer, and neither is identified by name.
-        val ttsModels = db.models().observeByModality(Modality.TEXT_TO_SPEECH).first()
+        val ttsModels = db.models().observeInstalledByModality(Modality.TEXT_TO_SPEECH).first()
         // A chosen model is offered to the engines first, so an explicit choice
         // beats the scan order when two are installed.
         val ordered = preferred?.let { listOf(it) + ttsModels.filterNot { m -> m.id == it.id } }
@@ -777,10 +777,10 @@ class VoiceViewModel @Inject constructor(
      */
     fun refreshFromOverrides() {
         viewModelScope.launch {
-            val model = db.models().observeByModality(Modality.TEXT_TO_SPEECH).first().firstOrNull()
+            val model = db.models().observeInstalledByModality(Modality.TEXT_TO_SPEECH).first().firstOrNull()
             val tts = SparseParams.parse(model?.paramOverridesJson)
             val stt = SparseParams.parse(
-                db.models().observeByModality(Modality.SPEECH_TO_TEXT).first().firstOrNull()
+                db.models().observeInstalledByModality(Modality.SPEECH_TO_TEXT).first().firstOrNull()
                     ?.paramOverridesJson,
             )
             _state.value = _state.value.copy(

@@ -67,7 +67,7 @@ class ChatViewModel @Inject constructor(
         // there was more than one model, the *first* model you ever installed
         // was unreachable until the app was restarted.
         viewModelScope.launch {
-            db.models().observeAll().collect { models ->
+            db.models().observeInstalled().collect { models ->
                 _state.value = _state.value.copy(
                     availableModels = models.filter {
                         it.modality == Modality.TEXT || it.modality == Modality.VISION
@@ -117,7 +117,7 @@ class ChatViewModel @Inject constructor(
             ?: newConversation()
 
         val model = conversation.modelId?.let { db.models().get(it) }
-            ?: db.models().observeByModality(Modality.TEXT).first().firstOrNull()
+            ?: db.models().observeInstalledByModality(Modality.TEXT).first().firstOrNull()
 
         val presets = db.presets().observeFor(Modality.TEXT).first()
         val personas = db.personas().observeAll().first()
@@ -133,7 +133,7 @@ class ChatViewModel @Inject constructor(
             systemPrompt = conversation.systemPrompt
                 ?: personas.firstOrNull { it.id == conversation.personaId }?.systemPrompt
                 ?: "",
-            availableModels = db.models().observeByModality(Modality.TEXT).first(),
+            availableModels = db.models().observeInstalledByModality(Modality.TEXT).first(),
         )
     }
 

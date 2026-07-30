@@ -260,7 +260,11 @@ class ModelResolver(
             )
         }
 
-        val companions = detectCompanions(files, sizeLookup)
+        val companions = detectCompanions(
+            files = files,
+            sizes = sizeLookup,
+            variantFiles = quants.flatMap { variant -> variant.files.map { it.filename } }.toSet(),
+        )
         val modality = classifyModality(info, format, files, companions)
 
         // Step 3 continued — the architecture must be one the bundled runtime
@@ -396,10 +400,25 @@ class ModelResolver(
     }
 
     /** Step 5 — auto-pair companions so a multi-file model is never hand-assembled. */
+    /**
+     * Companions are things a model needs *alongside* it — a vision projector, a
+     * TAESD decoder, Kokoro's voice packs. They are never the alternatives the
+     * user is choosing between.
+     *
+     * [variantFiles] is excluded for that reason, and it matters most for an
+     * auxiliary pack: every file in the ControlNet v1.1 repo contains "control"
+     * and ends in .safetensors, so all fifteen matched the companion rule and
+     * were auto-paired behind whichever one was chosen — about 1.9 GB of rival
+     * ControlNets attached to a 723 MB download. Kokoro is unaffected, since its
+     * voice packs are .bin and its variants are .onnx, which is the case
+     * companion detection exists for.
+     */
     private fun detectCompanions(
         files: List<String>,
         sizes: Map<String, HfPathInfo>,
+        variantFiles: Set<String> = emptySet(),
     ): List<CompanionFile> = files.mapNotNull { name ->
+        if (name in variantFiles) return@mapNotNull null
         val role = companionRole(name) ?: return@mapNotNull null
         val info = sizes[name]
         CompanionFile(

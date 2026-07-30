@@ -75,6 +75,29 @@ class ModelsViewModel @Inject constructor(
             },
             pausedDownloads = jobs.count { it.state == ai.ondevice.core.DownloadState.PAUSED },
             failedDownloads = jobs.count { it.state == ai.ondevice.core.DownloadState.FAILED },
+            // The library row is written when a download starts, not when it
+            // finishes, so a model still arriving looked installed and said
+            // "never used". Every picker offered it, and selecting one meant
+            // handing a runtime a half-written file. The pickers now filter on
+            // the same condition; here the row stays visible — you want to see
+            // that it is coming — but says so.
+            pending = jobs
+                .filter {
+                    it.state == ai.ondevice.core.DownloadState.QUEUED ||
+                        it.state == ai.ondevice.core.DownloadState.RUNNING ||
+                        it.state == ai.ondevice.core.DownloadState.PAUSED ||
+                        it.state == ai.ondevice.core.DownloadState.VERIFYING
+                }
+                .associate { job ->
+                    job.modelId to PendingInstall(
+                        fraction = if (job.bytesTotal > 0) {
+                            (job.bytesDone.toFloat() / job.bytesTotal).coerceIn(0f, 1f)
+                        } else {
+                            0f
+                        },
+                        paused = job.state == ai.ondevice.core.DownloadState.PAUSED,
+                    )
+                },
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ModelsState())
 
@@ -120,6 +143,16 @@ class ModelsViewModel @Inject constructor(
             }
 }
 
+/** A model still downloading, and how far along. */
+data class PendingInstall(val fraction: Float, val paused: Boolean) {
+    val label: String
+        get() = if (paused) {
+            "paused — ${(fraction * 100).toInt()}% downloaded"
+        } else {
+            "downloading — ${(fraction * 100).toInt()}%"
+        }
+}
+
 data class ModelsState(
     val groups: List<ModelGroup> = emptyList(),
     val loadedModelId: String? = null,
@@ -132,6 +165,8 @@ data class ModelsState(
     val activeDownloads: Int = 0,
     val pausedDownloads: Int = 0,
     val failedDownloads: Int = 0,
+    /** Models whose bytes have not all arrived yet, keyed by model id. */
+    val pending: Map<String, PendingInstall> = emptyMap(),
 ) {
     val hasDownloadNews: Boolean get() = activeDownloads + pausedDownloads + failedDownloads > 0
 

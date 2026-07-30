@@ -147,6 +147,18 @@ private fun ActiveJobCard(job: DownloadJob, viewModel: DownloadsViewModel) {
                     minHeight = 24.dp,
                 )
             }
+            // Cancel was reachable only from a *failed* job, as "Discard". A
+            // running or paused one had pause and resume and no way out, so a
+            // download started by mistake — the wrong quant, or a repo that
+            // turned out to be twelve gigabytes — could only be escaped by
+            // clearing the app's data. Cancelling deletes the partial files, so
+            // it reclaims the space rather than just hiding the row.
+            NButton(
+                "Cancel",
+                onClick = { viewModel.cancel(job.id) },
+                style = NButtonStyle.Ghost,
+                minHeight = 24.dp,
+            )
         }
 
         NProgressBar(

@@ -18,6 +18,83 @@ interface ModelDao {
     @Query("SELECT * FROM models WHERE modality = :modality ORDER BY lastUsedAt DESC")
     fun observeByModality(modality: Modality): Flow<List<ModelEntity>>
 
+    /**
+     * Only models whose bytes have actually arrived.
+     *
+     * The library row is written when a download *starts*, so a resumed job
+     * after a reboot still knows what it is installing — deliberate, and
+     * documented where it happens. The consequence is that [observeAll] and
+     * [observeByModality] include models that are still downloading, and every
+     * picker in the app was offering them: a half-written GGUF selected in chat
+     * fails inside llama.cpp with a header error, which reads like a corrupt
+     * model rather than an impatient user.
+     *
+     * "Installed" is therefore derived from the download queue rather than
+     * stored on the row — one source of truth, and no migration.
+     */
+    @Query(
+        """
+        SELECT * FROM models
+        WHERE NOT EXISTS (
+            SELECT 1 FROM download_jobs
+            WHERE download_jobs.modelId = models.id
+              AND download_jobs.state IN ('QUEUED','RUNNING','PAUSED','VERIFYING')
+        )
+        ORDER BY lastUsedAt DESC, installedAt DESC
+        """,
+    )
+    fun observeInstalled(): Flow<List<ModelEntity>>
+
+    @Query(
+        """
+        SELECT * FROM models
+        WHERE modality = :modality
+          AND NOT EXISTS (
+            SELECT 1 FROM download_jobs
+            WHERE download_jobs.modelId = models.id
+              AND download_jobs.state IN ('QUEUED','RUNNING','PAUSED','VERIFYING')
+          )
+        ORDER BY lastUsedAt DESC
+        """,
+    )
+    fun observeInstalledByModality(modality: Modality): Flow<List<ModelEntity>>
+
+    @Query(
+        """
+        SELECT * FROM models
+        WHERE modality = :modality
+          AND NOT EXISTS (
+            SELECT 1 FROM download_jobs
+            WHERE download_jobs.modelId = models.id
+              AND download_jobs.state IN ('QUEUED','RUNNING','PAUSED','VERIFYING')
+          )
+        ORDER BY lastUsedAt DESC
+        """,
+    )
+    suspend fun getInstalledByModality(modality: Modality): List<ModelEntity>
+
+    @Query(
+        """
+        SELECT * FROM models
+        WHERE NOT EXISTS (
+            SELECT 1 FROM download_jobs
+            WHERE download_jobs.modelId = models.id
+              AND download_jobs.state IN ('QUEUED','RUNNING','PAUSED','VERIFYING')
+        )
+        ORDER BY lastUsedAt DESC, installedAt DESC
+        """,
+    )
+    suspend fun getInstalled(): List<ModelEntity>
+
+    /** Models with a download still in flight, so the library can say so. */
+    @Query(
+        """
+        SELECT modelId FROM download_jobs
+        WHERE state IN ('QUEUED','RUNNING','PAUSED','VERIFYING')
+        """,
+    )
+    fun observePendingModelIds(): Flow<List<String>>
+
     @Query("SELECT * FROM models WHERE id = :id")
     fun observe(id: String): Flow<ModelEntity?>
 
