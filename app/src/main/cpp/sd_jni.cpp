@@ -629,4 +629,94 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
     return out;
 }
 
+/**
+ * ESRGAN upscaling.
+ *
+ * A separate context from the diffusion one, because that is how sd.cpp models
+ * it: `upscaler_ctx_t` owns its own weights and is not part of `sd_ctx_t`. It is
+ * built and freed per call rather than held, since an upscale is a deliberate
+ * one-off on a finished picture and keeping a second set of weights resident for
+ * the rest of the session would cost memory the generator wants.
+ *
+ * Same wire format as nativeGenerate: an 8-byte header carrying the output
+ * width and height, then packed RGB. The dimensions have to be returned rather
+ * than inferred, because the model's own factor wins when the caller passes 0.
+ */
+JNIEXPORT jbyteArray JNICALL
+Java_ai_ondevice_engine_SdBridge_nativeUpscale(
+        JNIEnv * env, jobject, jstring jesrgan, jbyteArray jrgb, jint width, jint height,
+        jint factor, jint threads, jint tileSize) {
+    const auto esrgan = jni_to_string(env, jesrgan);
+    if (esrgan.empty()) {
+        jni_throw(env, "No upscaler model is installed. Add an ESRGAN model and attach it.");
+        return nullptr;
+    }
+
+    owned_image src = take_image(env, jrgb, width, height);
+    if (src.image.data == nullptr) {
+        jni_throw(env, "There is no image to upscale.");
+        return nullptr;
+    }
+
+    // Take the backend strings from a default-initialised params struct rather
+    // than passing nullptr: the upscaler forwards them to the same backend
+    // resolution the diffusion context uses, and this build has no GPU backend
+    // compiled in either way.
+    sd_ctx_params_t defaults;
+    sd_ctx_params_init(&defaults);
+
+    upscaler_ctx_t * upscaler = new_upscaler_ctx(
+        esrgan.c_str(),
+        /* direct         */ false,
+        /* n_threads      */ threads > 0 ? threads : sd_get_num_physical_cores(),
+        /* tile_size      */ tileSize,
+        defaults.backend,
+        defaults.params_backend);
+    if (upscaler == nullptr) {
+        jni_throw(env, "The upscaler model could not be loaded. ESRGAN weights are expected.");
+        return nullptr;
+    }
+
+    const uint32_t requested =
+        factor > 0 ? (uint32_t) factor : (uint32_t) std::max(1, get_upscale_factor(upscaler));
+
+    sd_image_t * images = nullptr;
+    int          count  = 0;
+    const bool   ok     = upscale(upscaler, src.image, requested, &images, &count);
+    free_upscaler_ctx(upscaler);
+
+    if (!ok || images == nullptr || count <= 0) {
+        if (images != nullptr) free(images);
+        jni_throw(env, "Upscaling produced no image. This is usually memory — try a smaller "
+                       "tile size or a lower factor.");
+        return nullptr;
+    }
+
+    const sd_image_t & first  = images[0];
+    const size_t       pixels = (size_t) first.width * first.height;
+    jbyteArray         out    = env->NewByteArray((jsize) (pixels * 3 + 8));
+    if (out != nullptr) {
+        uint8_t       header[8];
+        const int32_t w = (int32_t) first.width;
+        const int32_t h = (int32_t) first.height;
+        std::memcpy(header, &w, 4);
+        std::memcpy(header + 4, &h, 4);
+        env->SetByteArrayRegion(out, 0, 8, reinterpret_cast<const jbyte *>(header));
+
+        std::vector<uint8_t> rgb(pixels * 3);
+        for (size_t i = 0; i < pixels; ++i) {
+            rgb[i * 3 + 0] = first.data[i * first.channel + 0];
+            rgb[i * 3 + 1] = first.data[i * first.channel + 1];
+            rgb[i * 3 + 2] = first.data[i * first.channel + 2];
+        }
+        env->SetByteArrayRegion(out, 8, (jsize) rgb.size(), reinterpret_cast<const jbyte *>(rgb.data()));
+    }
+
+    for (int i = 0; i < count; ++i) {
+        free(images[i].data);
+    }
+    free(images);
+    return out;
+}
+
 } // extern "C"

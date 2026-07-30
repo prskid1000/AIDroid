@@ -393,6 +393,30 @@ fun ImageScreen(
                 }
             }
 
+            // Only offered when there is something to upscale and something to
+            // upscale it with. sd.cpp gives the upscaler its own context, so this
+            // needs no diffusion model resident — but it does need the ESRGAN
+            // weights, and saying so is better than a disabled button.
+            state.lastImage?.let { last ->
+                val hasUpscaler = state.availableAttachments.any {
+                    it.role == ai.ondevice.core.AttachmentRole.UPSCALER
+                }
+                if (hasUpscaler) {
+                    NButton(
+                        if (state.generating) "Working…" else "Upscale ${last.width}×${last.height} with ESRGAN",
+                        onClick = { viewModel.upscale() },
+                        style = NButtonStyle.Secondary,
+                        block = true,
+                        modifier = Modifier.padding(top = 14.dp),
+                    )
+                    NHelp(
+                        "Writes a new gallery entry rather than replacing this one — the seed and " +
+                            "parameters recorded here reproduce the original size.",
+                        Modifier.padding(top = 6.dp),
+                    )
+                }
+            }
+
             AttachmentsSection(state, viewModel)
 
             // The same manifest renderer S8 uses, pointed at the sd.cpp block —

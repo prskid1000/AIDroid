@@ -333,6 +333,86 @@ class ImageViewModel @Inject constructor(
 
     fun setMaskPath(path: String?) = update { copy(maskPath = path) }
 
+    /**
+     * Upscale the picture just produced.
+     *
+     * A deliberate action on a finished image rather than a step in every run:
+     * sd.cpp keeps the upscaler in its own context, it is slow, and ×4 on a
+     * 512 ² image is four megapixels of output. The result is a new gallery
+     * entry, not a replacement — the original is what the recorded seed and
+     * parameters reproduce, and overwriting it would make the pair inconsistent.
+     */
+    fun upscale(factor: Int = 0) {
+        val source = _state.value.lastImage ?: return
+        val model = _state.value.model
+        val esrgan = _state.value.availableAttachments
+            .firstOrNull { it.role == ai.ondevice.core.AttachmentRole.UPSCALER }?.path
+            ?: SparseParams.parse(model?.paramOverridesJson).string("upscale_model")
+        if (esrgan.isNullOrBlank()) {
+            _state.value = _state.value.copy(
+                error = "No upscaler is installed.",
+                errorHint = "Add an ESRGAN model — its filename gives away the role, so it appears " +
+                    "under Attachments once downloaded.",
+            )
+            return
+        }
+
+        generationJob = viewModelScope.launch {
+            _state.value = _state.value.copy(generating = true, error = null, errorHint = null)
+            try {
+                val decoded = withContext(Dispatchers.IO) {
+                    android.graphics.BitmapFactory.decodeFile(source.path)
+                } ?: error("The image file could not be read.")
+                val pixels = IntArray(decoded.width * decoded.height)
+                decoded.getPixels(pixels, 0, decoded.width, 0, 0, decoded.width, decoded.height)
+
+                val result = diffusion.upscale(
+                    image = ai.ondevice.engine.DiffusionImage(decoded.width, decoded.height, pixels),
+                    esrganPath = esrgan,
+                    factor = factor,
+                )
+                result.fold(
+                    onSuccess = { bigger ->
+                        val entity = withContext(Dispatchers.IO) {
+                            val file = java.io.File(
+                                storage.galleryDir(),
+                                "${source.seed}-x${bigger.width / decoded.width}.png",
+                            )
+                            file.writeBytes(bigger.toPng(source.paramsJson))
+                            GeneratedImageEntity(
+                                id = UUID.randomUUID().toString(),
+                                path = file.absolutePath,
+                                prompt = source.prompt,
+                                negativePrompt = source.negativePrompt,
+                                paramsJson = source.paramsJson,
+                                modelId = source.modelId,
+                                seed = source.seed,
+                                width = bigger.width,
+                                height = bigger.height,
+                                createdAt = System.currentTimeMillis(),
+                            )
+                        }
+                        db.images().upsert(entity)
+                        _state.value = _state.value.copy(
+                            lastImage = entity,
+                            previewBitmap = bigger.toBitmap(),
+                        )
+                    },
+                    onFailure = {
+                        _state.value = _state.value.copy(
+                            error = it.message ?: "Upscaling failed.",
+                            errorHint = "Lower the factor, or try a smaller source image.",
+                        )
+                    },
+                )
+            } catch (failure: Throwable) {
+                _state.value = _state.value.copy(error = failure.message ?: "Upscaling failed.")
+            } finally {
+                _state.value = _state.value.copy(generating = false)
+            }
+        }
+    }
+
     private fun currentParams(seed: Long): SparseParams {
         val s = _state.value
         return SparseParams.of(

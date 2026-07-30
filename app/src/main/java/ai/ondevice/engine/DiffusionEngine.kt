@@ -276,6 +276,53 @@ class DiffusionEngine(
         return Rgb(out, width, height)
     }
 
+    /**
+     * Upscale a finished picture with an installed ESRGAN model.
+     *
+     * Deliberately not part of a generate: sd.cpp keeps the upscaler in its own
+     * context, so this needs no diffusion model loaded and leaves a loaded one
+     * alone. It is also slow and memory-hungry — a 512 ² image at ×4 is four
+     * megapixels out — which is why it is an explicit action on a picture the
+     * user already has rather than a step tacked onto every run.
+     *
+     * [factor] of 0 accepts whatever the model was trained for, which for the
+     * ESRGAN family is usually ×4.
+     */
+    suspend fun upscale(
+        image: DiffusionImage,
+        esrganPath: String,
+        factor: Int = 0,
+        threads: Int = 0,
+        tileSize: Int = 0,
+    ): Result<DiffusionImage> = withContext(Dispatchers.Default) {
+        runCatching {
+            check(SdBridge.available) {
+                SdBridge.loadError ?: "The stable-diffusion.cpp runtime is not installed in this build."
+            }
+            check(esrganPath.isNotBlank()) {
+                "No upscaler is attached. Install an ESRGAN model and tick it under Attachments."
+            }
+            val rgb = ByteArray(image.width * image.height * 3)
+            var at = 0
+            image.pixels.forEach { pixel ->
+                rgb[at] = ((pixel shr 16) and 0xFF).toByte()
+                rgb[at + 1] = ((pixel shr 8) and 0xFF).toByte()
+                rgb[at + 2] = (pixel and 0xFF).toByte()
+                at += 3
+            }
+            val out = SdBridge.nativeUpscale(
+                esrganPath = esrganPath,
+                rgb = rgb,
+                width = image.width,
+                height = image.height,
+                factor = factor,
+                threads = threads,
+                tileSize = tileSize,
+            ) ?: error("The upscaler returned nothing.")
+            unpack(out)
+        }
+    }
+
     /** Unpack the 8-byte header the native side prepends. */
     private fun unpack(bytes: ByteArray): DiffusionImage {
         val buffer = ByteBuffer.wrap(bytes, 0, 8).order(ByteOrder.LITTLE_ENDIAN)

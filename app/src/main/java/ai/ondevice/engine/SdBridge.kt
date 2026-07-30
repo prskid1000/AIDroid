@@ -50,6 +50,25 @@ object SdBridge {
         threads: Int,
     ): Long
 
+    /**
+     * ESRGAN upscaling. Takes no handle: sd.cpp gives the upscaler its own
+     * context, separate from the diffusion one, so this does not need a model
+     * loaded and does not disturb one that is.
+     *
+     * Returns the same shape as [nativeGenerate] — 8 bytes of width and height,
+     * then packed RGB — because the output size depends on the model's own
+     * factor when `factor` is 0.
+     */
+    external fun nativeUpscale(
+        esrganPath: String,
+        rgb: ByteArray,
+        width: Int,
+        height: Int,
+        factor: Int,
+        threads: Int,
+        tileSize: Int,
+    ): ByteArray?
+
     external fun nativeFree(handle: Long)
 
     external fun nativeApplyParams(handle: Long, paramsJson: String): String
