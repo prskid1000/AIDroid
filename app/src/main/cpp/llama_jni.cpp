@@ -291,6 +291,79 @@ const std::map<std::string, param_row> & param_table() {
     return table;
 }
 
+// --------------------------------------------------------------------------
+// What upstream's own defaults are.
+//
+// Every setter above already reads the live value as its fallback — `as_int(v,
+// e.params.n_ctx)` — so llama.cpp's default for each key is sitting in a
+// default-constructed common_params. Nothing was reporting it, so the app's
+// manifest hand-asserted "default": 0.8 for temp and so on, which is a second
+// copy of a number upstream is free to change.
+//
+// This reads them back so the manifest does not have to claim them. It is
+// deliberately a *separate* table rather than a getter bolted onto every row:
+// param_table has entries with real logic in them — samplers, grammar,
+// logit_bias, the two keys that share load_mode — and rewriting fifty-seven
+// working setters to bolt a getter onto four dozen of them is a large edit
+// whose only failure mode is a silent typo in a setter that currently works.
+//
+// A key absent here reports no default and the manifest's description stands,
+// which is the honest fallback: a value nobody can read back is one we should
+// not claim to have read.
+// --------------------------------------------------------------------------
+
+const std::map<std::string, json (*)(const common_params &)> & default_table() {
+    static const std::map<std::string, json (*)(const common_params &)> table = {
+        { "n_ctx",              [](const common_params & p) { return json(p.n_ctx); } },
+        { "n_batch",            [](const common_params & p) { return json(p.n_batch); } },
+        { "n_ubatch",           [](const common_params & p) { return json(p.n_ubatch); } },
+        { "n_gpu_layers",       [](const common_params & p) { return json(p.n_gpu_layers); } },
+        { "n_threads",          [](const common_params & p) { return json(p.cpuparams.n_threads); } },
+        { "n_threads_batch",    [](const common_params & p) { return json(p.cpuparams_batch.n_threads); } },
+        { "n_parallel",         [](const common_params & p) { return json(p.n_parallel); } },
+        { "main_gpu",           [](const common_params & p) { return json(p.main_gpu); } },
+        { "no_kv_offload",      [](const common_params & p) { return json(p.no_kv_offload); } },
+        { "check_tensors",      [](const common_params & p) { return json(p.check_tensors); } },
+        { "rope_freq_base",     [](const common_params & p) { return json(p.rope_freq_base); } },
+        { "rope_freq_scale",    [](const common_params & p) { return json(p.rope_freq_scale); } },
+        { "yarn_ext_factor",    [](const common_params & p) { return json(p.yarn_ext_factor); } },
+        { "yarn_attn_factor",   [](const common_params & p) { return json(p.yarn_attn_factor); } },
+        { "yarn_beta_fast",     [](const common_params & p) { return json(p.yarn_beta_fast); } },
+        { "yarn_beta_slow",     [](const common_params & p) { return json(p.yarn_beta_slow); } },
+        { "yarn_orig_ctx",      [](const common_params & p) { return json(p.yarn_orig_ctx); } },
+
+        { "temp",               [](const common_params & p) { return json(p.sampling.temp); } },
+        { "top_k",              [](const common_params & p) { return json(p.sampling.top_k); } },
+        { "top_p",              [](const common_params & p) { return json(p.sampling.top_p); } },
+        { "min_p",              [](const common_params & p) { return json(p.sampling.min_p); } },
+        { "typical_p",          [](const common_params & p) { return json(p.sampling.typ_p); } },
+        { "top_n_sigma",        [](const common_params & p) { return json(p.sampling.top_n_sigma); } },
+        { "min_keep",           [](const common_params & p) { return json(p.sampling.min_keep); } },
+        { "repeat_penalty",     [](const common_params & p) { return json(p.sampling.penalty_repeat); } },
+        { "repeat_last_n",      [](const common_params & p) { return json(p.sampling.penalty_last_n); } },
+        { "presence_penalty",   [](const common_params & p) { return json(p.sampling.penalty_present); } },
+        { "frequency_penalty",  [](const common_params & p) { return json(p.sampling.penalty_freq); } },
+        { "dry_multiplier",     [](const common_params & p) { return json(p.sampling.dry_multiplier); } },
+        { "dry_base",           [](const common_params & p) { return json(p.sampling.dry_base); } },
+        { "dry_allowed_length", [](const common_params & p) { return json(p.sampling.dry_allowed_length); } },
+        { "dry_penalty_last_n", [](const common_params & p) { return json(p.sampling.dry_penalty_last_n); } },
+        { "xtc_probability",    [](const common_params & p) { return json(p.sampling.xtc_probability); } },
+        { "xtc_threshold",      [](const common_params & p) { return json(p.sampling.xtc_threshold); } },
+        { "mirostat",           [](const common_params & p) { return json(p.sampling.mirostat); } },
+        { "mirostat_tau",       [](const common_params & p) { return json(p.sampling.mirostat_tau); } },
+        { "mirostat_eta",       [](const common_params & p) { return json(p.sampling.mirostat_eta); } },
+        { "dynatemp_range",     [](const common_params & p) { return json(p.sampling.dynatemp_range); } },
+        { "dynatemp_exponent",  [](const common_params & p) { return json(p.sampling.dynatemp_exponent); } },
+        { "ignore_eos",         [](const common_params & p) { return json(p.sampling.ignore_eos); } },
+        { "n_probs",            [](const common_params & p) { return json(p.sampling.n_probs); } },
+
+        { "n_predict",          [](const common_params & p) { return json(p.n_predict); } },
+        { "n_keep",             [](const common_params & p) { return json(p.n_keep); } },
+        { "context_shift",      [](const common_params & p) { return json(p.ctx_shift); } },
+    };
+    return table;
+}
+
 /**
  * Apply a JSON object of parameters. Returns the report SPEC §16.6 promises:
  * what was taken, and what this build did not recognise. An unknown key is
@@ -459,9 +532,21 @@ Java_ai_ondevice_engine_LlamaBridge_nativeSystemInfo(JNIEnv * env, jobject) {
  */
 JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_LlamaBridge_nativeSupportedParams(JNIEnv * env, jobject) {
+    // Aggregate-initialised: common_params has no user-provided default
+    // constructor, so `const common_params defaults;` will not compile. The
+    // members still get their in-class initialisers, which is exactly the set
+    // of upstream defaults being reported.
+    const common_params defaults = {};
+    const auto & readers = default_table();
+
     json out = json::object();
     for (const auto & entry : param_table()) {
-        out[entry.first] = json{ { "reload", entry.second.reload } };
+        json row{ { "reload", entry.second.reload } };
+        const auto reader = readers.find(entry.first);
+        if (reader != readers.end()) {
+            row["default"] = reader->second(defaults);
+        }
+        out[entry.first] = row;
     }
     return jni_from_string(env, out.dump());
 }

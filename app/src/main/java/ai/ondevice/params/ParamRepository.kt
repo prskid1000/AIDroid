@@ -80,14 +80,22 @@ class ParamRepository(
         val kept = described
             .filter { it.key in declared }
             .map { spec ->
-                // The reload flag belongs to the runtime, which is the only
-                // party that knows whether a key can be pushed into a live
-                // context. App-applied keys report false and take the
-                // manifest's answer, since the manifest is the only source
-                // for those.
+                // The reload flag and the default belong to the runtime. It is
+                // the only party that knows whether a key can be pushed into a
+                // live context, and its default is the one generation will
+                // actually use — the manifest's was a second copy of a number
+                // upstream is free to change between releases.
+                //
+                // A null default means the engine did not report one, not that
+                // the default is nothing, so the manifest's stands. App-applied
+                // keys take the manifest's answer for both: it is their only
+                // source.
                 val capability = declared.getValue(spec.key)
                 if (capability.appliedBy == ParamCapability.Applier.RUNTIME) {
-                    spec.copy(requiresReload = capability.requiresReload)
+                    spec.copy(
+                        requiresReload = capability.requiresReload,
+                        default = capability.default ?: spec.default,
+                    )
                 } else {
                     spec
                 }

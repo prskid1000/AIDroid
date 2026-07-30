@@ -8,6 +8,7 @@ import ai.ondevice.engine.WhisperBridge
 import ai.ondevice.speech.KokoroEngine
 import ai.ondevice.speech.OmniVoiceEngine
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonObject
@@ -26,6 +27,15 @@ data class ParamCapability(
     val key: String,
     val requiresReload: Boolean,
     val appliedBy: Applier,
+    /**
+     * The runtime's own default, when it can report one.
+     *
+     * llama.cpp's setters already fall back to the live value, so its defaults
+     * exist in a default-constructed `common_params` and are read back from
+     * there. Null means the engine did not say — the manifest's description
+     * stands, which is what it is for.
+     */
+    val default: JsonElement? = null,
 ) {
     enum class Applier { RUNTIME, APP }
 }
@@ -109,16 +119,15 @@ object EngineParams {
         val text = runCatching(report).getOrNull() ?: return null
         val parsed = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return null
         return parsed.mapValues { (key, value) ->
+            val row = value as? JsonObject
             ParamCapability(
                 key = key,
-                requiresReload = reloadFlag(value as? JsonObject),
+                requiresReload = row?.get("reload")?.jsonPrimitive?.booleanOrNull ?: false,
                 appliedBy = ParamCapability.Applier.RUNTIME,
+                default = row?.get("default"),
             )
         }
     }
-
-    private fun reloadFlag(obj: JsonObject?): Boolean =
-        obj?.get("reload")?.jsonPrimitive?.booleanOrNull ?: false
 
     private fun app(keys: Collection<String>): Map<String, ParamCapability> =
         keys.associateWith {

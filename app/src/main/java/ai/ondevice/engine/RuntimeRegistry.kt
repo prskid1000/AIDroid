@@ -11,11 +11,16 @@ import kotlinx.serialization.json.Json
  * SPEC §2.3 — each engine registers a capability descriptor at boot, and the
  * resolver queries this registry rather than knowing anything about models.
  *
- * The architecture list is **not hand-maintained**. §2.3 and Appendix A #3 both
- * insist it be generated from the pinned upstream source at build time, because
- * a hand-kept list rots and silently reintroduces model-locking. It therefore
- * ships as a CI-generated asset that the registry reads; regenerating it is a
- * step in the runtime-bump pipeline (§17.5), not an edit to this file.
+ * The architecture list is not written here. §2.3 and Appendix A #3 both insist
+ * it come from the pinned upstream source, because a hand-kept list rots and
+ * silently reintroduces model-locking. It ships as `runtimes.json`, the output
+ * of `tools/generate_runtimes.py`; bumping a runtime means running that script,
+ * not editing this file.
+ *
+ * The comment here used to say "CI-generated asset" and cite a runtime-bump
+ * pipeline. There is no CI — no workflow directory, and no Gradle task invokes
+ * the script. Naming it as something a person runs is the version of the rule
+ * that can actually be followed.
  */
 class RuntimeRegistry(private val context: Context) {
 
