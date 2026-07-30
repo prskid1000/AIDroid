@@ -41,7 +41,22 @@ data class ModelEntity(
     val eosToken: String?,
     /** mmproj / VAE / text encoders / voices, resolved and paired automatically. */
     val companionPathsJson: String,
+    /** When the library row was written — which is when the download *started*. */
     val installedAt: Long,
+    /**
+     * When every byte arrived and verified, or null while it has not.
+     *
+     * This is the record that a model is usable. It used to be derived instead,
+     * as "no download_jobs row for this model is still active" — the absence of
+     * evidence standing in for evidence. That reads correctly right up until a
+     * job row goes missing for any reason at all (a pruned history, a failed
+     * write, a user clearing the download list), at which point a model that
+     * never finished is silently promoted to installed and handed to llama.cpp,
+     * which reports it as a corrupt header.
+     *
+     * Written once, by the downloader, at the moment the last file verifies.
+     */
+    val completedAt: Long? = null,
     val lastUsedAt: Long?,
     /** "Keep loaded" — survives screen-off, not process death (SPEC §3.5). */
     val pinned: Boolean,

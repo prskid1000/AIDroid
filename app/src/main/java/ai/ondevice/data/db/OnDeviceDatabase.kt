@@ -58,7 +58,7 @@ class Converters {
         ParamManifestEntity::class,
         McpServerEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -134,6 +134,38 @@ abstract class OnDeviceDatabase : RoomDatabase() {
                         )
                     }
                 }
+            }
+        }
+
+        /**
+         * v4 records when a download finished, instead of inferring it from the
+         * absence of a queue entry.
+         *
+         * The backfill is the delicate part. Every existing row predates the
+         * column, and most of them are genuinely installed — wiping them to NULL
+         * would empty the library. So the migration answers each row the way the
+         * old query did, once: complete unless a download job for it is still
+         * active. That reproduces today's visible state exactly, which is the
+         * point of a backfill; it is the *future* reads that stop guessing.
+         *
+         * `installedAt` is used as the timestamp because it is the only date the
+         * row has. It is the moment the download started rather than finished,
+         * and nothing reads `completedAt` as a date — only as null or not — so
+         * an approximate value here is honest about being one.
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `models` ADD COLUMN `completedAt` INTEGER DEFAULT NULL")
+                db.execSQL(
+                    """
+                    UPDATE `models` SET `completedAt` = `installedAt`
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM `download_jobs`
+                        WHERE `download_jobs`.`modelId` = `models`.`id`
+                          AND `download_jobs`.`state` IN ('QUEUED','RUNNING','PAUSED','VERIFYING')
+                    )
+                    """.trimIndent(),
+                )
             }
         }
     }

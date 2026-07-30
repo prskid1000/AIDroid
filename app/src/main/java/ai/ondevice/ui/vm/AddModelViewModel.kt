@@ -263,6 +263,9 @@ class AddModelViewModel @Inject constructor(
                         *companions.map { it.companionRole.orEmpty() to it.destPath }.toTypedArray(),
                     ).toJsonString(),
                     installedAt = System.currentTimeMillis(),
+                    // Not installed yet — the downloader stamps this when the
+                    // last file verifies, and until then no picker offers it.
+                    completedAt = null,
                     lastUsedAt = null,
                     pinned = false,
                     favourite = false,

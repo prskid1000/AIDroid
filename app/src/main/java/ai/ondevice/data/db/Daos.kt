@@ -29,17 +29,21 @@ interface ModelDao {
      * fails inside llama.cpp with a header error, which reads like a corrupt
      * model rather than an impatient user.
      *
-     * "Installed" is therefore derived from the download queue rather than
-     * stored on the row — one source of truth, and no migration.
+     * These four queries used to answer that with `NOT EXISTS (an active
+     * download_jobs row)`. It was one source of truth and no migration, and it
+     * was also the absence of evidence doing the work of evidence: every model
+     * with no job row at all — because history was cleared, because a write
+     * failed, because the queue was pruned — passed the test. The failure mode
+     * was silent and pointed at the wrong culprit, since what the user saw was
+     * llama.cpp rejecting a header.
+     *
+     * `completedAt` is now written by the downloader when the last file
+     * verifies, so the question is asked of a fact rather than of a gap.
      */
     @Query(
         """
         SELECT * FROM models
-        WHERE NOT EXISTS (
-            SELECT 1 FROM download_jobs
-            WHERE download_jobs.modelId = models.id
-              AND download_jobs.state IN ('QUEUED','RUNNING','PAUSED','VERIFYING')
-        )
+        WHERE completedAt IS NOT NULL
         ORDER BY lastUsedAt DESC, installedAt DESC
         """,
     )
@@ -48,12 +52,7 @@ interface ModelDao {
     @Query(
         """
         SELECT * FROM models
-        WHERE modality = :modality
-          AND NOT EXISTS (
-            SELECT 1 FROM download_jobs
-            WHERE download_jobs.modelId = models.id
-              AND download_jobs.state IN ('QUEUED','RUNNING','PAUSED','VERIFYING')
-          )
+        WHERE modality = :modality AND completedAt IS NOT NULL
         ORDER BY lastUsedAt DESC
         """,
     )
@@ -62,12 +61,7 @@ interface ModelDao {
     @Query(
         """
         SELECT * FROM models
-        WHERE modality = :modality
-          AND NOT EXISTS (
-            SELECT 1 FROM download_jobs
-            WHERE download_jobs.modelId = models.id
-              AND download_jobs.state IN ('QUEUED','RUNNING','PAUSED','VERIFYING')
-          )
+        WHERE modality = :modality AND completedAt IS NOT NULL
         ORDER BY lastUsedAt DESC
         """,
     )
@@ -76,15 +70,15 @@ interface ModelDao {
     @Query(
         """
         SELECT * FROM models
-        WHERE NOT EXISTS (
-            SELECT 1 FROM download_jobs
-            WHERE download_jobs.modelId = models.id
-              AND download_jobs.state IN ('QUEUED','RUNNING','PAUSED','VERIFYING')
-        )
+        WHERE completedAt IS NOT NULL
         ORDER BY lastUsedAt DESC, installedAt DESC
         """,
     )
     suspend fun getInstalled(): List<ModelEntity>
+
+    /** Set once, by the downloader, when the last file of a model verifies. */
+    @Query("UPDATE models SET completedAt = :at WHERE id = :modelId")
+    suspend fun markCompleted(modelId: String, at: Long)
 
     /** Models with a download still in flight, so the library can say so. */
     @Query(

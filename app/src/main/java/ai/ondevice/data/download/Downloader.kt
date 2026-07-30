@@ -210,6 +210,9 @@ class Downloader(
         // A sharded model completes atomically: only once every part has
         // verified does the job report complete.
         val current = db.downloads().get(jobId) ?: return
+        // Stamped before the job flips to COMPLETE, so there is no instant in
+        // which the queue says finished and the library still says not.
+        db.models().markCompleted(current.modelId, now())
         update(
             current.copy(
                 state = DownloadState.COMPLETE,
