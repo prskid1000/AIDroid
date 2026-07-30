@@ -249,10 +249,10 @@ class ModelResolver(
         // The sidecar weight files have to be priced too, or the variant reports
         // the size of a graph stub. They are asked for alongside the graphs
         // rather than discovered later, because paths-info is one round trip.
-        val sidecars = (graphSets?.values?.flatten() ?: primaryFiles)
-            .flatMap { onnxSidecars(it, files) }
+        val graphFiles = graphSets?.let { (it.runnable + it.unrunnable).values.flatten() }
+        val sidecars = (graphFiles ?: primaryFiles).flatMap { onnxSidecars(it, files) }
         val wanted = (
-            (graphSets?.values?.flatten() ?: primaryFiles) +
+            (graphFiles ?: primaryFiles) +
                 sidecars +
                 files.filter { isCompanionFilename(it) }
             ).distinct()
@@ -265,8 +265,31 @@ class ModelResolver(
             sizes = sizeLookup,
             info = info,
             allFiles = files,
-            preGrouped = graphSets,
-        )
+            preGrouped = graphSets?.runnable,
+        ) + graphSets?.unrunnable
+            // Guarded rather than passed through: enumerateQuants treats a null
+            // preGrouped as "group the primary files yourself", so calling it
+            // with an empty foreign set would re-enumerate every variant a
+            // second time.
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { foreign ->
+                enumerateQuants(
+                    files = primaryFiles,
+                    sizes = sizeLookup,
+                    info = info,
+                    allFiles = files,
+                    preGrouped = foreign,
+                ).map {
+                    // Shown, and refused. The provider's own name is the reason,
+                    // so there is no table of explanations to keep current — a
+                    // repo that adds a `webgpu/` folder tomorrow gets a correct
+                    // sentence today.
+                    it.copy(
+                        blockedReason = "is built for the ${it.name} execution provider, " +
+                            "which this build does not have",
+                    )
+                }
+            }.orEmpty()
         if (quants.isEmpty()) {
             return@withContext Resolution.Refused(
                 kind = RefusalKind.NO_RUNTIME,
@@ -680,7 +703,7 @@ class ModelResolver(
      *
      * Returns null when the repo is the ordinary one-file-per-choice shape.
      */
-    private fun onnxGraphSets(onnxFiles: List<String>): Map<String, List<String>>? {
+    private fun onnxGraphSets(onnxFiles: List<String>): GraphSets? {
         if (onnxFiles.size < 2) return null
         val byBase = onnxFiles.groupBy { it.substringAfterLast('/') }
         val repeated = byBase.filterValues { paths ->
@@ -688,13 +711,19 @@ class ModelResolver(
         }
         if (repeated.isEmpty()) return null
 
-        val byDirectory = onnxFiles.groupBy { it.substringBeforeLast('/', "") }
-            // An execution-provider folder is not a choice on this device. A
-            // CUDA export cannot run on a phone, and offering `cuda` beside
-            // `int4` invites a gigabyte of download that will never load. These
-            // are ONNX Runtime's own provider names, so the list describes our
-            // runtime rather than any model.
-            .filterKeys { it.substringAfterLast('/').lowercase() !in FOREIGN_PROVIDERS }
+        val allDirectories = onnxFiles.groupBy { it.substringBeforeLast('/', "") }
+        // An execution-provider folder is not a choice on this device: a CUDA
+        // export cannot run on a phone. These are ONNX Runtime's own provider
+        // names, so the test describes our runtime rather than any model.
+        //
+        // They are held back from the grouping below — a CUDA build would
+        // otherwise vote on which signature is the primary one — and then put
+        // back at the end, marked. Dropping them silently is what this used to
+        // do, and a variant that vanishes reads as a repo that does not have it,
+        // which sends people looking for the version they can see on the
+        // Hugging Face page.
+        val foreign = allDirectories.filterKeys { it.substringAfterLast('/').lowercase() in FOREIGN_PROVIDERS }
+        val byDirectory = allDirectories - foreign.keys
         if (byDirectory.isEmpty()) return null
 
         // Directories are only alternatives to each other when they hold the
@@ -727,11 +756,28 @@ class ModelResolver(
             .mapNotNull { (_, dirs) -> dirs.maxByOrNull { it.key.count { c -> c == '/' } } }
             .flatMap { it.value }
 
-        return alternatives.entries.associate { (directory, graphs) ->
+        val runnable = alternatives.entries.associate { (directory, graphs) ->
             val label = directory.ifEmpty { "root" }
             label to (graphs + chosenComponents)
         }
+        val unrunnable = foreign.entries.associate { (directory, graphs) ->
+            directory.substringAfterLast('/') to (graphs + chosenComponents)
+        }
+        return GraphSets(runnable, unrunnable)
     }
+
+    /**
+     * The variant directories a multi-graph ONNX repo offers, split by whether
+     * this build could load one.
+     *
+     * [unrunnable] is listed and refused rather than hidden, keyed by the
+     * execution provider whose name the directory carries — which is also the
+     * reason, so the message writes itself without a table of explanations.
+     */
+    private data class GraphSets(
+        val runnable: Map<String, List<String>>,
+        val unrunnable: Map<String, List<String>> = emptyMap(),
+    )
 
     /** `Qwen2.5-7B-Instruct-Q4_K_M.gguf` → `Q4_K_M`. */
     private fun extractQuantName(filename: String, info: HfModelInfo): String {
