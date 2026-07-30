@@ -82,6 +82,11 @@ class DiffusionEngine(
                 vaePath = pathFor(AttachmentRole.VAE),
                 taesdPath = pathFor(AttachmentRole.TAESD),
                 controlNetPath = pathFor(AttachmentRole.CONTROLNET),
+                clipLPath = pathFor(AttachmentRole.CLIP_L),
+                clipGPath = pathFor(AttachmentRole.CLIP_G),
+                t5xxlPath = pathFor(AttachmentRole.T5XXL),
+                ipAdapterPath = pathFor(AttachmentRole.IP_ADAPTER),
+                embeddingsPath = pathFor(AttachmentRole.EMBEDDING),
                 threads = threads,
             )
             check(newHandle != 0L) { "The runtime returned no handle for $modelPath." }
@@ -140,11 +145,15 @@ class DiffusionEngine(
         // Attachments the *runtime* takes per-run, as a role-tagged list.
         //
         // Ticked attachments first, then anything named by an Expert parameter
-        // for a role nothing is ticked for. Without the second pass the manifest
-        // keys `ip_adapter`, `clip_l`, `clip_g`, `t5xxl`, `embd_dir` and
-        // `upscale_model` were settable and inert — the Image screen's
-        // Attachments section was the only route that reached sd.cpp.
-        val ticked = request.attachments.filter { it.enabled }
+        // for a role nothing is ticked for.
+        //
+        // Only the two roles the runtime takes per-run are sent: sd.cpp applies
+        // LoRAs per generation and can hot-swap a ControlNet, and everything
+        // else is a context field set at load. Sending the others here would be
+        // silently ignored, which is how they came to look wired in the first
+        // place.
+        val perRun = listOf(AttachmentRole.LORA, AttachmentRole.CONTROLNET)
+        val ticked = request.attachments.filter { it.enabled && it.role in perRun }
         val attachmentsJson = buildJsonArray {
             ticked.forEach { attachment ->
                 add(
@@ -155,7 +164,7 @@ class DiffusionEngine(
                     },
                 )
             }
-            AttachmentRole.entries
+            perRun
                 .filterNot { role -> ticked.any { it.role == role } }
                 .forEach { role ->
                     val path = request.params.string(role.paramKey)

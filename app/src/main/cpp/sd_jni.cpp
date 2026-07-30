@@ -282,11 +282,23 @@ Java_ai_ondevice_engine_SdBridge_nativeSystemInfo(JNIEnv * env, jobject) {
 
 JNIEXPORT jlong JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeLoad(
-        JNIEnv * env, jobject, jstring jmodel, jstring jvae, jstring jtaesd, jstring jcontrolNet, jint threads) {
+        JNIEnv * env, jobject, jstring jmodel, jstring jvae, jstring jtaesd, jstring jcontrolNet,
+        jstring jclipL, jstring jclipG, jstring jt5xxl, jstring jipAdapter, jstring jembeddings,
+        jint threads) {
     const auto model      = jni_to_string(env, jmodel);
     const auto vae        = jni_to_string(env, jvae);
     const auto taesd      = jni_to_string(env, jtaesd);
     const auto controlNet = jni_to_string(env, jcontrolNet);
+    // The rest of sd_ctx_params_t's auxiliary paths. These were classified,
+    // offered in the UI, sent across as role-tagged attachments — and then
+    // dropped, because the per-run attachment loop only understands LORA and
+    // CONTROLNET and every other role fell through its if/else. They are
+    // load-time fields in sd.cpp, so this is where they belong.
+    const auto clipL      = jni_to_string(env, jclipL);
+    const auto clipG      = jni_to_string(env, jclipG);
+    const auto t5xxl      = jni_to_string(env, jt5xxl);
+    const auto ipAdapter  = jni_to_string(env, jipAdapter);
+    const auto embeddings = jni_to_string(env, jembeddings);
 
     static std::once_flag once;
     std::call_once(once, [] {
@@ -308,6 +320,11 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
     params.vae_path         = vae.empty() ? nullptr : vae.c_str();
     params.taesd_path       = taesd.empty() ? nullptr : taesd.c_str();
     params.control_net_path = controlNet.empty() ? nullptr : controlNet.c_str();
+    params.clip_l_path      = clipL.empty() ? nullptr : clipL.c_str();
+    params.clip_g_path      = clipG.empty() ? nullptr : clipG.c_str();
+    params.t5xxl_path       = t5xxl.empty() ? nullptr : t5xxl.c_str();
+    params.ip_adapter_path  = ipAdapter.empty() ? nullptr : ipAdapter.c_str();
+    params.embeddings_connectors_path = embeddings.empty() ? nullptr : embeddings.c_str();
     params.n_threads        = threads > 0 ? threads : sd_get_num_physical_cores();
     params.enable_mmap      = true;
     // The GPU backends are not compiled in on this platform, so asking for

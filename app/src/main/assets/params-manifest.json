@@ -170,8 +170,7 @@
         { "key": "clip_g", "group": "model", "type": "path", "default": "", "tier": "EXPERT", "label": "CLIP-G", "help": "Second text encoder for SDXL and SD3.", "requiresReload": true, "cliFlag": "--clip_g" },
         { "key": "t5xxl", "group": "model", "type": "path", "default": "", "tier": "EXPERT", "label": "T5-XXL", "help": "Large text encoder for SD3 and Flux.", "requiresReload": true, "cliFlag": "--t5xxl" },
         { "key": "embd_dir", "group": "model", "type": "path", "default": "", "tier": "EXPERT", "label": "Embeddings directory", "help": "Textual-inversion embeddings.", "requiresReload": true, "cliFlag": "--embd-dir" },
-        { "key": "control_net", "group": "controlnet", "type": "path", "default": "", "tier": "EXPERT", "label": "ControlNet model", "help": "Path to the ControlNet weights.", "requiresReload": true, "cliFlag": "--control-net" },
-        { "key": "upscale_model", "group": "upscale", "type": "path", "default": "", "tier": "EXPERT", "label": "Upscale model", "help": "ESRGAN-family upscaler.", "requiresReload": true, "cliFlag": "--upscale-model" }
+        { "key": "control_net", "group": "controlnet", "type": "path", "default": "", "tier": "EXPERT", "label": "ControlNet model", "help": "Path to the ControlNet weights.", "requiresReload": true, "cliFlag": "--control-net" }
       ]
     },
 

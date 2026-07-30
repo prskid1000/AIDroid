@@ -37,6 +37,16 @@ object SdBridge {
         vaePath: String,
         taesdPath: String,
         controlNetPath: String,
+        /**
+         * The remaining sd_ctx_params_t auxiliary paths. Load-time in sd.cpp,
+         * which is why routing them through the per-run attachment list silently
+         * dropped them: that loop only understands LORA and CONTROLNET.
+         */
+        clipLPath: String,
+        clipGPath: String,
+        t5xxlPath: String,
+        ipAdapterPath: String,
+        embeddingsPath: String,
         threads: Int,
     ): Long
 

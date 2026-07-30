@@ -149,7 +149,18 @@ class ModelResolver(
             )
         }
 
-        if (ggufFiles.isEmpty() && ggmlBins.isEmpty() && onnxFiles.isEmpty()) {
+        // Diffusion auxiliaries are the exception to the GGUF rule, and it is not
+        // a small one: safetensors is the *native* format for a LoRA, a
+        // ControlNet, a VAE, a TAESD decoder or an IP-Adapter, and sd.cpp loads
+        // all of them directly. Refusing them for "needing a desktop to convert"
+        // was advice for a conversion that must not happen — and because every
+        // published auxiliary ships this way, it made the Image screen's
+        // Attachments section impossible to fill by any route. That section
+        // looked unimplemented for exactly this reason.
+        val auxiliaries = (safetensors + files.filter { it.endsWith(".ckpt", ignoreCase = true) })
+            .filter { ai.ondevice.core.AttachmentRole.classify(it) != null }
+
+        if (ggufFiles.isEmpty() && ggmlBins.isEmpty() && onnxFiles.isEmpty() && auxiliaries.isEmpty()) {
             return@withContext if (safetensors.isNotEmpty() || files.any { it.endsWith(".bin") }) {
                 pytorchOnlyRefusal(repoRef)
             } else {
@@ -167,14 +178,19 @@ class ModelResolver(
         val format = when {
             ggufFiles.isNotEmpty() -> ModelFormat.GGUF
             ggmlBins.isNotEmpty() -> ModelFormat.GGML_BIN
-            else -> ModelFormat.ONNX
+            onnxFiles.isNotEmpty() -> ModelFormat.ONNX
+            else -> ModelFormat.SAFETENSORS
         }
 
         // Step 4/6 — enumerate quant variants, folding shard sets into one entry.
         val primaryFiles = when (format) {
             ModelFormat.GGUF -> ggufFiles.filterNot { isCompanionFilename(it) }
             ModelFormat.GGML_BIN -> ggmlBins
-            else -> onnxFiles
+            ModelFormat.ONNX -> onnxFiles
+            // For an auxiliary pack the "variants" are the individual
+            // auxiliaries — canny, depth, openpose — and picking one is the
+            // point, not a quality trade-off.
+            else -> auxiliaries
         }
 
         // Step 7 — pin *first*, then read everything at the pin.
@@ -312,6 +328,12 @@ class ModelResolver(
         val arch = info.gguf?.architecture?.lowercase()
         return when {
             format == ModelFormat.GGML_BIN || arch == "whisper" -> Modality.SPEECH_TO_TEXT
+            // A safetensors repo that got this far did so because its files
+            // classify as diffusion auxiliaries, so it belongs to the diffusion
+            // runtime — not to whatever its tags claim. h94/IP-Adapter is tagged
+            // text-to-image, which would otherwise file an adapter as a base
+            // model and offer it in the Image screen's model picker.
+            format == ModelFormat.SAFETENSORS -> Modality.DIFFUSION
             files.any { it.contains("voices", true) && it.endsWith(".bin") } &&
                 files.any { it.endsWith(".onnx") } -> Modality.TEXT_TO_SPEECH
             format == ModelFormat.ONNX && info.tags.any { it.contains("text-to-speech", true) } -> Modality.TEXT_TO_SPEECH
