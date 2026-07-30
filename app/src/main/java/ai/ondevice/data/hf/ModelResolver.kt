@@ -643,6 +643,10 @@ class ModelResolver(
                     onnx = key.endsWith(".onnx", ignoreCase = true),
                     graphSet = preGrouped != null,
                 ),
+                cautionReason = quantCaution(
+                    totalBytes = remoteFiles.sumOf { it.sizeBytes },
+                    parameterCount = info.gguf?.total,
+                ),
             )
         }.sortedBy { it.totalBytes }
     }
@@ -780,6 +784,40 @@ class ModelResolver(
         }
         val match = Regex("""(?i)(IQ\d[_A-Z0-9]*|Q\d[_A-Z0-9]*|BF16|F16|F32)$""").find(base)
         return match?.value?.uppercase() ?: base.substringAfterLast('-').ifBlank { base }
+    }
+
+    /**
+     * A warning that this variant will run and should probably not be chosen.
+     *
+     * Measured, not looked up. Bits per weight is the download size divided by
+     * the parameter count the repo declares, so it needs no table of quant
+     * names and cannot go stale when a new one appears — an unfamiliar
+     * three-letter suffix is judged by the same arithmetic as a familiar one.
+     *
+     * The thresholds are where the published perplexity curves bend rather than
+     * where they slope: under two bits per weight everything degrades sharply,
+     * and under about two and a half a small model degrades much faster than a
+     * large one, because a large one has redundancy to spend and a 1.7B does
+     * not. Above that, "smaller is worse" is a trade-off the note already
+     * describes and the user is entitled to make.
+     *
+     * Silent when the repo declares no parameter count, which is the honest
+     * answer: the caution is arithmetic, and without both numbers there is none
+     * to do.
+     */
+    private fun quantCaution(totalBytes: Long, parameterCount: Long?): String? {
+        if (parameterCount == null || parameterCount <= 0L || totalBytes <= 0L) return null
+        val bitsPerWeight = totalBytes.toDouble() * 8.0 / parameterCount.toDouble()
+        val rounded = String.format("%.1f", bitsPerWeight)
+        return when {
+            bitsPerWeight < 2.0 ->
+                "About $rounded bits per weight. Below two, models answer confidently and wrongly " +
+                    "rather than just less well — this one is for experimenting with, not using."
+            bitsPerWeight < 2.5 && parameterCount < SMALL_MODEL_PARAMS ->
+                "About $rounded bits per weight, on a model this size. A large model absorbs that; " +
+                    "one under ${SMALL_MODEL_PARAMS / 1_000_000_000}B has no redundancy to spare."
+            else -> null
+        }
     }
 
     /**
@@ -969,6 +1007,9 @@ class ModelResolver(
          * repos that export fp16 under that name.
          */
         const val ORIGINAL_EXPORT = "original"
+
+        /** Below this, a heavy quantisation has no redundancy to eat into. */
+        const val SMALL_MODEL_PARAMS = 4_000_000_000L
 
         /**
          * How many safetensors a repo may hold before header probing is skipped.

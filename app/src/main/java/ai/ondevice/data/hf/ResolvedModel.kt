@@ -98,6 +98,17 @@ data class QuantVariant(
      * say is which one to pick instead.
      */
     val blockedReason: String? = null,
+    /**
+     * Why this variant is a bad idea, when it will nonetheless run.
+     *
+     * Distinct from [blockedReason] on purpose: this does not stop the
+     * download, it just refuses to let the smallest number on the screen be the
+     * only thing the user is told. Below about two bits per weight a small
+     * model stops being a worse version of itself and starts producing
+     * confident nonsense, and "1.1 GB" reads like the sensible choice right up
+     * until it is loaded.
+     */
+    val cautionReason: String? = null,
 ) {
     val totalBytes: Long get() = files.sumOf { it.sizeBytes }
     val isSharded: Boolean get() = files.size > 1

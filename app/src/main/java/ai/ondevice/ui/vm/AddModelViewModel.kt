@@ -160,10 +160,23 @@ class AddModelViewModel @Inject constructor(
      * the variant that works, so "pick the smallest" selected the one that
      * refuses to open and did it silently.
      */
+    /**
+     * What to pre-select.
+     *
+     * Smallest-that-runs, with one exclusion: a variant carrying a caution is
+     * not offered as the default. The pre-selection is a recommendation whether
+     * it is meant as one or not — most people take it — so recommending the
+     * cheapest download while a note underneath explains that it answers
+     * confidently and wrongly is the app disagreeing with itself.
+     *
+     * Cautioned variants stay in the list and stay selectable. The user is
+     * allowed to want one; they should not arrive at one by not choosing.
+     */
     private fun pickDefaultQuant(model: ResolvedModel): QuantVariant? {
         val runnable = model.quants.filter { it.runnable }.ifEmpty { model.quants }
-        return runnable.firstOrNull { it.speedClass == ai.ondevice.core.SpeedClass.OPENCL_FAST }
-            ?: runnable.minByOrNull { it.totalBytes }
+        val advisable = runnable.filter { it.cautionReason == null }.ifEmpty { runnable }
+        return advisable.firstOrNull { it.speedClass == ai.ondevice.core.SpeedClass.OPENCL_FAST }
+            ?: advisable.minByOrNull { it.totalBytes }
     }
 
     /**

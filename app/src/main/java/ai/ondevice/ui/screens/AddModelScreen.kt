@@ -284,6 +284,17 @@ fun AddModelScreen(
                                 quant.blockedReason?.let { "Cannot run here — $it" } ?: quant.note,
                                 Modifier.padding(top = 1.dp),
                             )
+                            // A caution is not a block. It runs; the point is
+                            // that the smallest number on the screen must not
+                            // be the only thing said about it.
+                            quant.cautionReason?.takeIf { quant.blockedReason == null }?.let {
+                                Text(
+                                    it,
+                                    style = NocturneType.Help,
+                                    color = NocturneColors.Accent300,
+                                    modifier = Modifier.padding(top = 3.dp),
+                                )
+                            }
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             Text(
