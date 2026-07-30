@@ -194,6 +194,34 @@ const std::map<std::string, row> & table() {
     return t;
 }
 
+// This build's defaults, read back off a default-constructed od_sd rather than
+// asserted a second time in the manifest. Every setter above already falls back
+// to the live value, so the numbers were here all along.
+const std::map<std::string, json (*)(const od_sd &)> & default_table() {
+    static const std::map<std::string, json (*)(const od_sd &)> t = {
+        { "prompt",           [](const od_sd & e) { return json(e.prompt); } },
+        { "negative_prompt",  [](const od_sd & e) { return json(e.negative_prompt); } },
+        { "steps",            [](const od_sd & e) { return json(e.steps); } },
+        { "cfg_scale",        [](const od_sd & e) { return json(e.cfg_scale); } },
+        { "guidance",         [](const od_sd & e) { return json(e.guidance); } },
+        { "flow_shift",       [](const od_sd & e) { return json(e.flow_shift); } },
+        { "slg_scale",        [](const od_sd & e) { return json(e.slg_scale); } },
+        { "skip_layer_start", [](const od_sd & e) { return json(e.skip_layer_start); } },
+        { "skip_layer_end",   [](const od_sd & e) { return json(e.skip_layer_end); } },
+        { "width",            [](const od_sd & e) { return json(e.width); } },
+        { "height",           [](const od_sd & e) { return json(e.height); } },
+        { "seed",             [](const od_sd & e) { return json(e.seed); } },
+        { "clip_skip",        [](const od_sd & e) { return json(e.clip_skip); } },
+        { "batch_count",      [](const od_sd & e) { return json(e.batch_count); } },
+        { "strength",         [](const od_sd & e) { return json(e.strength); } },
+        { "control_strength", [](const od_sd & e) { return json(e.control_strength); } },
+        { "vae_tiling",       [](const od_sd & e) { return json(e.vae_tiling); } },
+        { "sampling_method",  [](const od_sd & e) { return json(e.sampling_method); } },
+        { "schedule",         [](const od_sd & e) { return json(e.schedule); } },
+    };
+    return t;
+}
+
 /**
  * sd.cpp funnels three unrelated things through one progress callback:
  * weight loading (`pretty_bytes_progress`), VAE tile decoding, and the actual
@@ -279,9 +307,17 @@ extern "C" {
  */
 JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeSupportedParams(JNIEnv * env, jobject) {
+    const od_sd defaults = {};
+    const auto & readers = default_table();
+
     json out = json::object();
     for (const auto & entry : table()) {
-        out[entry.first] = json{ { "reload", false } };
+        json row{ { "reload", false } };
+        const auto reader = readers.find(entry.first);
+        if (reader != readers.end()) {
+            row["default"] = reader->second(defaults);
+        }
+        out[entry.first] = row;
     }
     return jni_from_string(env, out.dump());
 }

@@ -203,23 +203,39 @@ class OmniVoiceEngine {
         }
 
     /**
-     * The framing the model was trained with — and the single thing that
-     * decides whether this produces speech or noise.
+     * How the text is framed before the model sees it.
      *
-     * The ONNX repository's own `inference.py` does not do this: it calls
-     * `tokenizer.encode(text)` and hands the model bare prose. `modeling_
-     * omnivoice.py`, which is the actual model code, wraps every request as a
-     * style block followed by a delimited text block:
+     * There are two candidate answers and they disagree, which is worth stating
+     * plainly because this is the difference between speech and noise.
+     *
+     * `modeling_omnivoice.py` — the PyTorch model code — wraps every request as
+     * a style block followed by a delimited text block:
      *
      *     <|lang_start|>None<|lang_end|><|instruct_start|>None<|instruct_end|>
      *     <|text_start|>…<|text_end|>
      *
-     * "None" is not a placeholder this app invented — it is the literal string
-     * upstream writes when no language or style instruction is given, and the
-     * model was trained seeing it.
+     * All six of those specials are real entries in this repo's tokenizer, and
+     * "None" is upstream's own literal for "nothing specified", not a
+     * placeholder invented here. That is a good argument, and it is the one
+     * this engine followed first.
      *
-     * `<|denoise|>` is deliberately absent: upstream emits it only when a
-     * reference clip is supplied, and this build does not clone yet.
+     * `inference.py` — shipped in the ONNX repo, written against these exact
+     * exported graphs — does none of it. It calls `tokenizer.encode(text,
+     * add_special_tokens=True)` and hands the model bare prose.
+     *
+     * The wrapped form produced noise on device. So the default is now the
+     * reference script's, on the reasoning that the script distributed with an
+     * export describes that export better than the model code it was converted
+     * from: conversion is where a training-time framing gets baked into the
+     * graph, and if it were baked in, applying it again outside would double it.
+     *
+     * The wrapper survives for the case it is the only expression of — a
+     * language or a written voice description. There is no other way to say
+     * those, and upstream's form is the only documented one. That path is
+     * unverified; if it also comes back as noise, the wrapper is simply wrong
+     * for this export and `lang_code`/`voice_design` cannot be honoured by it.
+     *
+     * `<|denoise|>` stays absent: upstream emits it only with a reference clip.
      */
     private fun buildPrompt(
         tok: QwenTokenizer,
@@ -227,6 +243,9 @@ class OmniVoiceEngine {
         language: String?,
         instruction: String?,
     ): IntArray {
+        val styled = !language.isNullOrBlank() || !instruction.isNullOrBlank()
+        if (!styled) return tok.encode(text)
+
         val style = buildString {
             append("<|lang_start|>").append(language ?: "None").append("<|lang_end|>")
             append("<|instruct_start|>").append(instruction ?: "None").append("<|instruct_end|>")

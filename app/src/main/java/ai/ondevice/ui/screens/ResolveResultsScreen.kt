@@ -55,18 +55,22 @@ fun ResolveResultsScreen(onBack: () -> Unit) {
             Modifier.verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // Said once, at the top, because everything below it is invented.
-            // Without this line the screen reads as a report about this phone —
-            // and it was, briefly, reporting a runtime build the app has not
-            // shipped for months and a memory figure belonging to no device.
             Text(
-                "Examples of each refusal, not results. The figures below are illustrative; " +
-                    "a real refusal quotes this device and this runtime.",
+                "The ways a repo can be turned down. A real refusal appears under the paste " +
+                    "field on Add model, naming the repo, this device and this runtime, with " +
+                    "remedies you can act on.",
                 style = NocturneType.CardBody,
                 color = NocturneColors.Neutral400,
             )
-            SampleRefusals.forEach { refusal ->
-                RefusalCard(refusal, onRemedy = {})
+            RefusalKind.entries.forEach { kind ->
+                NCard {
+                    Text(kind.heading, style = NocturneType.CardTitleSm, color = NocturneColors.Text)
+                    Text(
+                        kind.explanation,
+                        style = NocturneType.CardBody,
+                        color = NocturneColors.Text.copy(alpha = 0.8f),
+                    )
+                }
             }
         }
     }
@@ -163,86 +167,3 @@ private fun RefusalMark(kind: RefusalKind) {
     }
 }
 
-/**
- * The five cases the canvas shows on S5, kept as data so the screen can be
- * reached without a live network. The *shape* of each is what
- * [ai.ondevice.data.hf.ModelResolver] produces; the numbers in them are not, and
- * the screen says so above.
- *
- * Nothing here may assert current device state. An earlier version wrote
- * "llama.cpp b6482 — the build installed on this device — has 41 architectures",
- * which was three false claims in one sentence by the time anyone read it: the
- * build is b10175, it has 138 architectures, and no reading was taken either
- * way. Phrase the fixtures so they cannot go stale, and let the live path quote
- * the registry.
- */
-private val SampleRefusals = listOf(
-    Resolution.Refused(
-        kind = RefusalKind.WONT_FIT,
-        title = "Won't fit",
-        subject = "Llama-3.3-70B-Instruct-GGUF · Q4_K_M",
-        detail = "Needs more resident memory than the device has. The live message quotes both " +
-            "figures and shows the working.",
-        working = "weights 42.5 + KV 1.5 at 4K + compute 0.2",
-        remedies = listOf(
-            ai.ondevice.data.hf.Remedy("Smaller quants (2)", RemedyAction.ShowSmallerQuants("")),
-            ai.ondevice.data.hf.Remedy("8B sibling", RemedyAction.SearchRepo("Llama-3.1-8B-Instruct-GGUF")),
-        ),
-    ),
-    Resolution.Refused(
-        kind = RefusalKind.PYTORCH_ONLY,
-        title = "PyTorch weights only",
-        subject = "mistralai/Mistral-Small-3.2-24B",
-        detail = "This repo ships safetensors. Converting to GGUF needs a desktop — the app won't " +
-            "pretend otherwise.",
-        remedies = listOf(
-            ai.ondevice.data.hf.Remedy(
-                "Search for Mistral-Small-3.2-24B-GGUF",
-                RemedyAction.SearchRepo("Mistral-Small-3.2-24B-GGUF"),
-                primary = true,
-            ),
-            ai.ondevice.data.hf.Remedy("bartowski", RemedyAction.OpenMirror("bartowski", "Mistral-Small-3.2-24B-GGUF")),
-            ai.ondevice.data.hf.Remedy("unsloth", RemedyAction.OpenMirror("unsloth", "Mistral-Small-3.2-24B-GGUF")),
-            ai.ondevice.data.hf.Remedy("mradermacher", RemedyAction.OpenMirror("mradermacher", "Mistral-Small-3.2-24B-GGUF")),
-        ),
-    ),
-    Resolution.Refused(
-        kind = RefusalKind.UNKNOWN_ARCHITECTURE,
-        title = "Unsupported architecture",
-        subject = "arch plamo3",
-        detail = "The installed llama.cpp build does not have this architecture. The live message " +
-            "names the build and its architecture count. A newer runtime may add it.",
-        remedies = listOf(
-            ai.ondevice.data.hf.Remedy("Check for runtime update", RemedyAction.CheckRuntimeUpdate, primary = true),
-            ai.ondevice.data.hf.Remedy(
-                "Upstream issues",
-                RemedyAction.OpenUrl("https://github.com/ggml-org/llama.cpp/issues?q=plamo3"),
-            ),
-        ),
-    ),
-    Resolution.Refused(
-        kind = RefusalKind.GATED,
-        title = "Gated repo",
-        subject = "google/gemma-3-27b-it-qat-q4_0-gguf",
-        detail = "Accept the licence on Hugging Face, then paste a token. The token is stored in the " +
-            "Android Keystore and used for nothing else.",
-        remedies = listOf(
-            ai.ondevice.data.hf.Remedy(
-                "Open repo page",
-                RemedyAction.OpenUrl("https://huggingface.co/google/gemma-3-27b-it-qat-q4_0-gguf"),
-                primary = true,
-            ),
-            ai.ondevice.data.hf.Remedy("Enter token", RemedyAction.EnterToken),
-        ),
-    ),
-    Resolution.Refused(
-        kind = RefusalKind.UNSCANNED,
-        title = "Unscanned files",
-        subject = "A warning, not a block",
-        detail = "Hugging Face hasn't scanned these files. GGUF has had template-injection " +
-            "vulnerabilities. Pickle files, if present, are blocked outright.",
-        remedies = listOf(
-            ai.ondevice.data.hf.Remedy("Continue anyway", RemedyAction.ContinueAnyway("")),
-        ),
-    ),
-)

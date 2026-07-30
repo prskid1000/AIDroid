@@ -86,7 +86,10 @@ fun AddModelScreen(
                         onValueChange = viewModel::onQueryChange,
                         minHeight = 44.dp,
                         textStyle = NocturneType.MonoValue.copy(fontSize = NocturneType.MonoCode.fontSize),
-                        placeholder = "unsloth/Qwen3-4B-Instruct-2507-GGUF",
+                        // Shows the shape of a Hugging Face id rather than a
+                        // second copy of one. Taken from the starter list below
+                        // so the example on screen is always one that resolves.
+                        placeholder = ai.ondevice.core.StarterModels.ALL.first().repoId,
                     )
                 }
                 NButton(

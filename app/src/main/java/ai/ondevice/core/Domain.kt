@@ -140,13 +140,46 @@ enum class ThermalPolicy {
 enum class MessageRole { USER, ASSISTANT, SYSTEM, TOOL_CALL, TOOL_RESULT }
 
 /** SPEC §3.2 — every refusal gets its own message and its own remedy. */
-enum class RefusalKind {
-    WONT_FIT,
-    PYTORCH_ONLY,
-    UNKNOWN_ARCHITECTURE,
-    GATED,
-    NOT_FOUND,
-    PICKLE_BLOCKED,
-    UNSCANNED,
-    NO_RUNTIME,
+enum class RefusalKind(val heading: String, val explanation: String) {
+    WONT_FIT(
+        "Won't fit",
+        "The weights, the KV cache at the chosen context, and the compute buffer add up to " +
+            "more than this device has. The live refusal shows the arithmetic and offers " +
+            "smaller quants.",
+    ),
+    PYTORCH_ONLY(
+        "PyTorch weights only",
+        "The repo ships safetensors or .bin with no GGUF or ONNX export. Converting needs a " +
+            "desktop, and the app will not pretend otherwise.",
+    ),
+    UNKNOWN_ARCHITECTURE(
+        "Unsupported architecture",
+        "The installed runtime does not list this architecture. The live refusal names the " +
+            "build and how many it knows; a newer one may add it.",
+    ),
+    GATED(
+        "Gated repo",
+        "Accept the licence on Hugging Face, then paste a token. The token goes in the " +
+            "Android Keystore and is used for nothing else.",
+    ),
+    NOT_FOUND(
+        "No such repo",
+        "Hugging Face has no repo by that id. Usually a typo or a private repo the token " +
+            "cannot see.",
+    ),
+    PICKLE_BLOCKED(
+        "Pickle files blocked",
+        "Pickle executes code on load. There is no safe way to open one, so it is refused " +
+            "outright rather than warned about.",
+    ),
+    UNSCANNED(
+        "Unscanned files",
+        "A warning, not a block. Hugging Face has not scanned these files, and GGUF has had " +
+            "template-injection vulnerabilities.",
+    ),
+    NO_RUNTIME(
+        "No runtime for this format",
+        "The format is recognised but the engine that reads it is not installed in this " +
+            "build.",
+    ),
 }

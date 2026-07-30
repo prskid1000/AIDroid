@@ -138,6 +138,43 @@ const std::map<std::string, row> & table() {
     return t;
 }
 
+// Every setter above reads the live value as its fallback, so a
+// default-constructed od_whisper holds this build's default for each key. The
+// manifest used to assert them separately; it now only describes.
+//
+// Three keys are named differently on the two sides — offset_t, duration and
+// prompt are offset_ms, duration_ms and initial_prompt on the struct — which is
+// the reason this maps by key rather than deriving anything from field names.
+const std::map<std::string, json (*)(const od_whisper &)> & default_table() {
+    static const std::map<std::string, json (*)(const od_whisper &)> t = {
+        { "language",         [](const od_whisper & e) { return json(e.language); } },
+        { "translate",        [](const od_whisper & e) { return json(e.translate); } },
+        { "detect_language",  [](const od_whisper & e) { return json(e.detect_language); } },
+        { "beam_size",        [](const od_whisper & e) { return json(e.beam_size); } },
+        { "best_of",          [](const od_whisper & e) { return json(e.best_of); } },
+        { "audio_ctx",        [](const od_whisper & e) { return json(e.audio_ctx); } },
+        { "threads",          [](const od_whisper & e) { return json(e.threads); } },
+        { "max_len",          [](const od_whisper & e) { return json(e.max_len); } },
+        { "max_context",      [](const od_whisper & e) { return json(e.max_context); } },
+        { "offset_t",         [](const od_whisper & e) { return json(e.offset_ms); } },
+        { "duration",         [](const od_whisper & e) { return json(e.duration_ms); } },
+        { "split_on_word",    [](const od_whisper & e) { return json(e.split_on_word); } },
+        { "word_thold",       [](const od_whisper & e) { return json(e.word_thold); } },
+        { "entropy_thold",    [](const od_whisper & e) { return json(e.entropy_thold); } },
+        { "logprob_thold",    [](const od_whisper & e) { return json(e.logprob_thold); } },
+        { "no_speech_thold",  [](const od_whisper & e) { return json(e.no_speech_thold); } },
+        { "temperature",      [](const od_whisper & e) { return json(e.temperature); } },
+        { "temperature_inc",  [](const od_whisper & e) { return json(e.temperature_inc); } },
+        { "no_fallback",      [](const od_whisper & e) { return json(e.no_fallback); } },
+        { "prompt",           [](const od_whisper & e) { return json(e.initial_prompt); } },
+        { "diarize",          [](const od_whisper & e) { return json(e.diarize); } },
+        { "suppress_blank",   [](const od_whisper & e) { return json(e.suppress_blank); } },
+        { "suppress_nst",     [](const od_whisper & e) { return json(e.suppress_nst); } },
+        { "single_segment",   [](const od_whisper & e) { return json(e.single_segment); } },
+    };
+    return t;
+}
+
 whisper_full_params build_params(od_whisper & e) {
     // Beam search when a beam size was asked for, greedy otherwise. whisper
     // treats these as different parameter shapes, so the choice has to be made
@@ -196,9 +233,17 @@ extern "C" {
  */
 JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_WhisperBridge_nativeSupportedParams(JNIEnv * env, jobject) {
+    const od_whisper defaults = {};
+    const auto & readers = default_table();
+
     json out = json::object();
     for (const auto & entry : table()) {
-        out[entry.first] = json{ { "reload", false } };
+        json row{ { "reload", false } };
+        const auto reader = readers.find(entry.first);
+        if (reader != readers.end()) {
+            row["default"] = reader->second(defaults);
+        }
+        out[entry.first] = row;
     }
     return jni_from_string(env, out.dump());
 }
