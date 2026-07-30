@@ -224,15 +224,32 @@ class ModelResolver(
         // concrete commit once, and using that same commit for paths-info and
         // for every download URL, is what makes the sha256 check meaningful.
         val pinnedRevision = info.sha?.takeIf { it.isNotBlank() } ?: repoRef.revision
-        val sizeLookup = api.pathsInfo(
-            repoId,
-            (primaryFiles + files.filter { isCompanionFilename(it) }).take(64),
-            pinnedRevision,
-        )
+
+        // A multi-graph ONNX model is grouped by directory, not by file — see
+        // onnxGraphSets. Null for every other shape.
+        val graphSets = if (format == ModelFormat.ONNX) onnxGraphSets(onnxFiles) else null
+
+        // The sidecar weight files have to be priced too, or the variant reports
+        // the size of a graph stub. They are asked for alongside the graphs
+        // rather than discovered later, because paths-info is one round trip.
+        val sidecars = (graphSets?.values?.flatten() ?: primaryFiles)
+            .flatMap { onnxSidecars(it, files) }
+        val wanted = (
+            (graphSets?.values?.flatten() ?: primaryFiles) +
+                sidecars +
+                files.filter { isCompanionFilename(it) }
+            ).distinct()
+        val sizeLookup = api.pathsInfo(repoId, wanted.take(128), pinnedRevision)
             .getOrDefault(emptyList())
             .associateBy { it.path }
 
-        val quants = enumerateQuants(primaryFiles, sizeLookup, info)
+        val quants = enumerateQuants(
+            files = primaryFiles,
+            sizes = sizeLookup,
+            info = info,
+            allFiles = files,
+            preGrouped = graphSets,
+        )
         if (quants.isEmpty()) {
             return@withContext Resolution.Refused(
                 kind = RefusalKind.NO_RUNTIME,
@@ -424,13 +441,34 @@ class ModelResolver(
         files: List<String>,
         sizes: Map<String, HfPathInfo>,
         info: HfModelInfo,
+        /** Every file in the repo, so a graph can find its weight sidecar. */
+        allFiles: List<String> = files,
+        /**
+         * Pre-grouped variants, when the repo's shape is not one-file-per-choice.
+         * Keyed by the label to show.
+         */
+        preGrouped: Map<String, List<String>>? = null,
     ): List<QuantVariant> {
         val shardPattern = Regex("""(?i)^(.*)-\d{5}-of-\d{5}(\.gguf)$""")
         val grouped = LinkedHashMap<String, MutableList<String>>()
-        files.forEach { f ->
-            val match = shardPattern.find(f)
-            val key = if (match != null) match.groupValues[1] + match.groupValues[2] else f
-            grouped.getOrPut(key) { mutableListOf() }.add(f)
+        if (preGrouped != null) {
+            preGrouped.forEach { (label, members) -> grouped[label] = members.toMutableList() }
+        } else {
+            files.forEach { f ->
+                val match = shardPattern.find(f)
+                val key = if (match != null) match.groupValues[1] + match.groupValues[2] else f
+                grouped.getOrPut(key) { mutableListOf() }.add(f)
+            }
+        }
+
+        // ONNX keeps anything over 2 GB — and in practice anything at all — in a
+        // sibling data file, so the graph alone measures a couple of kilobytes.
+        // Reporting that as the download made a 411 MB model read "2 KB" and
+        // "weights 0.00", and downloading it would have produced a graph with no
+        // weights behind it.
+        grouped.forEach { (_, members) ->
+            val sidecars = members.flatMap { onnxSidecars(it, allFiles) }
+            members.addAll(sidecars.filterNot { it in members })
         }
 
         // A quant suffix only identifies a variant when the repo holds one model.
@@ -439,7 +477,9 @@ class ModelResolver(
         // all labelled "Q5_1" — a list in which you cannot tell base from small,
         // which is worse than no list. Where the suffix does not distinguish,
         // fall back to the part of the filename that does.
-        val proposed = grouped.keys.associateWith { extractQuantName(it, info) }
+        val proposed = grouped.keys.associateWith {
+            if (preGrouped != null) it else extractQuantName(it, info)
+        }
         val ambiguous = proposed.values.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
 
         return grouped.map { (key, members) ->
@@ -482,6 +522,54 @@ class ModelResolver(
             .removeSuffix(".gguf").removeSuffix(".bin").removeSuffix(".onnx")
             .removePrefix("ggml-")
             .removePrefix("model-")
+
+    /** An ONNX graph's external weight file, under any of the three spellings in use. */
+    private fun onnxSidecars(graph: String, allFiles: List<String>): List<String> {
+        if (!graph.endsWith(".onnx", ignoreCase = true)) return emptyList()
+        val candidates = setOf("$graph.data", "${graph}_data", "$graph.onnx_data")
+        return allFiles.filter { it in candidates }
+    }
+
+    /**
+     * Group a multi-graph ONNX model by directory instead of by file.
+     *
+     * Some ONNX "models" are a *set* of graphs that only work together —
+     * OmniVoice is an embedding encoder, a Qwen3 backbone, a codebook head and a
+     * vocoder — and the publisher ships the whole set once per precision, in
+     * sibling folders. Listing the graphs as quant variants asks the user to pick
+     * one of seventeen when they need four, and the three identical
+     * `audio_embeddings_encoder` rows are indistinguishable anyway.
+     *
+     * The signal is structural rather than a filename: **a basename that appears
+     * in more than one directory** means the directories are the alternatives and
+     * the files within one are components. Kokoro, whose eight graphs are genuine
+     * precision variants, keeps them in a single folder under distinct names — so
+     * it does not trip this and still lists eight choices. Verified against both.
+     *
+     * Returns null when the repo is the ordinary one-file-per-choice shape.
+     */
+    private fun onnxGraphSets(onnxFiles: List<String>): Map<String, List<String>>? {
+        if (onnxFiles.size < 2) return null
+        val byBase = onnxFiles.groupBy { it.substringAfterLast('/') }
+        val repeated = byBase.filterValues { paths ->
+            paths.map { it.substringBeforeLast('/', "") }.distinct().size > 1
+        }
+        if (repeated.isEmpty()) return null
+
+        val byDirectory = onnxFiles.groupBy { it.substringBeforeLast('/', "") }
+        // Graphs missing from a given directory are supplied from wherever they
+        // do exist, preferring the largest copy — for OmniVoice that pairs the
+        // int4 backbone with the fp16 tokenizer graphs, which is the combination
+        // that actually produces speech rather than noise.
+        return byDirectory.entries.associate { (directory, graphs) ->
+            val present = graphs.map { it.substringAfterLast('/') }.toSet()
+            val missing = byBase.filterKeys { it !in present }.values.mapNotNull { paths ->
+                paths.maxByOrNull { it.length }
+            }
+            val label = directory.ifEmpty { "root" }
+            label to (graphs + missing)
+        }
+    }
 
     /** `Qwen2.5-7B-Instruct-Q4_K_M.gguf` → `Q4_K_M`. */
     private fun extractQuantName(filename: String, info: HfModelInfo): String {
