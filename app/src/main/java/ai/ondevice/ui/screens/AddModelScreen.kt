@@ -28,7 +28,9 @@ import ai.ondevice.core.VerdictTone
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NCard
+import ai.ondevice.ui.components.NCardMeta
 import ai.ondevice.ui.components.NDropdown
+import ai.ondevice.ui.components.NMetaText
 import ai.ondevice.ui.components.NFieldLabel
 import ai.ondevice.ui.components.NHelp
 import ai.ondevice.ui.components.NInput
@@ -88,11 +90,19 @@ fun AddModelScreen(
                     )
                 }
                 NButton(
-                    text = if (state.resolving) "…" else "Resolve",
+                    // A Hugging Face id has a slash in it, so text without one
+                    // can only ever fail to resolve. The button says what it
+                    // will actually do rather than offering to look up
+                    // something that cannot exist.
+                    text = when {
+                        state.resolving || state.searching -> "…"
+                        !state.query.contains('/') -> "Search"
+                        else -> "Resolve"
+                    },
                     onClick = viewModel::resolve,
                     style = NButtonStyle.Primary,
                     minHeight = 44.dp,
-                    enabled = state.query.isNotBlank() && !state.resolving,
+                    enabled = state.query.isNotBlank() && !state.resolving && !state.searching,
                 )
             }
 
@@ -104,6 +114,42 @@ fun AddModelScreen(
                     color = NocturneColors.Accent,
                     modifier = Modifier.nClickableFlat { viewModel.importLocal() },
                 )
+            }
+
+            // — search results, when the query was a name rather than an id —
+
+            if (state.searchResults.isNotEmpty()) {
+                SectionKicker(
+                    "Search · ${state.searchResults.size} on Hugging Face",
+                    Modifier.padding(bottom = 8.dp),
+                )
+                state.searchResults.forEach { result ->
+                    NCard(
+                        Modifier
+                            .padding(bottom = 7.dp)
+                            .nClickableFlat { viewModel.openSearchResult(result.id) },
+                        gap = 5.dp,
+                    ) {
+                        Text(result.id, style = NocturneType.CardTitleSm)
+                        NCardMeta {
+                            result.pipelineTag?.let { NMetaText(it) }
+                            NMetaText("${Fmt.grouped(result.downloads.toInt())} downloads")
+                            if (result.likes > 0) NMetaText("${result.likes} likes")
+                        }
+                    }
+                }
+                // Search returns whatever matches the name. Whether any of it
+                // runs here is the resolver's answer, and it only has one once
+                // a repo is picked — so this list promises nothing.
+                NHelp(
+                    "Ranked by downloads. Pick one to resolve it — until then nothing here has been " +
+                        "checked against this device or against the bundled runtimes.",
+                    Modifier.padding(bottom = 16.dp),
+                )
+            }
+
+            if (state.searching) {
+                NHelp("Searching Hugging Face…", Modifier.padding(bottom = 16.dp))
             }
 
             // — the resolved model, or the reason there isn't one —

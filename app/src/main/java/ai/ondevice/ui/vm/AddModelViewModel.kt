@@ -56,10 +56,29 @@ class AddModelViewModel @Inject constructor(
         _state.value = _state.value.copy(query = value)
     }
 
+    /**
+     * Resolve a repo, or search for one.
+     *
+     * A Hugging Face id is `owner/name`, so text with no slash in it cannot be
+     * one — and resolving it could only ever fail with "no such repo". Treating
+     * that as a search costs the user nothing and turns a dead end into the
+     * thing they were trying to do. Anything with a slash, a URL, or a direct
+     * .gguf link still resolves exactly as before.
+     */
     fun resolve() {
         val query = _state.value.query.trim()
         if (query.isEmpty()) return
-        _state.value = _state.value.copy(resolving = true, refusal = null, resolved = null, verdict = null)
+        if (!query.contains('/')) {
+            searchHub(query)
+            return
+        }
+        _state.value = _state.value.copy(
+            resolving = true,
+            refusal = null,
+            resolved = null,
+            verdict = null,
+            searchResults = emptyList(),
+        )
 
         viewModelScope.launch {
             when (val outcome = resolver.resolve(query, blockPickle = prefs.blockPickle.first())) {
@@ -141,6 +160,26 @@ class AddModelViewModel @Inject constructor(
      * Queue the primary file, every shard, and every required companion as one
      * atomic job (SPEC §3.4).
      */
+    private fun searchHub(query: String) {
+        _state.value = _state.value.copy(
+            searching = true,
+            refusal = null,
+            resolved = null,
+            verdict = null,
+            searchResults = emptyList(),
+        )
+        viewModelScope.launch {
+            val results = api.search(query).getOrElse { emptyList() }
+            _state.value = _state.value.copy(searching = false, searchResults = results)
+        }
+    }
+
+    /** Picking a result is the same as having typed its id: resolve it. */
+    fun openSearchResult(repoId: String) {
+        _state.value = _state.value.copy(query = repoId, searchResults = emptyList())
+        resolve()
+    }
+
     fun setModality(modality: Modality) {
         _state.value = _state.value.copy(selectedModality = modality)
     }
@@ -293,6 +332,8 @@ data class AddModelState(
      * still supplies context length, architecture, chat template and the fit
      * estimate; it just no longer decides these two.
      */
+    val searching: Boolean = false,
+    val searchResults: List<ai.ondevice.data.hf.HfSearchResult> = emptyList(),
     val selectedModality: Modality? = null,
     val selectedRole: AttachmentRole? = null,
     /** True once [selectedRole] has been answered, including answered as "none". */
