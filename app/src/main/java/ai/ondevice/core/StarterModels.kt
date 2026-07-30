@@ -82,9 +82,9 @@ object StarterModels {
         StarterModel(
             repoId = "onnx-community/OmniVoice-Onnx",
             modality = Modality.TEXT_TO_SPEECH,
-            summary = "Any language, [laughter] and [sigh], a voice you describe in words — " +
-                "but six to seven times slower than Kokoro. Pick the \"root\" variant: " +
-                "\"int4\" saves 240 MB and will not load.",
+            summary = "Any language, [laughter] and [sigh], a voice you describe in words — but " +
+                "neither variant loads on the ONNX Runtime this build ships. Use Kokoro until " +
+                "a newer runtime is available.",
             // The int4 export cannot be loaded by any released ONNX Runtime. Its
             // embedding table is 4-bit block-quantised and says so with a `bits`
             // attribute on com.microsoft.GatherBlockQuantized, which is on ORT's
