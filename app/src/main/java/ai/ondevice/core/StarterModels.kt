@@ -82,13 +82,20 @@ object StarterModels {
         StarterModel(
             repoId = "onnx-community/OmniVoice-Onnx",
             modality = Modality.TEXT_TO_SPEECH,
-            summary = "Any language, [laughter] and [sigh], several speakers — but " +
-                "six to seven times slower than Kokoro.",
-            // Not the int4 figure. The backbone quantises to int4 fine, but the
-            // audio embedding table and codebook heads must stay fp16 or the
-            // output is noise rather than a worse voice, so the honest number
-            // includes them.
-            sizeHint = "~683 MB",
+            summary = "Any language, [laughter] and [sigh], a voice you describe in words — " +
+                "but six to seven times slower than Kokoro. Pick the \"root\" variant: " +
+                "\"int4\" saves 240 MB and will not load.",
+            // The int4 export cannot be loaded by any released ONNX Runtime. Its
+            // embedding table is 4-bit block-quantised and says so with a `bits`
+            // attribute on com.microsoft.GatherBlockQuantized, which is on ORT's
+            // main branch and in no shipped version — not 1.22, the newest
+            // Android build. Only that one file differs: int4/llm_decoder is
+            // byte-identical to the root one and the Higgs tokenizer graphs are
+            // shared, so the whole saving is an embeddings encoder of 87 MB
+            // against 327 MB, and it buys a model that refuses to open.
+            //
+            // The figure is the root variant's, and is not the int4 one.
+            sizeHint = "~1.0 GB",
         ),
 
         // — images —
