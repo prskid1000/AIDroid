@@ -70,6 +70,14 @@ class RuntimeRegistry(private val context: Context) {
     val hasOpenClBackend: Boolean
         get() = descriptor(LLAMA)?.let { it.installed && BackendId.OPENCL in it.backends } == true
 
+    /**
+     * The backends [runtimeId] actually registered, which is not the same
+     * question as which one the user would like. Empty means the runtime is not
+     * installed; callers treat CPU as the floor rather than inventing a device.
+     */
+    fun backendsFor(runtimeId: String): List<BackendId> =
+        descriptor(runtimeId)?.takeIf { it.installed }?.backends ?: emptyList()
+
     val llamaBuildTag: String get() = buildTag(LLAMA)
 
     /** The build tag the parameter screen gates `sinceBuild` against, per runtime. */

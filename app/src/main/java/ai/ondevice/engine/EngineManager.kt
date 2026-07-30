@@ -120,16 +120,27 @@ class EngineManager(
      * Backend selection: an explicit per-model override wins; then the global
      * setting; then whichever backend measured fastest for this model on this
      * device; then OpenCL, which is the upstream-recommended path on Adreno.
+     *
+     * Every one of those is a *preference*, so the answer is clamped to the
+     * backends the installed runtime actually registered. It used to end in a
+     * bare `return BackendId.OPENCL`, and since this value is what the Chat
+     * header reads, the badge said "OpenCL" on a build that has no GPU backend
+     * compiled in at all — runtimes.json honestly reports ["CPU"], and
+     * whisper_jni sets `use_gpu = false` for the same reason. A cosmetic lie,
+     * but an expensive one: it sent a plain-CPU slowness straight at the GPU.
      */
     private suspend fun resolveBackend(model: ModelEntity): BackendId {
-        model.backendOverride?.let { return it }
+        val available = registry.backendsFor(RuntimeRegistry.LLAMA)
+        fun clamp(backend: BackendId) = backend.takeIf { it in available } ?: BackendId.CPU
+
+        model.backendOverride?.let { return clamp(it) }
         val mode = prefs.backendMode.first()
         if (mode != AppPrefs.BACKEND_AUTO) {
-            runCatching { BackendId.valueOf(mode) }.getOrNull()?.let { return it }
+            runCatching { BackendId.valueOf(mode) }.getOrNull()?.let { return clamp(it) }
         }
         val measured = db.benchmarks().getFor(model.id)
-        measured.maxByOrNull { it.genTokPerSec }?.let { return it.backend }
-        return BackendId.OPENCL
+        measured.maxByOrNull { it.genTokPerSec }?.let { return clamp(it.backend) }
+        return clamp(BackendId.OPENCL)
     }
 
     /**

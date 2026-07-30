@@ -27,6 +27,29 @@ android {
             cmake {
                 // -DNDEBUG turns off ggml's assertions in the shipped build.
                 cppFlags += listOf("-std=c++17", "-fexceptions", "-frtti", "-O3", "-DNDEBUG")
+
+                // cppFlags reaches CMAKE_CXX_FLAGS only, so for a long time
+                // every .c file in this project compiled with no -O at all:
+                // the NDK clears CMAKE_C_FLAGS_DEBUG, CMAKE_C_FLAGS was empty,
+                // and clang's default is -O0. C++ got -O3 and C got nothing.
+                //
+                // That is not a rounding error, because ggml splits along the
+                // same line the flags did. Its quantised dot products live in
+                // ggml-cpu/quants.c and ggml-cpu/arch/<arch>/quants.c, the op
+                // dispatcher in ggml-cpu.c — six C files that hold essentially
+                // all of token-generation time, and every one of them was
+                // un-optimised while the 200-odd C++ files around them were
+                // not. Those kernels are hand-written NEON/AVX intrinsics, and
+                // -O0 spills every intrinsic to the stack instead of keeping it
+                // in a vector register, which is why the cost is a multiple and
+                // not a few per cent. It hit all three ggml runtimes at once —
+                // chat, transcribe and image share one ggml — plus espeak-ng
+                // and libwebp, which are C throughout.
+                //
+                // Release builds escaped it (RelWithDebInfo supplies -O2 for C),
+                // so this only ever showed up in the debug builds we measure on.
+                cFlags += listOf("-O3", "-DNDEBUG")
+
                 arguments += listOf("-DANDROID_STL=c++_shared")
             }
         }
