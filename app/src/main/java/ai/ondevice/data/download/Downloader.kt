@@ -106,11 +106,28 @@ class Downloader(
         activeJobs.remove(jobId)?.cancel()
         scope.launch(Dispatchers.IO) {
             val entity = db.downloads().get(jobId) ?: return@launch
-            entity.toJob().files.forEach { file ->
+            val job = entity.toJob()
+            job.files.forEach { file ->
                 runCatching { File(file.destPath).delete() }
                 runCatching { File(file.destPath + PART_SUFFIX).delete() }
             }
             db.downloads().deleteById(jobId)
+
+            // The library row goes too, unless the model was already installed.
+            //
+            // "Installed" is the *absence* of an active job, and the row is
+            // written before the first byte so a reboot knows what it was
+            // fetching. Deleting only the job therefore promoted a cancelled
+            // download to a finished install: the files had just been removed
+            // above, and the model still appeared in the library, never used,
+            // at its full advertised size.
+            //
+            // Guarded on the primary file, because cancelling a *re*-download of
+            // something already on disk must not delete the copy that works.
+            val model = db.models().get(job.modelId)
+            if (model != null && !File(model.localPath).exists()) {
+                db.models().deleteById(job.modelId)
+            }
         }
     }
 

@@ -276,7 +276,14 @@ fun AddModelScreen(
                                 ),
                                 color = if (selected) NocturneColors.Accent200 else NocturneColors.Text,
                             )
-                            NHelp(quant.note, Modifier.padding(top = 1.dp))
+                            // A blocked variant is shown, not hidden — a row
+                            // that vanishes reads as a repo that does not have
+                            // it. What it says is why, and it stops being the
+                            // one pre-selected.
+                            NHelp(
+                                quant.blockedReason?.let { "Cannot run here — $it" } ?: quant.note,
+                                Modifier.padding(top = 1.dp),
+                            )
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             Text(
