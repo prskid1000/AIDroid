@@ -217,6 +217,26 @@
       ]
     },
     {
+      "id": "omnivoice",
+      "buildTag": "OmniVoice-Onnx",
+      "upstreamCommit": "65b5f53",
+      "jniContract": 3,
+      "installed": true,
+      "sizeBytes": 788529152,
+      "formats": [
+        "ONNX"
+      ],
+      "capabilities": [
+        "SYNTHESIZE"
+      ],
+      "backends": [
+        "CPU"
+      ],
+      "architectures": [
+        "qwen3"
+      ]
+    },
+    {
       "id": "stable-diffusion.cpp",
       "buildTag": "master-2251699",
       "upstreamCommit": "2251699",

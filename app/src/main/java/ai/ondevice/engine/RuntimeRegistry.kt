@@ -100,6 +100,9 @@ class RuntimeRegistry(private val context: Context) {
         const val STABLE_DIFFUSION = "stable-diffusion.cpp"
         const val KOKORO = "kokoro"
 
+        /** OmniVoice keeps its own parameter set: it shares no controls with Kokoro. */
+        const val OMNIVOICE = "omnivoice"
+
         /** Bumped only when the Kotlin↔JNI signature changes — §16.7 makes that rare. */
         const val REQUIRED_JNI_CONTRACT = 3
     }

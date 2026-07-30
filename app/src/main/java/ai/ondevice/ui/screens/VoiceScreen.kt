@@ -92,7 +92,7 @@ import ai.ondevice.ui.vm.VoiceViewModel
 fun VoiceScreen(
     currentRoute: String?,
     onNavigate: (String) -> Unit,
-    onOpenAdvanced: () -> Unit,
+    onOpenAdvanced: (String) -> Unit,
     viewModel: VoiceViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -503,7 +503,7 @@ private fun SpeakPanel(
     viewModel: VoiceViewModel,
     onPickScript: () -> Unit,
     onShareAudio: (java.io.File) -> Unit,
-    onOpenAdvanced: () -> Unit,
+    onOpenAdvanced: (String) -> Unit,
 ) {
     // — which engine is actually speaking —
     //
@@ -816,9 +816,26 @@ private fun SpeakPanel(
         )
     }
 
+    // Each engine's own parameter set. Kokoro and OmniVoice are both
+    // text-to-speech but share almost no controls: Kokoro has a voice list, a
+    // phonemiser language and a style blend, OmniVoice has a written voice
+    // design and a step count. Sending both here to Kokoro's set is what put
+    // af_* voice names and a 510-token chunk note in front of OmniVoice.
     NButton(
-        "Advanced · language, chunking, trim, gain",
-        onClick = onOpenAdvanced,
+        when (provider) {
+            ai.ondevice.speech.SynthProvider.OMNIVOICE -> "Advanced · voice design, language, steps"
+            ai.ondevice.speech.SynthProvider.KOKORO -> "Advanced · language, chunking, trim, gain"
+            else -> "Advanced · system engine"
+        },
+        onClick = {
+            onOpenAdvanced(
+                when (provider) {
+                    ai.ondevice.speech.SynthProvider.OMNIVOICE ->
+                        ai.ondevice.engine.RuntimeRegistry.OMNIVOICE
+                    else -> ai.ondevice.engine.RuntimeRegistry.KOKORO
+                },
+            )
+        },
         style = NButtonStyle.Secondary,
         block = true,
         modifier = Modifier.padding(top = 14.dp),

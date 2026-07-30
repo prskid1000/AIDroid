@@ -848,6 +848,12 @@ class VoiceViewModel @Inject constructor(
                 splitPattern = tts.string("split_pattern") ?: _state.value.splitPattern,
                 trimSilence = tts.bool("trim_silence") ?: _state.value.trimSilence,
                 languageCode = tts.string("lang_code") ?: _state.value.languageCode,
+                // OmniVoice's own three. Written by its parameter set and read
+                // back here, which is the same contract the comment above this
+                // function describes for Kokoro's.
+                voiceDesign = tts.string("voice_design") ?: _state.value.voiceDesign,
+                omniSteps = tts.int("steps") ?: _state.value.omniSteps,
+                omniFrames = tts.int("frames") ?: _state.value.omniFrames,
                 // The capture readout used to print these from hardcoded
                 // defaults, so setting them in Advanced changed neither the
                 // capture nor the line claiming to describe it.
@@ -1024,6 +1030,9 @@ class VoiceViewModel @Inject constructor(
             splitPattern = _state.value.splitPattern,
             trimSilence = _state.value.trimSilence,
             languageCode = _state.value.languageCode,
+            voiceDesign = _state.value.voiceDesign,
+            steps = _state.value.omniSteps,
+            frames = _state.value.omniFrames.takeIf { it > 0 },
         )
     }
 
@@ -1296,6 +1305,12 @@ data class VoiceState(
     val sttModels: List<ModelEntity> = emptyList(),
     val ttsModel: ModelEntity? = null,
     /** Every installed voice model, so the Speak tab can offer a choice. */
+    /** OmniVoice: the speaker described in words, since it ships no voice list. */
+    val voiceDesign: String = "",
+    /** OmniVoice: iterative unmasking passes. Named apart from whisper's steps. */
+    val omniSteps: Int = ai.ondevice.speech.OmniVoiceEngine.DEFAULT_STEPS,
+    /** OmniVoice: grid length in 40 ms frames; 0 means estimate from the text. */
+    val omniFrames: Int = 0,
     val ttsModels: List<ModelEntity> = emptyList(),
     /**
      * Which engine can run each voice model, keyed by model id.

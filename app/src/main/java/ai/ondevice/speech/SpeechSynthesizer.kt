@@ -378,6 +378,15 @@ class SpeechSynthesizer(
                 text = request.text,
                 speed = request.speed,
                 trimSilence = request.trimSilence,
+                // These three were dropped here, which quietly reduced OmniVoice
+                // to a slower Kokoro: the engine has taken a language, a voice
+                // design and a step count all along, and nothing upstream of
+                // this call could reach them. Voice design in particular is the
+                // model's whole answer to "which speaker" — it has no voice list.
+                language = request.languageCode?.takeIf { it.isNotBlank() && it != "auto" },
+                instruction = request.voiceDesign?.takeIf { it.isNotBlank() },
+                steps = request.steps ?: OmniVoiceEngine.DEFAULT_STEPS,
+                frames = request.frames?.takeIf { it > 0 },
             ),
         ).map { audio ->
             // OmniVoice has no gain input either, so volume is applied here for
@@ -527,8 +536,38 @@ data class SpeechRequest(
     /** Kokoro only, from the Advanced parameters. */
     val splitPattern: String = KokoroRequest.DEFAULT_SPLIT_PATTERN,
     val trimSilence: Boolean = true,
-    /** Kokoro only: an espeak voice to override the one the voice id implies. */
+    /**
+     * Which language to speak in.
+     *
+     * The two engines mean different things by it and both are honoured. Kokoro
+     * needs an espeak voice, because its front end is a phonemiser and the
+     * phonemes differ per language. OmniVoice needs no phonemiser at all — it
+     * covers 600+ languages and takes the name straight into
+     * `<|lang_start|>…<|lang_end|>` — so for it this is a plain language name
+     * rather than a code from a fixed list.
+     */
     val languageCode: String? = null,
+    /**
+     * OmniVoice's voice design: the speaker described in words rather than
+     * chosen from a list.
+     *
+     * Upstream calls this out as a headline feature — "control voices via
+     * assigned speaker attributes (gender, age, pitch, dialect/accent, whisper,
+     * etc.)" — and it is why OmniVoice ships no voice list to pick from. It goes
+     * into `<|instruct_start|>…<|instruct_end|>`, where the literal "None" is
+     * what upstream writes when nothing is asked for.
+     */
+    val voiceDesign: String? = null,
+    /**
+     * OmniVoice only: how many iterative unmasking passes to run.
+     *
+     * It is a diffusion language model over a masked grid of audio tokens, so
+     * this is the quality-for-time dial the architecture actually exposes —
+     * there is no temperature or top-p here. Null takes the engine's default.
+     */
+    val steps: Int? = null,
+    /** OmniVoice only: grid length in 40 ms frames. Null estimates from the text. */
+    val frames: Int? = null,
 ) {
     val isKokoro: Boolean get() = provider == SynthProvider.KOKORO
 }

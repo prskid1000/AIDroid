@@ -151,7 +151,9 @@ class ParamsViewModel @Inject constructor(
     private fun modalityOf(runtimeId: String) = when (runtimeId) {
         RuntimeRegistry.STABLE_DIFFUSION -> Modality.DIFFUSION
         RuntimeRegistry.WHISPER -> Modality.SPEECH_TO_TEXT
-        RuntimeRegistry.KOKORO -> Modality.TEXT_TO_SPEECH
+        // Both voice engines are text-to-speech models; they differ in which
+        // parameter set describes them, not in what kind of model they are.
+        RuntimeRegistry.KOKORO, RuntimeRegistry.OMNIVOICE -> Modality.TEXT_TO_SPEECH
         else -> Modality.TEXT
     }
 

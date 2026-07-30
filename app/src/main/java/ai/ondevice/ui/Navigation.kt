@@ -133,12 +133,12 @@ fun OnDeviceApp(
             VoiceScreen(
                 currentRoute = currentRoute,
                 onNavigate = { navController.navigateToRoot(it) },
-                onOpenAdvanced = {
+                // The engine decides which parameter set opens. Hardcoding
+                // Kokoro here is what put its voice list and its 510-token
+                // chunk note in front of OmniVoice.
+                onOpenAdvanced = { runtime ->
                     navController.navigate(
-                        Routes.parameters(
-                            tier = ai.ondevice.core.Tier.ADVANCED,
-                            runtime = ai.ondevice.engine.RuntimeRegistry.KOKORO,
-                        ),
+                        Routes.parameters(tier = ai.ondevice.core.Tier.ADVANCED, runtime = runtime),
                     )
                 },
             )
