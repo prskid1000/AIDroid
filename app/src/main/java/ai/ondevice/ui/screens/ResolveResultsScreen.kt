@@ -55,6 +55,16 @@ fun ResolveResultsScreen(onBack: () -> Unit) {
             Modifier.verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            // Said once, at the top, because everything below it is invented.
+            // Without this line the screen reads as a report about this phone —
+            // and it was, briefly, reporting a runtime build the app has not
+            // shipped for months and a memory figure belonging to no device.
+            Text(
+                "Examples of each refusal, not results. The figures below are illustrative; " +
+                    "a real refusal quotes this device and this runtime.",
+                style = NocturneType.CardBody,
+                color = NocturneColors.Neutral400,
+            )
             SampleRefusals.forEach { refusal ->
                 RefusalCard(refusal, onRemedy = {})
             }
@@ -155,15 +165,24 @@ private fun RefusalMark(kind: RefusalKind) {
 
 /**
  * The five cases the canvas shows on S5, kept as data so the screen can be
- * reached without a live network. Each is produced verbatim by
- * [ai.ondevice.data.hf.ModelResolver] at runtime.
+ * reached without a live network. The *shape* of each is what
+ * [ai.ondevice.data.hf.ModelResolver] produces; the numbers in them are not, and
+ * the screen says so above.
+ *
+ * Nothing here may assert current device state. An earlier version wrote
+ * "llama.cpp b6482 — the build installed on this device — has 41 architectures",
+ * which was three false claims in one sentence by the time anyone read it: the
+ * build is b10175, it has 138 architectures, and no reading was taken either
+ * way. Phrase the fixtures so they cannot go stale, and let the live path quote
+ * the registry.
  */
 private val SampleRefusals = listOf(
     Resolution.Refused(
         kind = RefusalKind.WONT_FIT,
         title = "Won't fit",
         subject = "Llama-3.3-70B-Instruct-GGUF · Q4_K_M",
-        detail = "Needs ≈ 44.2 GB resident. This device has 12 GB, 10.4 GB free.",
+        detail = "Needs more resident memory than the device has. The live message quotes both " +
+            "figures and shows the working.",
         working = "weights 42.5 + KV 1.5 at 4K + compute 0.2",
         remedies = listOf(
             ai.ondevice.data.hf.Remedy("Smaller quants (2)", RemedyAction.ShowSmallerQuants("")),
@@ -191,8 +210,8 @@ private val SampleRefusals = listOf(
         kind = RefusalKind.UNKNOWN_ARCHITECTURE,
         title = "Unsupported architecture",
         subject = "arch plamo3",
-        detail = "llama.cpp b6482 — the build installed on this device — has 41 architectures and " +
-            "this isn't one of them. A newer runtime may add it.",
+        detail = "The installed llama.cpp build does not have this architecture. The live message " +
+            "names the build and its architecture count. A newer runtime may add it.",
         remedies = listOf(
             ai.ondevice.data.hf.Remedy("Check for runtime update", RemedyAction.CheckRuntimeUpdate, primary = true),
             ai.ondevice.data.hf.Remedy(

@@ -26,6 +26,22 @@ class ModelResolver(
 ) {
 
     /**
+     * Which architecture strings mean "diffusion".
+     *
+     * Read from the registry rather than written here. §1.3 and Appendix A #3
+     * say the allowlist must come from the source the runtime is built from, and
+     * this file had its own copy of sd.cpp's SDVersion enum — five names kept by
+     * hand, guaranteed to fall behind the day sd.cpp gains a sixth.
+     *
+     * The two additions are not architectures and are not claimed to be: `unet`
+     * and `dit` are the tensor-prefix names a safetensors header exposes when
+     * the repo never states a version at all, so they cannot come from the enum.
+     */
+    private val diffusionArchitectures: Set<String> by lazy {
+        registry.architecturesFor(RuntimeRegistry.STABLE_DIFFUSION) + setOf("unet", "dit")
+    }
+
+    /**
      * Accepted inputs, per §3.2: `owner/repo`, a huggingface.co URL in any of
      * its `/tree/` and `/blob/` variants, a direct `.gguf` URL on any host, and
      * a local `content://` SAF URI.
@@ -332,7 +348,7 @@ class ModelResolver(
         // screen where it can actually run.
         val modality = if (model.modality == Modality.TEXT && architecture != null) {
             when (architecture.lowercase()) {
-                in DIFFUSION_ARCHITECTURES -> Modality.DIFFUSION
+                in diffusionArchitectures -> Modality.DIFFUSION
                 "whisper" -> Modality.SPEECH_TO_TEXT
                 else -> model.modality
             }
@@ -379,7 +395,7 @@ class ModelResolver(
             files.any { it.contains("voices", true) && it.endsWith(".bin") } &&
                 files.any { it.endsWith(".onnx") } -> Modality.TEXT_TO_SPEECH
             format == ModelFormat.ONNX && info.tags.any { it.contains("text-to-speech", true) } -> Modality.TEXT_TO_SPEECH
-            arch != null && arch in DIFFUSION_ARCHITECTURES -> Modality.DIFFUSION
+            arch != null && arch in diffusionArchitectures -> Modality.DIFFUSION
             files.any { it.equals("model_index.json", true) } -> Modality.DIFFUSION
             files.any { it.contains("unet", true) } && files.any { it.contains("vae", true) } -> Modality.DIFFUSION
             // A single-file SD/SDXL GGUF has none of the shapes above: no
@@ -565,6 +581,12 @@ class ModelResolver(
             }
         }
 
+        // Captured before the companions below are folded in. Only files the
+        // shard pattern actually collapsed are shards; a graph plus its weight
+        // sidecar plus a tokenizer is three files and one part. Counting after
+        // the fold is what made every Kokoro variant claim "3 shards".
+        val shardCounts = grouped.mapValues { (_, members) -> members.size }
+
         // ONNX keeps anything over 2 GB — and in practice anything at all — in a
         // sibling data file, so the graph alone measures a couple of kilobytes.
         // Reporting that as the download made a 411 MB model read "2 KB" and
@@ -616,7 +638,9 @@ class ModelResolver(
                 note = quantNote(
                     proposed.getValue(key),
                     speed,
-                    sorted.size,
+                    shards = shardCounts[key] ?: sorted.size,
+                    fileCount = sorted.size,
+                    onnx = key.endsWith(".onnx", ignoreCase = true),
                     graphSet = preGrouped != null,
                 ),
             )
@@ -742,6 +766,18 @@ class ModelResolver(
     /** `Qwen2.5-7B-Instruct-Q4_K_M.gguf` → `Q4_K_M`. */
     private fun extractQuantName(filename: String, info: HfModelInfo): String {
         val base = filename.substringAfterLast('/').removeSuffix(".gguf").removeSuffix(".bin").removeSuffix(".onnx")
+        // ONNX exports carry their precision in a convention of their own —
+        // `model_fp16`, `model_uint8`, `model_q4f16`, `model_quantized` — which
+        // the GGUF suffix pattern below cannot read: `fp16` does not end in
+        // `F16`, and `uint8` contains no `Q`. Both therefore fell through to the
+        // whole filename and were then described as full precision, which is
+        // wrong for every one of them. Reading the stem off `model` gives the
+        // precision directly, and leaves a bare `model.onnx` blank so it can be
+        // called what it is rather than guessed at.
+        if (filename.endsWith(".onnx", ignoreCase = true)) {
+            val stem = base.removePrefix("model").trim('_', '-', '.')
+            return if (stem.isBlank()) ORIGINAL_EXPORT else stem.uppercase()
+        }
         val match = Regex("""(?i)(IQ\d[_A-Z0-9]*|Q\d[_A-Z0-9]*|BF16|F16|F32)$""").find(base)
         return match?.value?.uppercase() ?: base.substringAfterLast('-').ifBlank { base }
     }
@@ -755,6 +791,8 @@ class ModelResolver(
         rawQuant: String,
         speed: SpeedClass,
         shards: Int,
+        fileCount: Int = shards,
+        onnx: Boolean = false,
         graphSet: Boolean = false,
     ): String = buildString {
         // A multi-graph ONNX variant is neither quantised by its label nor
@@ -764,10 +802,37 @@ class ModelResolver(
         // parts of one model, not slices of one file. Shards can be resumed
         // independently and parts cannot, so the word matters.
         if (graphSet) {
-            append("$shards files · one model in parts")
+            append("$fileCount files · one model in parts")
             return@buildString
         }
         val quant = rawQuant.uppercase()
+        // ONNX has its own vocabulary and the GGUF table gets it wrong three
+        // ways on a single Kokoro screen: `model_fp16` and `model_uint8` both
+        // read "full precision", and `model_q4` read "unrecognised quant name"
+        // — a name the app itself had just extracted. None of these are GGUF
+        // quantisations and none of them mean what the GGUF table says.
+        if (onnx) {
+            append(
+                when {
+                    quant == ORIGINAL_EXPORT.uppercase() -> "as published"
+                    quant.startsWith("QUANTIZED") -> "8-bit, dynamically quantised"
+                    quant.startsWith("UINT8F16") || quant.startsWith("INT8F16") ->
+                        "8-bit weights, half-precision maths"
+                    quant.startsWith("UINT8") || quant.startsWith("INT8") || quant.startsWith("Q8") ->
+                        "8-bit weights"
+                    quant.startsWith("Q4F16") || quant.startsWith("INT4F16") ->
+                        "4-bit weights, half-precision maths"
+                    quant.startsWith("Q4") || quant.startsWith("INT4") || quant.startsWith("BNB4") ->
+                        "4-bit weights, smallest"
+                    quant.startsWith("FP16") || quant.startsWith("F16") -> "half precision"
+                    quant.startsWith("BF16") -> "half precision, bfloat"
+                    quant.startsWith("FP32") || quant.startsWith("F32") -> "full precision"
+                    else -> "as published"
+                },
+            )
+            if (fileCount > 1) append(" · $fileCount files")
+            return@buildString
+        }
         append(
             when {
                 speed == SpeedClass.OPENCL_FAST -> "Adreno fast path"
@@ -897,8 +962,13 @@ class ModelResolver(
     }
 
     private companion object {
-        /** Known to stable-diffusion.cpp; matched on architecture, not repo name. */
-        val DIFFUSION_ARCHITECTURES = setOf("sd1", "sd2", "sdxl", "sd3", "flux", "unet", "dit")
+        /**
+         * The label for a bare `model.onnx` when the filename says nothing about
+         * precision. Naming it after what we know — that it is the export the
+         * publisher put there first — beats guessing fp32 and being wrong on the
+         * repos that export fp16 under that name.
+         */
+        const val ORIGINAL_EXPORT = "original"
 
         /**
          * How many safetensors a repo may hold before header probing is skipped.

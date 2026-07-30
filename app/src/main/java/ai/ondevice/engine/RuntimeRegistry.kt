@@ -59,6 +59,21 @@ class RuntimeRegistry(private val context: Context) {
      */
     fun supportsArchitecture(arch: String): Boolean = arch.lowercase() in knownArchitectures.map { it.lowercase() }
 
+    /**
+     * The architectures one runtime declares, lower-cased for matching.
+     *
+     * Unlike [knownArchitectures] this does not filter on `installed`, because
+     * callers use it to decide what a model *is* rather than whether it can run
+     * — an SDXL checkpoint is a diffusion model whether or not sd.cpp is here.
+     *
+     * It exists so classification can ask runtimes.json instead of keeping a
+     * second copy of the same list in Kotlin. That file is generated from each
+     * engine's own source (`tools/generate_runtimes.py` reads sd.cpp's SDVersion
+     * enum), so a hand-written duplicate could only ever drift away from it.
+     */
+    fun architecturesFor(runtimeId: String): Set<String> =
+        descriptor(runtimeId)?.architectures?.map { it.lowercase() }?.toSet() ?: emptySet()
+
     fun supportsFormat(format: ModelFormat): Boolean =
         descriptors.any { it.installed && format in it.formats }
 
