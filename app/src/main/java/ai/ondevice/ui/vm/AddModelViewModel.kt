@@ -203,6 +203,10 @@ class AddModelViewModel @Inject constructor(
         val resolved = _state.value.resolved ?: return
         val quant = resolved.quants.firstOrNull { it.name == _state.value.selectedQuant } ?: return
         if (_state.value.verdict?.verdict?.runnable != true) return
+        // The button is disabled for this, but a guard that only exists in the
+        // UI is one screen away from not existing. Nothing downloads 759 MB of
+        // a file this build has already established it cannot open.
+        if (quant.blockedReason != null) return
         // Type and role are the user's to state. Without them there is nothing
         // to write, and falling back to the detected value here would quietly
         // reinstate the guessing this replaced.

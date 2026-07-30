@@ -394,16 +394,23 @@ fun AddModelScreen(
                 val downloadBytes = (selectedQuant?.totalBytes ?: 0) +
                     resolved.companions.filter { it.role.required || it.autoSelected }
                         .sumOf { it.file.sizeBytes }
+                // A variant can be blocked while the *model* is fine, so this is
+                // a separate question from the verdict. The verdict answers
+                // "does this device have the memory"; blockedReason answers
+                // "can this build open the file at all", and the second one is
+                // not something more RAM or a smaller context fixes.
+                val blocked = selectedQuant?.blockedReason
                 NButton(
                     text = when {
                         !runnable -> state.verdict?.verdict?.label ?: "Not runnable"
+                        blocked != null -> "This variant cannot run here"
                         !state.classified -> "Choose a type and a role"
                         else -> "Download ${Fmt.bytes(downloadBytes)}"
                     },
                     onClick = { viewModel.download(); onDownloadStarted() },
                     style = NButtonStyle.Primary,
                     block = true,
-                    enabled = runnable && state.classified,
+                    enabled = runnable && state.classified && blocked == null,
                     minHeight = Touch.Primary,
                     modifier = Modifier.padding(top = 16.dp),
                 )
