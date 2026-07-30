@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ai.ondevice.core.Fmt
+import ai.ondevice.core.Modality
 import ai.ondevice.core.VerdictTone
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
@@ -102,6 +103,20 @@ fun ModelDetailScreen(
                 if (model.pinned) NTag("pinned in RAM", style = NTagStyle.Outline)
             }
 
+            // Not every model has every property, and this screen used to act as
+            // though they all did. A ControlNet has no context window, an
+            // upscaler has no tokens per second, and neither is something an
+            // engine loads on its own — yet both were offered a context slider
+            // to drag, a benchmark to run and a "keep loaded" pin, all of which
+            // describe a language model. An add-on is a file another model
+            // reads; the only honest things to say about it are what it is,
+            // where it came from and what is on disk.
+            val isAddOn = model.attachmentRole != null
+            val hasContextWindow = !isAddOn &&
+                (model.modality == Modality.TEXT || model.modality == Modality.VISION)
+            val isBenchmarkable = !isAddOn && model.modality == Modality.TEXT
+
+            if (hasContextWindow) {
             SectionKicker("Context window", Modifier.padding(bottom = 10.dp))
             Row(
                 Modifier.fillMaxWidth().padding(bottom = 4.dp),
@@ -180,8 +195,10 @@ fun ModelDetailScreen(
                     }
                 }
             }
+            }
 
             // §8.2 — measured, not assumed.
+            if (isBenchmarkable) {
             SectionKicker("Measured on this device", Modifier.padding(top = 22.dp, bottom = 8.dp))
             if (state.benchmarks.isEmpty()) {
                 NHelp(
@@ -238,6 +255,7 @@ fun ModelDetailScreen(
                 enabled = !state.benchmarking,
                 modifier = Modifier.padding(top = 12.dp),
             )
+            }
 
             if (state.companions.isNotEmpty()) {
                 SectionKicker("Companions · auto-paired", Modifier.padding(top = 22.dp, bottom = 8.dp))
@@ -307,18 +325,23 @@ fun ModelDetailScreen(
                 Modifier.fillMaxWidth().padding(top = 18.dp),
                 horizontalArrangement = Arrangement.spacedBy(7.dp),
             ) {
-                NButton(
-                    if (model.pinned) "Unpin" else "Keep loaded",
-                    onClick = viewModel::togglePin,
-                    style = NButtonStyle.Secondary,
-                    modifier = Modifier.weight(1f),
-                )
-                NButton(
-                    "Parameters",
-                    onClick = { onOpenParameters(ai.ondevice.core.Tier.EXPERT) },
-                    style = NButtonStyle.Secondary,
-                    modifier = Modifier.weight(1f),
-                )
+                // An add-on is never loaded on its own — it is a file the base
+                // model's runtime reads — so there is nothing to pin in RAM and
+                // no parameter set of its own to open.
+                if (!isAddOn) {
+                    NButton(
+                        if (model.pinned) "Unpin" else "Keep loaded",
+                        onClick = viewModel::togglePin,
+                        style = NButtonStyle.Secondary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    NButton(
+                        "Parameters",
+                        onClick = { onOpenParameters(ai.ondevice.core.Tier.EXPERT) },
+                        style = NButtonStyle.Secondary,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
                 NButton(
                     "Delete",
                     onClick = { viewModel.delete(onBack) },

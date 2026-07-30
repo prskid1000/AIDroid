@@ -738,7 +738,12 @@ private fun SpeakPanel(
     }
 
     // — blend, Kokoro only —
-    if (state.kokoroAvailable) {
+    //
+    // Gated on Kokoro being *selected*, not merely installed. Blending mixes two
+    // Kokoro style vectors, which is a thing only Kokoro's graph takes; keyed on
+    // availability it sat under OmniVoice offering af_heart and bm_george to an
+    // engine with no style input at all.
+    if (kokoroSelected) {
         SectionKicker("Blend", Modifier.padding(top = 20.dp, bottom = 8.dp))
         NCard(gap = 6.dp) {
             Text("Mix a second voice", style = NocturneType.CardTitleSm)
