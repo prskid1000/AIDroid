@@ -137,14 +137,31 @@ class ModelResolver(
         val safetensors = files.filter { it.endsWith(".safetensors", ignoreCase = true) }
         val pickles = files.filter { it.endsWith(".pkl") || it.endsWith(".pt") || it.endsWith(".pth") }
 
-        if (blockPickle && pickles.isNotEmpty()) {
+        // The pickle block exists because `torch.load` executes whatever the
+        // file tells it to. This app never calls torch. The one loader that
+        // reads these is sd.cpp's, and it does not execute: it walks the opcodes
+        // and, on REDUCE, pushes a null unless the global is a known
+        // tensor-rebuild — there is no interpreter behind it (see
+        // src/model_io/pickle_io.cpp).
+        //
+        // That distinction matters here and nowhere else, because the ESRGAN
+        // ecosystem is entirely .pth. Fourteen repos surveyed, not one shipping
+        // safetensors — so a blanket block means no upscaler can ever be
+        // installed. The exception is therefore as narrow as it can be: a pickle
+        // is tolerated only when its own filename classifies it as a diffusion
+        // auxiliary, which is also the only route by which it reaches that
+        // non-executing reader. Anything else still refuses.
+        val pickleAuxiliaries = pickles.filter { ai.ondevice.core.AttachmentRole.classify(it) != null }
+        val unsafePickles = pickles - pickleAuxiliaries.toSet()
+
+        if (blockPickle && unsafePickles.isNotEmpty()) {
             return@withContext Resolution.Refused(
                 kind = RefusalKind.PICKLE_BLOCKED,
                 title = "Pickle files present",
                 subject = repoId,
-                detail = "This repo ships ${pickles.size} pickle-format file(s), which can execute " +
-                    "arbitrary code on load. Blocked by default; you can override this in Settings " +
-                    "under expert options.",
+                detail = "This repo ships ${unsafePickles.size} pickle-format file(s), which can " +
+                    "execute arbitrary code on load. Blocked by default; you can override this in " +
+                    "Settings under expert options.",
                 remedies = listOf(Remedy("Open repo page", RemedyAction.OpenUrl("${HfApi.BASE}/$repoId"))),
             )
         }
@@ -157,8 +174,11 @@ class ModelResolver(
         // published auxiliary ships this way, it made the Image screen's
         // Attachments section impossible to fill by any route. That section
         // looked unimplemented for exactly this reason.
-        val auxiliaries = (safetensors + files.filter { it.endsWith(".ckpt", ignoreCase = true) })
-            .filter { ai.ondevice.core.AttachmentRole.classify(it) != null }
+        val auxiliaries = (
+            safetensors +
+                files.filter { it.endsWith(".ckpt", ignoreCase = true) } +
+                pickleAuxiliaries
+            ).filter { ai.ondevice.core.AttachmentRole.classify(it) != null }
 
         if (ggufFiles.isEmpty() && ggmlBins.isEmpty() && onnxFiles.isEmpty() && auxiliaries.isEmpty()) {
             return@withContext if (safetensors.isNotEmpty() || files.any { it.endsWith(".bin") }) {

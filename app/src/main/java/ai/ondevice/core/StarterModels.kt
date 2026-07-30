@@ -155,6 +155,17 @@ object StarterModels {
             summary = "A better decoder for SD 1.5 — fixes washed-out colour.",
             sizeHint = "~335 MB",
         ),
+        StarterModel(
+            repoId = "ai-forever/Real-ESRGAN",
+            modality = Modality.DIFFUSION,
+            role = AttachmentRole.UPSCALER,
+            // ×2, ×4 and ×8, and all three are named RealESRGAN_* so the role
+            // is read off the filename. Chosen over the larger community packs
+            // because those name most of their files things like
+            // "4x-UltraSharp", which classifies as nothing at all.
+            summary = "Enlarge a finished picture ×2, ×4 or ×8. Pick one file.",
+            sizeHint = "~67 MB each",
+        ),
     )
 
     /** Grouped for display, in the order a new install would want them. */
