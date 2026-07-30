@@ -579,7 +579,12 @@ class ModelResolver(
                 // The character note is about the *quantisation*, so it reads
                 // the suffix even when the label had to be widened to stay
                 // unambiguous.
-                note = quantNote(proposed.getValue(key), speed, sorted.size),
+                note = quantNote(
+                    proposed.getValue(key),
+                    speed,
+                    sorted.size,
+                    graphSet = preGrouped != null,
+                ),
             )
         }.sortedBy { it.totalBytes }
     }
@@ -656,17 +661,47 @@ class ModelResolver(
         if (repeated.isEmpty()) return null
 
         val byDirectory = onnxFiles.groupBy { it.substringBeforeLast('/', "") }
-        // Graphs missing from a given directory are supplied from wherever they
-        // do exist, preferring the largest copy — for OmniVoice that pairs the
-        // int4 backbone with the fp16 tokenizer graphs, which is the combination
-        // that actually produces speech rather than noise.
-        return byDirectory.entries.associate { (directory, graphs) ->
-            val present = graphs.map { it.substringAfterLast('/') }.toSet()
-            val missing = byBase.filterKeys { it !in present }.values.mapNotNull { paths ->
-                paths.maxByOrNull { it.length }
-            }
+            // An execution-provider folder is not a choice on this device. A
+            // CUDA export cannot run on a phone, and offering `cuda` beside
+            // `int4` invites a gigabyte of download that will never load. These
+            // are ONNX Runtime's own provider names, so the list describes our
+            // runtime rather than any model.
+            .filterKeys { it.substringAfterLast('/').lowercase() !in FOREIGN_PROVIDERS }
+        if (byDirectory.isEmpty()) return null
+
+        // Directories are only alternatives to each other when they hold the
+        // *same* graphs. Grouping on "has any .onnx" made OmniVoice's four-graph
+        // Higgs tokenizer — a component every variant needs — appear as two more
+        // variants to choose between, so a five-entry list held two real choices,
+        // two components and a CUDA build.
+        val signature = byDirectory.mapValues { (_, paths) ->
+            paths.map { it.substringAfterLast('/') }.toSortedSet()
+        }
+        // The publisher puts the model itself at the repo root, so the family
+        // the root belongs to is the one being chosen between; everything else
+        // is a part that gets added to whichever choice is made. With no root
+        // graphs, the family with the most directories is the one with variants.
+        val primary = signature[""] ?: signature.values
+            .groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+            ?: return null
+
+        val alternatives = byDirectory.filterKeys { signature[it] == primary }
+        if (alternatives.isEmpty()) return null
+        val components = byDirectory.filterKeys { signature[it] != primary }
+
+        // One directory per component family, deepest path first. Depth is how
+        // publishers nest a precision under a component — OmniVoice's tokenizer
+        // is `audio_tokenizer/` with `audio_tokenizer/fp16/` inside it — and the
+        // nested one is both the smaller download and what its own manifest
+        // says is used.
+        val chosenComponents = components.entries
+            .groupBy { (_, paths) -> paths.map { it.substringAfterLast('/') }.toSortedSet() }
+            .mapNotNull { (_, dirs) -> dirs.maxByOrNull { it.key.count { c -> c == '/' } } }
+            .flatMap { it.value }
+
+        return alternatives.entries.associate { (directory, graphs) ->
             val label = directory.ifEmpty { "root" }
-            label to (graphs + missing)
+            label to (graphs + chosenComponents)
         }
     }
 
@@ -682,7 +717,22 @@ class ModelResolver(
      * speed class shown on the right — the two columns answer different
      * questions ("what does this quant cost you?" vs "which backend runs it?").
      */
-    private fun quantNote(rawQuant: String, speed: SpeedClass, shards: Int): String = buildString {
+    private fun quantNote(
+        rawQuant: String,
+        speed: SpeedClass,
+        shards: Int,
+        graphSet: Boolean = false,
+    ): String = buildString {
+        // A multi-graph ONNX variant is neither quantised by its label nor
+        // sharded. Both of OmniVoice's read "full precision · 14 shards": the
+        // label is a directory name that matches no quant pattern, and the file
+        // count is four graphs plus their weight sidecars plus a tokenizer —
+        // parts of one model, not slices of one file. Shards can be resumed
+        // independently and parts cannot, so the word matters.
+        if (graphSet) {
+            append("$shards files · one model in parts")
+            return@buildString
+        }
         val quant = rawQuant.uppercase()
         append(
             when {
@@ -822,6 +872,19 @@ class ModelResolver(
          * fifteen-ControlNet pack, whose roles never needed probing anyway.
          */
         const val HEADER_PROBE_LIMIT = 8
+
+        /**
+         * ONNX Runtime execution providers this build does not have.
+         *
+         * Publishers ship a folder per provider, and a repo that offers `cuda/`
+         * beside `int4/` is not offering a choice on a phone — it is offering a
+         * download that cannot load. Named after providers rather than models,
+         * so the list stays a statement about our runtime.
+         */
+        val FOREIGN_PROVIDERS = setOf(
+            "cuda", "tensorrt", "trt", "dml", "directml", "openvino",
+            "rocm", "migraphx", "cann", "webgpu", "coreml",
+        )
 
         /** What sd.cpp's TinyDecoder block is named — `src/model/vae/tae.hpp`. */
         const val TAESD_TENSOR_PREFIX = "decoder.layers."

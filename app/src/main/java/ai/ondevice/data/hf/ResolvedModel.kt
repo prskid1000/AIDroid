@@ -89,9 +89,19 @@ data class QuantVariant(
     val files: List<RemoteFile>,
     val speedClass: SpeedClass,
     val note: String,
+    /**
+     * Why this build cannot run this variant, or null when it can.
+     *
+     * Set before anything is downloaded, from the graph rather than the
+     * filename. It is shown rather than hidden: a variant that silently
+     * disappears reads as a repo that does not have it, and the useful thing to
+     * say is which one to pick instead.
+     */
+    val blockedReason: String? = null,
 ) {
     val totalBytes: Long get() = files.sumOf { it.sizeBytes }
     val isSharded: Boolean get() = files.size > 1
+    val runnable: Boolean get() = blockedReason == null
 }
 
 data class RemoteFile(
