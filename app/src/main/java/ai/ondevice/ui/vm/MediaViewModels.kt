@@ -915,17 +915,31 @@ class VoiceViewModel @Inject constructor(
         speakJob?.cancel()
         _state.value = _state.value.copy(speaking = true, speakError = null, spokenRange = null)
         speakJob = viewModelScope.launch {
-            synthesizer.speak(currentRequest(text)).collect { event ->
-                when (event) {
-                    is ai.ondevice.speech.SpeechEvent.Started ->
-                        _state.value = _state.value.copy(speaking = true)
-                    is ai.ondevice.speech.SpeechEvent.Range ->
-                        _state.value = _state.value.copy(spokenRange = event.start to event.end)
-                    is ai.ondevice.speech.SpeechEvent.Done ->
-                        _state.value = _state.value.copy(speaking = false, spokenRange = null)
-                    is ai.ondevice.speech.SpeechEvent.Failed ->
-                        _state.value = _state.value.copy(speaking = false, speakError = event.message)
+            try {
+                synthesizer.speak(currentRequest(text)).collect { event ->
+                    when (event) {
+                        is ai.ondevice.speech.SpeechEvent.Started ->
+                            _state.value = _state.value.copy(speaking = true)
+                        is ai.ondevice.speech.SpeechEvent.Range ->
+                            _state.value = _state.value.copy(spokenRange = event.start to event.end)
+                        is ai.ondevice.speech.SpeechEvent.Done ->
+                            _state.value = _state.value.copy(speaking = false, spokenRange = null)
+                        is ai.ondevice.speech.SpeechEvent.Failed ->
+                            _state.value = _state.value.copy(speaking = false, speakError = event.message)
+                    }
                 }
+            } finally {
+                // The flow *ending* is the terminal signal, not the Done event.
+                // Clearing `speaking` only on Done meant any engine that
+                // finished without emitting one left the button reading "Stop"
+                // for good — audio played, the run was over, and the only way
+                // out was to press Stop on something already stopped.
+                //
+                // Assignment to a StateFlow does not suspend, so unlike the
+                // teardown in ChatViewModel this needs no NonCancellable; a
+                // cancelled coroutine can still run it. speakError survives the
+                // copy, so a failure keeps its message.
+                _state.value = _state.value.copy(speaking = false, spokenRange = null)
             }
         }
     }

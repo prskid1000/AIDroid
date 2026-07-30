@@ -271,6 +271,38 @@ fun ModelDetailScreen(
                 )
             }
 
+            if (state.files.isNotEmpty()) {
+                ai.ondevice.ui.components.SectionKicker(
+                    "Files · ${state.files.size} · ${Fmt.bytes(state.filesTotalBytes)}",
+                    Modifier.padding(top = 20.dp, bottom = 8.dp),
+                )
+                state.files.forEach { file ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            file.name,
+                            style = NocturneType.MonoXs,
+                            color = if (file.isPrimary) NocturneColors.Accent200 else NocturneColors.Text,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            Fmt.bytes(file.sizeBytes),
+                            style = NocturneType.Meta,
+                            color = NocturneColors.TextMuted,
+                        )
+                    }
+                }
+                NHelp(
+                    "What is on disk right now, read from the folder rather than from the download " +
+                        "record. The accented row is the file handed to the runtime; a model that " +
+                        "arrived incomplete shows it here instead of at the moment it fails to load.",
+                    Modifier.padding(top = 9.dp),
+                )
+            }
+
             Row(
                 Modifier.fillMaxWidth().padding(top = 18.dp),
                 horizontalArrangement = Arrangement.spacedBy(7.dp),

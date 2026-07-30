@@ -211,9 +211,37 @@ class ModelDetailViewModel @Inject constructor(
                 availableRamBytes = capabilities.availableRamBytes,
                 companions = SparseParams.parse(model.companionPathsJson).values
                     .map { (role, path) -> role to path.toString().trim('"') },
+                files = installedFilesOf(model),
             )
             recompute()
         }
+    }
+
+    /**
+     * Everything actually on disk for this model, largest first.
+     *
+     * A model is a directory, and until now no screen said what was in it. That
+     * is the difference between "OmniVoice is installed" and being able to see
+     * that what landed was the audio tokeniser's four graphs and none of the
+     * decoder — a distinction that otherwise only surfaces as a runtime error
+     * naming a file nobody can check. Read from the filesystem rather than from
+     * the download record, because the question being asked is what is there
+     * now, not what was once meant to be.
+     */
+    private fun installedFilesOf(model: ModelEntity): List<InstalledFile> {
+        val directory = runCatching { storage.modelDir(model.id) }.getOrNull() ?: return emptyList()
+        val root = directory.absolutePath
+        return directory.walkTopDown()
+            .filter { it.isFile }
+            .map {
+                InstalledFile(
+                    name = it.absolutePath.removePrefix(root).trimStart('/', '\\'),
+                    sizeBytes = it.length(),
+                    isPrimary = it.absolutePath == model.localPath,
+                )
+            }
+            .sortedByDescending { it.sizeBytes }
+            .toList()
     }
 
     /**
@@ -309,6 +337,17 @@ data class ModelDetailState(
     val totalRamBytes: Long = 0,
     val availableRamBytes: Long = 0,
     val companions: List<Pair<String, String>> = emptyList(),
+    val files: List<InstalledFile> = emptyList(),
+) {
+    val filesTotalBytes: Long get() = files.sumOf { it.sizeBytes }
+}
+
+/** One file inside a model's directory, as it exists on disk right now. */
+data class InstalledFile(
+    val name: String,
+    val sizeBytes: Long,
+    /** The file the library record points at — the one a runtime is handed. */
+    val isPrimary: Boolean,
 )
 
 /** S4 — the download queue. */

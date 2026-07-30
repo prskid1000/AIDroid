@@ -536,9 +536,13 @@ class ModelResolver(
         // Reporting that as the download made a 411 MB model read "2 KB" and
         // "weights 0.00", and downloading it would have produced a graph with no
         // weights behind it.
-        grouped.forEach { (_, members) ->
+        grouped.forEach { (label, members) ->
             val sidecars = members.flatMap { onnxSidecars(it, allFiles) }
             members.addAll(sidecars.filterNot { it in members })
+            if (members.any { it.endsWith(".onnx", ignoreCase = true) }) {
+                val tokenisers = onnxTextCompanions(label, allFiles)
+                members.addAll(tokenisers.filterNot { it in members })
+            }
         }
 
         // A quant suffix only identifies a variant when the repo holds one model.
@@ -592,6 +596,31 @@ class ModelResolver(
             .removeSuffix(".gguf").removeSuffix(".bin").removeSuffix(".onnx")
             .removePrefix("ggml-")
             .removePrefix("model-")
+
+    /**
+     * The text-side files an ONNX model needs that are not graphs.
+     *
+     * A GGUF carries its vocabulary inside the file; an ONNX model does not, and
+     * ships it beside the graphs as `tokenizer.json`. Collecting only `.onnx`
+     * and its weight sidecars therefore installed OmniVoice complete in every
+     * respect except the one that lets it read a sentence, and the failure
+     * arrived as "onnx-community_OmniVoice-Onnx_int4 has no tokenizer.json"
+     * *after* three quarters of a gigabyte had been fetched.
+     *
+     * Publishers keep a per-precision copy next to each variant — OmniVoice has
+     * `int4/tokenizer.json` and `cuda/tokenizer.json` as well as one at the root
+     * — so prefer the copy belonging to this variant and fall back to the root.
+     * They are picked by name rather than by extension because a repo's `.json`
+     * files also include configs no runtime opens.
+     */
+    private fun onnxTextCompanions(label: String, allFiles: List<String>): List<String> {
+        val directory = label.substringBeforeLast('/', "").takeIf { it.isNotEmpty() } ?: label
+        fun pick(name: String): String? =
+            allFiles.firstOrNull { it == "$directory/$name" }
+                ?: allFiles.firstOrNull { it == "$label/$name" }
+                ?: allFiles.firstOrNull { it == name }
+        return listOfNotNull(pick("tokenizer.json"), pick("tokenizer_config.json"))
+    }
 
     /** An ONNX graph's external weight file, under any of the three spellings in use. */
     private fun onnxSidecars(graph: String, allFiles: List<String>): List<String> {
