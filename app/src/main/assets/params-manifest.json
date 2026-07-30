@@ -1940,7 +1940,7 @@
           "default": "",
           "tier": "BASIC",
           "label": "Voice design",
-          "help": "Describe the speaker instead of picking one: gender, age, pitch, an accent or dialect, or a whisper. OmniVoice ships no voice list because this replaces it. Empty sends the literal \"None\", which is what the model was trained to see.",
+          "help": "Comma-separated speaker attributes, the way upstream writes them: \"female, low pitch, british accent\" or \"male, British accent\". Gender, age, pitch, dialect or accent, and whisper are the documented axes. OmniVoice ships no voice list because this replaces it. Empty sends the literal \"None\", which is what the model was trained to see. Note upstream's own caveat: the model is trained mainly on voice cloning, and voice design was trained on Chinese and English only — it generalises to other languages but can be unstable there.",
           "requiresReload": false
         },
         {

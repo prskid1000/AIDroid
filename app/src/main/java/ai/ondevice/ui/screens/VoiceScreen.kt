@@ -599,6 +599,41 @@ private fun SpeakPanel(
 
     // — the script —
     SectionKicker("Script", Modifier.padding(top = 18.dp, bottom = 8.dp))
+
+    // OmniVoice takes direction inline, and there is no way to discover that
+    // from a text box. These are not conventions this app invented: the tag
+    // list and both pronunciation forms are upstream's, quoted so a typo in a
+    // tag reads as a typo rather than as the model ignoring you.
+    if (provider == ai.ondevice.speech.SynthProvider.OMNIVOICE) {
+        NCard(gap = 6.dp) {
+            Text("Direction goes in the text", style = NocturneType.CardTitleSm)
+            Text(
+                "Non-verbal sounds are tags written where you want them: " +
+                    "\"[laughter] You really got me.\" Supported are [laughter], [sigh], " +
+                    "[confirmation-en], [question-en], [question-ah], [question-oh], " +
+                    "[question-ei], [question-yi], [surprise-ah], [surprise-oh], [surprise-wa], " +
+                    "[surprise-yo] and [dissatisfaction-hnn]. Anything else in brackets is read " +
+                    "as an English pronunciation.",
+                style = NocturneType.CardBody,
+                color = NocturneColors.Text.copy(alpha = 0.8f),
+            )
+            Text(
+                "Fix a pronunciation in English with CMU dictionary symbols in capitals: " +
+                    "\"He plays the [B EY1 S] guitar while catching a [B AE1 S] fish.\" " +
+                    "In Chinese, write the pinyin with a tone number in capitals after the " +
+                    "character: \"打ZHE2出售\".",
+                style = NocturneType.CardBody,
+                color = NocturneColors.Text.copy(alpha = 0.8f),
+            )
+            Text(
+                "Who is speaking is not set here — describe them under Advanced · voice design, " +
+                    "e.g. \"female, low pitch, british accent\".",
+                style = NocturneType.CardBody,
+                color = NocturneColors.Text.copy(alpha = 0.8f),
+            )
+        }
+    }
+
     if (state.speakSource == ai.ondevice.ui.vm.SpeakSource.FILE) {
         NButton(
             if (state.scriptSource != null) "Replace script file" else "Choose a script file",
