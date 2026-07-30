@@ -152,9 +152,19 @@ class AddModelViewModel @Inject constructor(
     }
 
     /** Prefer the Adreno fast path when one exists and fits. */
-    private fun pickDefaultQuant(model: ResolvedModel): QuantVariant? =
-        model.quants.firstOrNull { it.speedClass == ai.ondevice.core.SpeedClass.OPENCL_FAST }
-            ?: model.quants.minByOrNull { it.totalBytes }
+    /**
+     * Smallest that runs, not smallest.
+     *
+     * A variant this build cannot load is not a cheaper option, and defaulting
+     * to one is worse than listing it: OmniVoice's int4 is 240 MB smaller than
+     * the variant that works, so "pick the smallest" selected the one that
+     * refuses to open and did it silently.
+     */
+    private fun pickDefaultQuant(model: ResolvedModel): QuantVariant? {
+        val runnable = model.quants.filter { it.runnable }.ifEmpty { model.quants }
+        return runnable.firstOrNull { it.speedClass == ai.ondevice.core.SpeedClass.OPENCL_FAST }
+            ?: runnable.minByOrNull { it.totalBytes }
+    }
 
     /**
      * Queue the primary file, every shard, and every required companion as one
