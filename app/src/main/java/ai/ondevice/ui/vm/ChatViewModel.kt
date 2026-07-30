@@ -72,7 +72,24 @@ class ChatViewModel @Inject constructor(
                     availableModels = models.filter {
                         it.modality == Modality.TEXT || it.modality == Modality.VISION
                     },
+                    // Re-read the selected row too, not just the list. The
+                    // parameters screen edits this same row, and holding a
+                    // snapshot taken at restore meant the context readout kept
+                    // reporting the old n_ctx after it had been changed —
+                    // "8192 ctx" on a model since set to 2048.
+                    model = _state.value.model?.let { current ->
+                        models.firstOrNull { it.id == current.id } ?: current
+                    },
                 )
+            }
+        }
+
+        // Settings → Backend is a global preference, so it has to be observed
+        // rather than read once: changing it while the chat is open used to
+        // leave the readout describing the old choice.
+        viewModelScope.launch {
+            prefs.backendMode.collect { mode ->
+                _state.value = _state.value.copy(backendPreference = mode)
             }
         }
 
@@ -83,6 +100,12 @@ class ChatViewModel @Inject constructor(
                 _state.value = _state.value.copy(
                     loadedModelId = engine.loaded?.modelId,
                     loadingModel = engine.loading,
+                    // The backend the engine actually resolved, which is the
+                    // only trustworthy answer: it is the end of a four-step
+                    // fallback — per-model override, then the global setting,
+                    // then the measured winner, then OpenCL — and none of those
+                    // steps is visible from the model row alone.
+                    loadedBackend = engine.backend,
                 )
             }
         }
@@ -868,6 +891,17 @@ data class ChatState(
     val importSummary: String? = null,
     /** What the engine says is resident — not what the conversation prefers. */
     val loadedModelId: String? = null,
+
+    /**
+     * The backend actually in use, from the engine. Null until something is
+     * loaded, which the toolbar must render as "not loaded" rather than
+     * guessing — it used to print the literal string "OpenCL" in that case,
+     * which meant the readout was wrong on any device that chose otherwise and
+     * on every device before the first load.
+     */
+    val loadedBackend: ai.ondevice.core.BackendId? = null,
+    /** The global preference, for describing what *would* be used. */
+    val backendPreference: String = ai.ondevice.data.prefs.AppPrefs.BACKEND_AUTO,
     val error: String? = null,
     val errorSuggestion: String? = null,
 ) {

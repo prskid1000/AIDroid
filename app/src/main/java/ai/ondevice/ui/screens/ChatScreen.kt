@@ -287,7 +287,19 @@ private fun ChatToolbar(
                 NDot(color = if (state.generating) NocturneColors.Accent else NocturneColors.Neutral500)
                 Text(
                     buildString {
-                        append(state.model?.backendOverride?.label ?: "OpenCL")
+                        // What is *running*, not a guess. Before anything is
+                        // loaded there is no answer, so say so and name the
+                        // preference instead of asserting a backend — the old
+                        // hardcoded "OpenCL" was wrong on any device that chose
+                        // differently, and wrong on every device until the
+                        // first load.
+                        append(
+                            state.loadedBackend?.label
+                                ?: state.model?.backendOverride?.label
+                                ?: ai.ondevice.data.prefs.AppPrefs
+                                    .backendModeLabel(state.backendPreference)
+                                    .let { if (state.loadedModelId == null) "not loaded · $it" else it },
+                        )
                         append(" · ${Fmt.grouped(state.contextUsed)} / ${Fmt.grouped(state.contextLimit)} ctx")
                     },
                     style = NocturneType.NavLabel,

@@ -40,6 +40,24 @@ import kotlinx.serialization.json.JsonPrimitive
  * reload badge when the parameter needs one, the inline help, and a reset
  * affordance.
  */
+/**
+ * One installed file a `path` parameter can point at.
+ *
+ * A path parameter names a *file on this device*, and the only files that are
+ * certainly there are the ones the app downloaded. Offering a free text box
+ * asked the user to type an absolute path from memory — for a file in an
+ * app-private external directory they have no reason to know the name of — and
+ * accepted anything, including a path that does not exist, with the failure
+ * arriving later from the runtime. So the choices are the installed models.
+ */
+data class PathChoice(
+    val label: String,
+    val detail: String,
+    val path: String,
+    /** What the app detected this file to be, or null if it could not tell. */
+    val role: ai.ondevice.core.AttachmentRole? = null,
+)
+
 @Composable
 fun ParamRow(
     spec: ParamSpec,
@@ -47,6 +65,8 @@ fun ParamRow(
     onChange: (String, Any?) -> Unit,
     modifier: Modifier = Modifier,
     showKeyLine: Boolean = true,
+    /** Installed files a `path` parameter may be pointed at. */
+    pathChoices: List<PathChoice> = emptyList(),
 ) {
     val current = values[spec.key] ?: spec.default
     val modified = spec.key in values &&
@@ -92,7 +112,7 @@ fun ParamRow(
         }
 
         // Widget selection is table-driven off the type. No parameter names here.
-        ParamControl(spec, values, onChange)
+        ParamControl(spec, values, onChange, pathChoices)
 
         if (spec.help.isNotBlank()) {
             NHelp(spec.help, Modifier.padding(top = 5.dp))
@@ -116,6 +136,7 @@ private fun ParamControl(
     spec: ParamSpec,
     values: SparseParams,
     onChange: (String, Any?) -> Unit,
+    pathChoices: List<PathChoice>,
 ) {
     when (spec.type) {
         ParamType.FLOAT -> if (spec.isRange) {
@@ -158,12 +179,52 @@ private fun ParamControl(
             )
         }
 
-        ParamType.STRING, ParamType.PATH -> {
+        ParamType.PATH -> {
+            val v = values.string(spec.key) ?: (spec.default as? JsonPrimitive)?.content.orEmpty()
+            // A path parameter names one *kind* of file, and the manifest key
+            // already says which: AttachmentRole carries the key the runtime
+            // takes each role under, so `control_net` can offer ControlNets and
+            // nothing else. Where no role claims the key — a bare
+            // `diffusion_model`, say — everything installed is offered, because
+            // guessing narrower would hide a legitimate choice.
+            val wanted = ai.ondevice.core.AttachmentRole.entries
+                .firstOrNull { it.paramKey == spec.key }
+            val choices = wanted
+                ?.let { role -> pathChoices.filter { it.role == role } }
+                ?.ifEmpty { pathChoices }
+                ?: pathChoices
+            if (choices.isEmpty()) {
+                NHelp(
+                    "Nothing installed that this could point at. Download one on the Add model " +
+                        "screen and it appears here — a path typed by hand would only fail later, " +
+                        "inside the runtime.",
+                )
+            } else {
+                // Same shape as the chat model picker: choose from what is
+                // installed. "None" is first because clearing it must be as easy
+                // as setting it.
+                val labels = listOf("None") + choices.map { it.label }
+                val selected = choices.indexOfFirst { it.path == v }
+                    .let { if (it < 0) 0 else it + 1 }
+                NEnumRow(
+                    options = labels,
+                    selected = labels[selected],
+                    onSelect = { label ->
+                        val index = labels.indexOf(label)
+                        onChange(spec.key, if (index <= 0) null else choices[index - 1].path)
+                    },
+                )
+                choices.getOrNull(selected - 1)?.let { chosen ->
+                    NHelp(chosen.detail, Modifier.padding(top = 4.dp))
+                }
+            }
+        }
+
+        ParamType.STRING -> {
             val v = values.string(spec.key) ?: (spec.default as? JsonPrimitive)?.content.orEmpty()
             NInput(
                 value = v,
                 onValueChange = { onChange(spec.key, it) },
-                placeholder = if (spec.type == ParamType.PATH) "Pick a file…" else null,
                 textStyle = NocturneType.MonoSm,
             )
         }

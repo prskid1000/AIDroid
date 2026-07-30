@@ -131,19 +131,12 @@ fun VoiceScreen(
 
     PhoneScaffold(
         toolbar = {
-            RootToolbar("Voice") {
-                // Name the model that is about to do the work, which is a
-                // different model per tab. Showing "whisper.cpp" while the
-                // Speak tab is open credits the transcriber for synthesis it
-                // has nothing to do with — and the Speak panel already names
-                // its own engine, so the tag would also contradict the card
-                // directly below it.
-                when (state.mode) {
-                    VoiceMode.TRANSCRIBE ->
-                        state.sttModel?.let { NTag(it.displayName, style = NTagStyle.Neutral) }
-                    VoiceMode.SPEAK -> Unit
-                }
-            }
+            // No engine tag up here. Which model does the work depends on the
+            // tab, so a single toolbar badge was either wrong on one of them or
+            // duplicating the card below it. Each tab names its own engine in
+            // its own panel instead, in the same shape, so the two tabs read
+            // alike.
+            RootToolbar("Voice")
         },
         bottomBar = { NBottomBar(BottomDestinations, currentRoute) { onNavigate(it.route) } },
         contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 18.dp),
@@ -197,6 +190,47 @@ fun VoiceScreen(
                     state.errorHint?.let {
                         Text(
                             it,
+                            style = NocturneType.CardBody,
+                            color = NocturneColors.Text.copy(alpha = 0.8f),
+                        )
+                    }
+                }
+            }
+
+            // Transcribe's engine card, the mirror of Speak's. Both tabs now
+            // name the model doing the work in the same place and the same
+            // shape, which is what the toolbar tag was standing in for.
+            if (state.mode == VoiceMode.TRANSCRIBE) {
+                NCard(
+                    Modifier.padding(bottom = 10.dp),
+                    ring = if (state.sttModel != null) NocturneColors.Accent700 else NocturneColors.Divider,
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            NIcons.Waveform,
+                            contentDescription = null,
+                            tint = NocturneColors.Accent300,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(
+                            state.sttModel?.let { "${it.displayName} · whisper.cpp" }
+                                ?: "No speech model",
+                            style = NocturneType.CardTitleSm,
+                            modifier = Modifier.weight(1f),
+                        )
+                        NTag(
+                            if (state.sttModel != null) "on-device" else "missing",
+                            style = if (state.sttModel != null) NTagStyle.Accent else NTagStyle.Outline,
+                        )
+                    }
+                    if (state.sttModel == null) {
+                        Text(
+                            "Nothing to transcribe with yet. Add model lists whisper under Speech — " +
+                                "base or small suits a phone.",
                             style = NocturneType.CardBody,
                             color = NocturneColors.Text.copy(alpha = 0.8f),
                         )

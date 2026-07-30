@@ -90,6 +90,7 @@ class ParamsViewModel @Inject constructor(
             modelId = model?.id,
             query = "",
         )
+        _state.value = _state.value.copy(pathChoices = installedFiles())
         // Seed the display order from the stored value when there is one,
         // otherwise from the manifest default.
         val stored = _state.value.values.stringList("samplers")
@@ -98,16 +99,47 @@ class ParamsViewModel @Inject constructor(
     }
 
     /**
-     * Whose overrides this screen edits. For llama that is deliberately the
-     * *loaded* model rather than any installed one — the build gate and the
-     * context readout have to describe the model actually in memory. The other
-     * runtimes load on demand, so the first installed model of the matching
-     * modality is the right target.
+     * Whose overrides this screen edits.
+     *
+     * The loaded model is preferred, because the build gate and the context
+     * readout should describe what is actually in memory. But it cannot be the
+     * *only* answer: nothing is loaded until the first message, so opening
+     * Settings → Advanced parameters from a cold start left this null, and with
+     * it null [persist] returned early and **every edit was silently
+     * discarded** — the screen showed the new value, the database kept the old
+     * one, and n_ctx set to 2048 came back as 8192 on the next load.
+     *
+     * So fall back to the model that *would* be loaded: the most recently used
+     * one of the right modality, which is what the chat picks too.
      */
     private suspend fun modelFor(runtimeId: String) = when (runtimeId) {
-        RuntimeRegistry.LLAMA -> engines.state.value.loaded?.modelId?.let { db.models().get(it) }
+        RuntimeRegistry.LLAMA ->
+            engines.state.value.loaded?.modelId?.let { db.models().get(it) }
+                ?: db.models().observeByModality(Modality.TEXT).first().firstOrNull()
         else -> db.models().observeByModality(modalityOf(runtimeId)).first().firstOrNull()
     }
+
+    /**
+     * Every installed file a `path` parameter could legitimately name.
+     *
+     * Taken from the library rather than by scanning the filesystem, so what is
+     * offered is exactly what the app knows it downloaded and can vouch for.
+     * The role is included in the label because that is the thing the user is
+     * actually choosing by — "the ControlNet", not "a .safetensors".
+     */
+    private suspend fun installedFiles(): List<ai.ondevice.params.PathChoice> =
+        db.models().getAll().mapNotNull { model ->
+            val file = java.io.File(model.localPath)
+            if (!file.isFile) return@mapNotNull null
+            val role = ai.ondevice.core.AttachmentRole.classify(model.localPath)
+            ai.ondevice.params.PathChoice(
+                label = role?.label ?: model.displayName,
+                detail = "${model.displayName} · ${file.name} · " +
+                    ai.ondevice.core.Fmt.bytes(file.length()),
+                path = model.localPath,
+                role = role,
+            )
+        }
 
     private fun modalityOf(runtimeId: String) = when (runtimeId) {
         RuntimeRegistry.STABLE_DIFFUSION -> Modality.DIFFUSION
@@ -275,10 +307,28 @@ class ParamsViewModel @Inject constructor(
         )
     }
 
+    /**
+     * Write the overrides to the model row.
+     *
+     * If there is nothing to write them to, say so. This used to `return`
+     * quietly, which turned the whole screen into a very convincing no-op —
+     * sliders moved, values updated, nothing was saved. An edit that cannot be
+     * stored is a refusal, and §1.2 says a refusal names itself.
+     */
     private fun persist() {
-        val modelId = _state.value.modelId ?: return
+        val modelId = _state.value.modelId
+        if (modelId == null) {
+            _state.value = _state.value.copy(
+                unsavedReason = "No model is installed for this runtime, so there is nothing to " +
+                    "save these against. Install one and they will stick.",
+            )
+            return
+        }
         viewModelScope.launch {
             db.models().setParamOverrides(modelId, _state.value.values.toJsonString())
+            if (_state.value.unsavedReason != null) {
+                _state.value = _state.value.copy(unsavedReason = null)
+            }
         }
     }
 }
@@ -303,6 +353,10 @@ data class ParamsState(
     val disabledSamplers: Set<String> = emptySet(),
     val rawJson: String = "{ \"some_new_upstream_flag\": 0.7 }",
     val rawError: String? = null,
+    /** Non-null when edits cannot be stored, so the screen can stop pretending. */
+    val unsavedReason: String? = null,
+    /** Installed files that a `path` parameter can be pointed at. */
+    val pathChoices: List<ai.ondevice.params.PathChoice> = emptyList(),
     val lastReport: ParamReport? = null,
 ) {
     val totalCount: Int get() = allSpecs.size

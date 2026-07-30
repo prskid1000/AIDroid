@@ -122,6 +122,17 @@ fun AllParametersScreen(
 
         Column(Modifier.verticalScroll(rememberScrollState())) {
 
+            state.unsavedReason?.let { reason ->
+                NCard(Modifier.padding(bottom = 10.dp), ring = NocturneColors.Neutral700) {
+                    Text("These are not being saved", style = NocturneType.CardTitleSm)
+                    Text(
+                        reason,
+                        style = NocturneType.CardBody,
+                        color = NocturneColors.Text.copy(alpha = 0.8f),
+                    )
+                }
+            }
+
             NHelp(
                 "${state.visible.shownCount} shown · ${state.visible.hiddenCount} hidden by dependsOn " +
                     "or build gate",
@@ -199,6 +210,7 @@ fun AllParametersScreen(
                         spec = spec,
                         values = state.values,
                         onChange = viewModel::setValue,
+                        pathChoices = state.pathChoices,
                     )
                 }
             }
