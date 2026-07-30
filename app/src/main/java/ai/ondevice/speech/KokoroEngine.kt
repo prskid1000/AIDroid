@@ -95,6 +95,30 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
                     // 0 lets ORT pick; anything else is the user's thread budget.
                     if (threads > 0) setIntraOpNumThreads(threads)
                     setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+
+                    // Kokoro's text encoder is ALBERT, and ALBERT's whole idea
+                    // is that every layer *shares* one set of weights. In this
+                    // graph a single fp16 initialiser —
+                    // encoder.bert.encoder.albert_layer_groups.0.albert_layers
+                    //   .0.full_layer_layer_norm.weight
+                    // — is read by 12 SkipLayerNormalization nodes at once.
+                    //
+                    // ORT pre-packs constant initialisers into a kernel-private
+                    // layout at session creation and then drops the original
+                    // tensor, which is sound when one kernel owns it. With a
+                    // shared initialiser the first node packs it away and every
+                    // later node asking for the same input gets a null back:
+                    //
+                    //   Non-zero status code returned while running
+                    //   SkipLayerNormalization node ... Missing Input: <that name>
+                    //
+                    // It reads like a truncated download and is not one. The
+                    // file is byte-identical to the repo, sha256-verified, and
+                    // the initialiser is present in the graph — it is released
+                    // out from under the node that needs it. Turning pre-packing
+                    // off costs a little matmul throughput and is the difference
+                    // between Kokoro speaking and not.
+                    addConfigEntry("session.disable_prepacking", "1")
                 }
                 val created = env.createSession(model.absolutePath, options)
 

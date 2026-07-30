@@ -315,6 +315,7 @@ data class ModelDetailState(
 @HiltViewModel
 class DownloadsViewModel @Inject constructor(
     private val downloader: Downloader,
+    private val db: OnDeviceDatabase,
 ) : ViewModel() {
 
     val jobs: StateFlow<List<DownloadJob>> = downloader.observeJobs()
@@ -324,4 +325,11 @@ class DownloadsViewModel @Inject constructor(
     fun resume(id: String) = downloader.start(id)
     fun cancel(id: String) = downloader.cancel(id)
     fun retry(id: String) = downloader.start(id)
+
+    /**
+     * Forget finished transfers. Nothing is uninstalled and no file is touched:
+     * these rows are a receipt, and "installed" is defined by the absence of an
+     * *active* job rather than the presence of a completed one.
+     */
+    fun clearFinished() = viewModelScope.launch { db.downloads().clearFinished() }
 }

@@ -97,6 +97,25 @@ fun DownloadQueueScreen(
                 }
             }
 
+            if (complete.isNotEmpty() || failed.isNotEmpty()) {
+                NButton(
+                    "Clear finished · ${complete.size + failed.size}",
+                    viewModel::clearFinished,
+                    style = NButtonStyle.Secondary,
+                    block = true,
+                    modifier = Modifier.padding(top = 10.dp),
+                )
+                // Said plainly because "clear" next to a list of model names
+                // reads like it might remove the models. It removes the history
+                // and nothing else — a completed row is a receipt, and the
+                // library derives "installed" from the absence of an *active*
+                // job, never from one of these.
+                NHelp(
+                    "Removes the history only. Installed models and their files are untouched.",
+                    Modifier.padding(top = 6.dp),
+                )
+            }
+
             NHelp(
                 "Downloads run in a foreground service and survive app kill. Partial files are swept on " +
                     "next boot.",

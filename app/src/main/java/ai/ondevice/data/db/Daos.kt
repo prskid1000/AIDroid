@@ -357,6 +357,16 @@ interface DownloadDao {
 
     @Query("SELECT * FROM download_jobs WHERE state IN ('QUEUED','RUNNING','PAUSED','VERIFYING') ORDER BY createdAt")
     suspend fun getUnfinished(): List<DownloadJobEntity>
+
+    /**
+     * Clear finished history. Safe for the library, and the reason is the
+     * [observeInstalled] query above: "installed" is the *absence* of an active
+     * job, never the presence of a completed one. Deleting these rows removes a
+     * receipt, not a model — which is also why FAILED goes with COMPLETE, since
+     * neither state holds anything open.
+     */
+    @Query("DELETE FROM download_jobs WHERE state IN ('COMPLETE','FAILED')")
+    suspend fun clearFinished()
 }
 
 @Dao
