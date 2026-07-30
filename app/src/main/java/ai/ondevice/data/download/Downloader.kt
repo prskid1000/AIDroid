@@ -240,6 +240,28 @@ class Downloader(
             val partFile = File(file.destPath + PART_SUFFIX)
             partFile.parentFile?.mkdirs()
 
+            // A finished file already at the destination is not re-fetched.
+            // Only a `.part` was ever resumed, so anything that had completed
+            // and then lost its library row — a wiped database, a cleared
+            // history, an app reinstall over kept files — cost a full download
+            // to get back, with the bytes sitting on disk the whole time.
+            //
+            // The size has to match and, where the repo publishes one, so does
+            // the checksum: "a file of the right name exists" is not evidence
+            // that it is this file. Where there is no published checksum the
+            // size is all there is, which is weaker, and still better than
+            // fetching a gigabyte to arrive at the same bytes.
+            val dest = File(file.destPath)
+            if (dest.isFile && file.sizeBytes > 0 && dest.length() == file.sizeBytes) {
+                val trustworthy = file.expectedSha256?.let {
+                    sha256Of(dest).equals(it, ignoreCase = true)
+                } ?: true
+                if (trustworthy) {
+                    onProgress(dest.length(), 0)
+                    return@runCatching file.copy(bytesDone = dest.length(), complete = true)
+                }
+            }
+
             val existing = if (partFile.exists()) partFile.length() else 0L
             val startAt = if (existing in 1 until file.sizeBytes.coerceAtLeast(1)) existing else 0L
             if (startAt == 0L && partFile.exists()) partFile.delete()
@@ -317,7 +339,6 @@ class Downloader(
                     }
                 }
 
-                val dest = File(file.destPath)
                 if (dest.exists()) dest.delete()
                 if (!partFile.renameTo(dest)) throw java.io.IOException("Could not finalise ${file.filename}")
 
