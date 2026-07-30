@@ -56,6 +56,7 @@ class DiffusionEngine(
         modelPath: String,
         attachments: List<ModelAttachment> = emptyList(),
         threads: Int = 0,
+        params: ai.ondevice.core.SparseParams = ai.ondevice.core.SparseParams.EMPTY,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             check(SdBridge.available) {
@@ -65,8 +66,16 @@ class DiffusionEngine(
 
             // These three are load-time in sd.cpp — they change the context, not
             // the run — so they are resolved here and the rest at generate time.
+            //
+            // The ticked attachment wins, and the manifest parameter is the
+            // fallback. Both routes existed but only the first was read, which
+            // made `vae`, `taesd` and `control_net` look like working Expert
+            // parameters while doing nothing: AttachmentRole declares those very
+            // strings as its `paramKey`, so even a search for them found a hit
+            // and hid the gap.
             fun pathFor(role: AttachmentRole) =
-                attachments.firstOrNull { it.enabled && it.role == role }?.path.orEmpty()
+                attachments.firstOrNull { it.enabled && it.role == role }?.path
+                    ?: params.string(role.paramKey).orEmpty()
 
             val newHandle = SdBridge.nativeLoad(
                 modelPath = modelPath,
@@ -129,8 +138,15 @@ class DiffusionEngine(
         val mask = request.maskPngPath?.let { decodeRgbFromFile(it) }
 
         // Attachments the *runtime* takes per-run, as a role-tagged list.
+        //
+        // Ticked attachments first, then anything named by an Expert parameter
+        // for a role nothing is ticked for. Without the second pass the manifest
+        // keys `ip_adapter`, `clip_l`, `clip_g`, `t5xxl`, `embd_dir` and
+        // `upscale_model` were settable and inert — the Image screen's
+        // Attachments section was the only route that reached sd.cpp.
+        val ticked = request.attachments.filter { it.enabled }
         val attachmentsJson = buildJsonArray {
-            request.attachments.filter { it.enabled }.forEach { attachment ->
+            ticked.forEach { attachment ->
                 add(
                     buildJsonObject {
                         put("role", attachment.role.name)
@@ -139,6 +155,20 @@ class DiffusionEngine(
                     },
                 )
             }
+            AttachmentRole.entries
+                .filterNot { role -> ticked.any { it.role == role } }
+                .forEach { role ->
+                    val path = request.params.string(role.paramKey)
+                    if (!path.isNullOrBlank()) {
+                        add(
+                            buildJsonObject {
+                                put("role", role.name)
+                                put("path", path)
+                                put("weight", 1.0f)
+                            },
+                        )
+                    }
+                }
         }.toString()
 
         var done = false

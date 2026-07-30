@@ -190,7 +190,12 @@ class ImageViewModel @Inject constructor(
             try {
                 if (diffusion.loadedModelId != model.id) {
                     _state.value = _state.value.copy(loadingModel = true)
-                    val loaded = diffusion.load(model.id, model.localPath, _state.value.attachments)
+                    val loaded = diffusion.load(
+                        model.id,
+                        model.localPath,
+                        _state.value.attachments,
+                        params = SparseParams.parse(model.paramOverridesJson),
+                    )
                     _state.value = _state.value.copy(loadingModel = false)
                     if (loaded.isFailure) {
                         _state.value = _state.value.copy(
