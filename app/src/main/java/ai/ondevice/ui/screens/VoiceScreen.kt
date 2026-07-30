@@ -44,6 +44,7 @@ import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NCard
 import ai.ondevice.ui.components.NCardMeta
+import ai.ondevice.ui.components.NDropdown
 import ai.ondevice.ui.components.NEnumRow
 import ai.ondevice.ui.components.NHelp
 import ai.ondevice.ui.components.NInput
@@ -216,14 +217,13 @@ fun VoiceScreen(
                             tint = NocturneColors.Accent300,
                             modifier = Modifier.size(16.dp),
                         )
-                        // The quant, not the runtime name. whisper's repo is
-                        // literally called "whisper.cpp", so appending the
-                        // runtime produced "whisper.cpp · whisper.cpp"; the size
-                        // of the model is the thing worth knowing here.
+                        // No engine name here. Transcribe has exactly one —
+                        // whisper.cpp — so naming it says nothing the user can
+                        // act on, and it duplicated the model shown immediately
+                        // below. Speak names its engine because it genuinely has
+                        // three to choose between.
                         Text(
-                            state.sttModel?.let { model ->
-                                listOfNotNull(model.displayName, model.quant).joinToString(" · ")
-                            } ?: "No speech model",
+                            if (state.sttModel != null) "Speech model" else "No speech model",
                             style = NocturneType.CardTitleSm,
                             modifier = Modifier.weight(1f),
                         )
@@ -250,7 +250,7 @@ fun VoiceScreen(
                         // several sizes of the same repo — "tiny-q5_1" and
                         // "small" distinguish them, the repo name does not.
                         val labels = state.sttModels.map { it.quant ?: it.displayName }
-                        NEnumRow(
+                        NDropdown(
                             options = labels,
                             selected = state.sttModel?.let { it.quant ?: it.displayName },
                             onSelect = { label ->
@@ -258,6 +258,7 @@ fun VoiceScreen(
                                     .firstOrNull { (it.quant ?: it.displayName) == label }
                                     ?.let(viewModel::selectSttModel)
                             },
+                            modifier = Modifier.padding(top = 4.dp),
                         )
                     }
                 }
@@ -522,13 +523,14 @@ private fun SpeakPanel(
         // now the app picked by scanning directories and never said which it had
         // landed on.
         if (state.ttsModels.isNotEmpty()) {
-            NEnumRow(
+            NDropdown(
                 options = state.ttsModels.map { it.displayName },
                 selected = state.ttsModel?.displayName,
                 onSelect = { name ->
                     state.ttsModels.firstOrNull { it.displayName == name }
                         ?.let(viewModel::selectTtsModel)
                 },
+                modifier = Modifier.padding(top = 8.dp),
             )
         }
 

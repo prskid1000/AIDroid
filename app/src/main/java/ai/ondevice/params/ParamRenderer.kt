@@ -189,10 +189,17 @@ private fun ParamControl(
             // guessing narrower would hide a legitimate choice.
             val wanted = ai.ondevice.core.AttachmentRole.entries
                 .firstOrNull { it.paramKey == spec.key }
-            val choices = wanted
-                ?.let { role -> pathChoices.filter { it.role == role } }
-                ?.ifEmpty { pathChoices }
-                ?: pathChoices
+            // When the role is known and nothing installed matches it, the
+            // answer is "nothing" — not "everything". An earlier version fell
+            // back to the full list on the reasoning that a narrow guess might
+            // hide a legitimate choice, and the result was CLIP-L offering a
+            // whisper model and two LLMs. None of those is a text encoder, and
+            // pointing clip_l at one produces a load failure inside sd.cpp with
+            // nothing to connect it back to this control.
+            val choices = when (wanted) {
+                null -> pathChoices
+                else -> pathChoices.filter { it.role == wanted }
+            }
             if (choices.isEmpty()) {
                 NHelp(
                     "Nothing installed that this could point at. Download one on the Add model " +
@@ -203,10 +210,13 @@ private fun ParamControl(
                 // Same shape as the chat model picker: choose from what is
                 // installed. "None" is first because clearing it must be as easy
                 // as setting it.
+                // A dropdown rather than pills: these labels are model names and
+                // filenames, which wrap into a paragraph as chips and stop making
+                // the current value obvious.
                 val labels = listOf("None") + choices.map { it.label }
                 val selected = choices.indexOfFirst { it.path == v }
                     .let { if (it < 0) 0 else it + 1 }
-                NEnumRow(
+                ai.ondevice.ui.components.NDropdown(
                     options = labels,
                     selected = labels[selected],
                     onSelect = { label ->

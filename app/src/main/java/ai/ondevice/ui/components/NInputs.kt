@@ -408,3 +408,86 @@ fun NEnumRow(
         }
     }
 }
+
+/**
+ * A dropdown, for when the options are too long or too many to lay out as pills.
+ *
+ * [NEnumRow] is the right control for a closed set of short values — three
+ * sampler names, two sources — because every option stays visible and choosing
+ * is one tap. It is the wrong control for a filename, a model id, or a list that
+ * grows with what the user has installed: the pills wrap into a paragraph, the
+ * current value stops being obvious, and a whisper library of eight sizes fills
+ * the screen.
+ *
+ * So this shows only the current value and a chevron, and opens the rest on
+ * demand. Long values are ellipsised rather than wrapped, since the tail of a
+ * path is what distinguishes it and the head is shared.
+ */
+@Composable
+fun NDropdown(
+    options: List<String>,
+    selected: String?,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    placeholder: String = "Choose…",
+    minHeight: androidx.compose.ui.unit.Dp = 42.dp,
+) {
+    val expanded = remember { androidx.compose.runtime.mutableStateOf(false) }
+
+    Box(modifier) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .defaultMinSize(minHeight = minHeight)
+                .background(NocturneColors.Surface, Radius.Md)
+                .ring(
+                    if (expanded.value) NocturneColors.Accent else NocturneColors.Divider,
+                    Radius.Md,
+                )
+                .nClickableFlat { expanded.value = true }
+                .padding(horizontal = 12.dp, vertical = 9.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                selected ?: placeholder,
+                style = NocturneType.MonoSm,
+                color = if (selected == null) NocturneColors.TextMuted else NocturneColors.Text,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            androidx.compose.material3.Icon(
+                ai.ondevice.ui.theme.NIcons.ChevronDown,
+                contentDescription = null,
+                tint = NocturneColors.TextMuted,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+
+        androidx.compose.material3.DropdownMenu(
+            expanded = expanded.value,
+            onDismissRequest = { expanded.value = false },
+            // The menu is its own surface, outside the app's, so it has to be
+            // told the palette or it arrives in Material's default light grey.
+            containerColor = NocturneColors.Neutral900,
+        ) {
+            options.forEach { option ->
+                val isSelected = option == selected
+                androidx.compose.material3.DropdownMenuItem(
+                    text = {
+                        Text(
+                            option,
+                            style = NocturneType.MonoSm,
+                            color = if (isSelected) NocturneColors.Accent200 else NocturneColors.Text,
+                        )
+                    },
+                    onClick = {
+                        expanded.value = false
+                        if (!isSelected) onSelect(option)
+                    },
+                )
+            }
+        }
+    }
+}
