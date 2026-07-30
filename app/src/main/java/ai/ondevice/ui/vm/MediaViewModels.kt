@@ -552,6 +552,7 @@ class VoiceViewModel @Inject constructor(
             val ttsModel = db.models().observeByModality(Modality.TEXT_TO_SPEECH).first().firstOrNull()
             _state.value = _state.value.copy(
                 sttModel = db.models().observeByModality(Modality.SPEECH_TO_TEXT).first().firstOrNull(),
+                sttModels = db.models().observeByModality(Modality.SPEECH_TO_TEXT).first(),
                 ttsModel = ttsModel,
                 transcripts = db.transcripts().observeAll().first(),
             )
@@ -704,6 +705,28 @@ class VoiceViewModel @Inject constructor(
             blendRatio = parts.getOrNull(2)?.trim()?.toFloatOrNull()?.coerceIn(0f, 1f)
                 ?: _state.value.blendRatio,
         )
+    }
+
+    /**
+     * Which speech model transcribes.
+     *
+     * There was no way to say: the screen took whichever row the database
+     * returned first, so installing whisper base alongside small gave you one of
+     * them and no means of preferring the other. Switching drops the loaded
+     * context, because it belongs to the previous model.
+     */
+    fun selectSttModel(model: ModelEntity) {
+        if (_state.value.sttModel?.id == model.id) return
+        if (_state.value.recording) stopRecording()
+        transcriber.unload()
+        _state.value = _state.value.copy(
+            sttModel = model,
+            segments = emptyList(),
+            partial = emptyList(),
+            error = null,
+            errorHint = null,
+        )
+        viewModelScope.launch { db.models().touch(model.id, System.currentTimeMillis()) }
     }
 
     fun setPitch(value: Float) = update { copy(pitch = value) }
@@ -1087,6 +1110,8 @@ data class VoiceState(
     val source: TranscribeSource = TranscribeSource.MICROPHONE,
     val speakSource: SpeakSource = SpeakSource.TYPED,
     val sttModel: ModelEntity? = null,
+    /** Every installed speech model, so the tab can offer a choice. */
+    val sttModels: List<ModelEntity> = emptyList(),
     val ttsModel: ModelEntity? = null,
     val recording: Boolean = false,
     val elapsedMillis: Long = 0,

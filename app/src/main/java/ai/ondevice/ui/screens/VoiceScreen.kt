@@ -235,6 +235,20 @@ fun VoiceScreen(
                             color = NocturneColors.Text.copy(alpha = 0.8f),
                         )
                     }
+                    // Only worth showing when there is a choice to make. Base
+                    // and small differ enough in speed and accuracy that which
+                    // one runs should not be whichever the database returned
+                    // first.
+                    if (state.sttModels.size > 1) {
+                        NEnumRow(
+                            options = state.sttModels.map { it.displayName },
+                            selected = state.sttModel?.displayName,
+                            onSelect = { name ->
+                                state.sttModels.firstOrNull { it.displayName == name }
+                                    ?.let(viewModel::selectSttModel)
+                            },
+                        )
+                    }
                 }
             }
 
