@@ -64,6 +64,10 @@ class OmniVoiceEngine {
     private var tokenizer: QwenTokenizer? = null
     private var pastNames: List<String> = emptyList()
     private var describedGraphs = false
+    private var describedShapes = false
+
+    /** Null until measured; see [attentionIsBidirectional]. Reset on unload. */
+    private var bidirectional: Boolean? = null
     private var llmEmbedType: OnnxJavaType = OnnxJavaType.FLOAT
     private var headsInputType: OnnxJavaType = OnnxJavaType.FLOAT
 
@@ -144,28 +148,71 @@ class OmniVoiceEngine {
      * Turn a graph-load failure into something the user can act on.
      *
      * The int4 export quantises its embedding table four bits to a weight and
-     * says so with a `bits` attribute on `com.microsoft.GatherBlockQuantized`.
-     * That attribute is on ONNX Runtime's main branch and is in no released
-     * version — not 1.22, which is the newest Android build published — so the
-     * graph is refused outright with a node dump that reads like a corrupt
-     * download. It is not corrupt and no newer runtime we can depend on will
-     * read it; the answer is the other export, whose embeddings encoder is
-     * 327 MB rather than 87 MB and uses no such op. Everything else in the two
-     * is the same file, `llm_decoder` included.
+     * says so with a `bits` attribute on `com.microsoft.GatherBlockQuantized`,
+     * which ONNX Runtime gained in 1.23. This build ships 1.28, so it loads. The
+     * message survives for anyone running an older runtime, where the failure is
+     * a node dump that reads like a corrupt download and is nothing of the kind.
      */
     private fun explainLoadFailure(file: java.io.File, cause: Throwable): String {
         val message = cause.message.orEmpty()
         val unsupportedQuant = "GatherBlockQuantized" in message ||
             ("bits" in message && "Unrecognized attribute" in message)
         return if (unsupportedQuant) {
-            "${file.name} is a 4-bit export this ONNX Runtime cannot read: it needs the `bits` " +
-                "attribute on GatherBlockQuantized, which no released ONNX Runtime has yet. " +
-                "Install OmniVoice's other variant — the one whose audio_embeddings_encoder is " +
-                "around 327 MB rather than 87 MB. Nothing is wrong with the download."
+            "${file.name} is a 4-bit export that needs the `bits` attribute on " +
+                "GatherBlockQuantized, added in ONNX Runtime 1.23. This build has a runtime " +
+                "older than that. Nothing is wrong with the download."
         } else {
             "${file.name} could not be loaded. $message"
         }
     }
+
+    /**
+     * Whether the backbone can see the whole sequence, which this model needs.
+     *
+     * OmniVoice unmasks a grid: a frame at position 5 has to attend to a frame
+     * committed at position 50, or ordering the commits by confidence buys
+     * nothing. That requires bidirectional attention.
+     *
+     * `onnx-community/OmniVoice-Onnx` was exported with onnxruntime-genai's
+     * ModelBuilder, which builds *autoregressive* decoders — attention is
+     * masked to the past. Measured on the int4 export: change the last token of
+     * a twelve-token sequence and every earlier hidden state is bit-identical,
+     * max|diff| exactly 0. The repo's own eval.py never catches this because it
+     * checks the embeddings encoder and the heads decoder against PyTorch and
+     * calls the LLM "a black-box genai model".
+     *
+     * The result is not subtly worse audio, it is a buzz: unmasking degenerates
+     * to a handful of repeated codes. Reproduced outside the app, in Python,
+     * with the reference algorithm — 42 distinct codes across 1024 slots.
+     *
+     * So this is measured rather than assumed, and per model directory. Nothing
+     * here names OmniVoice: any export whose backbone cannot see forwards fails
+     * the same way and earns the same refusal.
+     */
+    private fun attentionIsBidirectional(): Boolean = runCatching {
+        val probe = 12
+        val ids = Array(CODEBOOKS) { LongArray(probe) { i -> (5 + i).toLong() } }
+        val mask = BooleanArray(probe)
+        val attention = LongArray(probe) { 1L }
+
+        val first = forward(ids, mask, attention, probe)
+        for (cb in 0 until CODEBOOKS) ids[cb][probe - 1] = 900L
+        val second = forward(ids, mask, attention, probe)
+
+        // Compare only what precedes the changed position. If the backbone is
+        // causal those logits cannot have moved at all.
+        val upto = (probe - 1) * AUDIO_VOCAB
+        var largest = 0f
+        for (cb in 0 until CODEBOOKS) {
+            val base = cb * probe * AUDIO_VOCAB
+            for (i in 0 until upto) {
+                val d = kotlin.math.abs(first[base + i] - second[base + i])
+                if (d > largest) largest = d
+            }
+        }
+        android.util.Log.i("OmniVoice", "bidirectional probe: max|diff| before the change = $largest")
+        largest > 1e-6f
+    }.getOrDefault(true) // Could not ask; do not refuse on a failed measurement.
 
     suspend fun unload() = mutex.withLock { unlockedUnload() }
 
@@ -178,6 +225,9 @@ class OmniVoiceEngine {
         tokenizer = null
         pastNames = emptyList()
         loadedPath = null
+        bidirectional = null
+        describedGraphs = false
+        describedShapes = false
     }
 
     suspend fun synthesize(request: OmniVoiceRequest): Result<KokoroAudio> =
@@ -191,6 +241,22 @@ class OmniVoiceEngine {
                 check(textTokens.isNotEmpty()) { "That text produced no tokens." }
 
                 val frames = request.frames ?: estimateFrames(text, request.speed)
+
+                // Measured once per load, before spending a minute of compute on
+                // a grid the backbone cannot unmask.
+                if (bidirectional == null) {
+                    bidirectional = mutex.withLock { attentionIsBidirectional() }
+                }
+                check(bidirectional == true) {
+                    "This OmniVoice export cannot produce speech. Its backbone was built as an " +
+                        "autoregressive decoder — each position sees only the ones before it — " +
+                        "and OmniVoice unmasks a grid, so a frame has to see the frames committed " +
+                        "after it. Measured here, not guessed: changing the last token leaves " +
+                        "every earlier output bit-identical. The audio would be a buzz, so the " +
+                        "app stops rather than playing one. A re-export with full attention " +
+                        "would work; nothing is wrong with your download or this device."
+                }
+
                 val codes = mutex.withLock { unmask(textTokens, frames, request.steps) }
                 val samples = mutex.withLock { decodeToWaveform(codes, frames) }
 
@@ -423,7 +489,18 @@ class OmniVoiceEngine {
                     val states = adapt(env, decoded.pick("hidden_states"), headsInputType)
                         .also(closeables::add)
                     head.run(mapOf("hidden_states" to states)).use { scored ->
-                        return readFloats(scored.pick("logits"))
+                        val logits = scored.pick("logits")
+                        if (!describedShapes) {
+                            describedShapes = true
+                            android.util.Log.i(
+                                "OmniVoice",
+                                "seq=$sequence embeds=${hidden.info.shape.toList()}/${hidden.info.type} " +
+                                    "hidden=${states.info.shape.toList()} " +
+                                    "logits=${logits.info.shape.toList()}/${logits.info.type} " +
+                                    "expected logits=[1, $CODEBOOKS, $sequence, $AUDIO_VOCAB]",
+                            )
+                        }
+                        return readFloats(logits)
                     }
                 }
             }
