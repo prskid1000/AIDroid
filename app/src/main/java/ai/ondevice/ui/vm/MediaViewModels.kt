@@ -655,7 +655,26 @@ class VoiceViewModel @Inject constructor(
      * an unavailable voice is marked and cannot be selected, rather than being
      * silently swapped for a system voice at speak time.
      */
-    private suspend fun loadVoices() {
+    /**
+     * Which installed voice model the Speak tab uses.
+     *
+     * Needed once there is more than one, and there can easily be two: Kokoro
+     * and OmniVoice are both TEXT_TO_SPEECH, and nothing stops two builds of
+     * either. Until now the engine was inferred by sniffing directory contents
+     * and the *model* was never selectable at all — so with both installed the
+     * app decided for you and gave you no way to see or change which.
+     */
+    fun selectTtsModel(model: ModelEntity) {
+        if (_state.value.ttsModel?.id == model.id) return
+        if (_state.value.speaking) stopSpeaking()
+        _state.value = _state.value.copy(ttsModel = model, speakError = null)
+        viewModelScope.launch {
+            db.models().touch(model.id, System.currentTimeMillis())
+            loadVoices(preferred = model)
+        }
+    }
+
+    private suspend fun loadVoices(preferred: ModelEntity? = null) {
         // Point the synthesiser at the installed weights *before* asking what
         // it can do — `kokoroReady` is a statement about this device right now,
         // not a capability the build declares.
@@ -665,7 +684,11 @@ class VoiceViewModel @Inject constructor(
         // engine decides: Kokoro wants a graph plus voice packs, OmniVoice wants
         // its four graphs and a tokenizer, and neither is identified by name.
         val ttsModels = db.models().observeByModality(Modality.TEXT_TO_SPEECH).first()
-        val directories = ttsModels.mapNotNull { model ->
+        // A chosen model is offered to the engines first, so an explicit choice
+        // beats the scan order when two are installed.
+        val ordered = preferred?.let { listOf(it) + ttsModels.filterNot { m -> m.id == it.id } }
+            ?: ttsModels
+        val directories = ordered.mapNotNull { model ->
             java.io.File(model.localPath).let { if (it.isDirectory) it else it.parentFile }
         }
         synthesizer.useKokoroModel(directories.firstOrNull { java.io.File(it, "voices").exists() || it.walkTopDown().any { f -> f.extension == "bin" } })
@@ -677,6 +700,8 @@ class VoiceViewModel @Inject constructor(
         val all = kokoro + omni + system
         _state.value = _state.value.copy(
             voices = all,
+            ttsModels = ttsModels,
+            ttsModel = preferred ?: _state.value.ttsModel ?: ttsModels.firstOrNull(),
             systemEngineAvailable = system.isNotEmpty(),
             kokoroAvailable = synthesizer.kokoroReady,
             omniVoiceAvailable = synthesizer.omniVoiceReady,
@@ -1198,6 +1223,8 @@ data class VoiceState(
     /** Every installed speech model, so the tab can offer a choice. */
     val sttModels: List<ModelEntity> = emptyList(),
     val ttsModel: ModelEntity? = null,
+    /** Every installed voice model, so the Speak tab can offer a choice. */
+    val ttsModels: List<ModelEntity> = emptyList(),
     val recording: Boolean = false,
     val elapsedMillis: Long = 0,
     val waveform: List<Float> = List(40) { 0.15f },

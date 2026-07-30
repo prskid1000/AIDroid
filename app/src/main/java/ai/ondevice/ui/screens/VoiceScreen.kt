@@ -216,9 +216,14 @@ fun VoiceScreen(
                             tint = NocturneColors.Accent300,
                             modifier = Modifier.size(16.dp),
                         )
+                        // The quant, not the runtime name. whisper's repo is
+                        // literally called "whisper.cpp", so appending the
+                        // runtime produced "whisper.cpp · whisper.cpp"; the size
+                        // of the model is the thing worth knowing here.
                         Text(
-                            state.sttModel?.let { "${it.displayName} · whisper.cpp" }
-                                ?: "No speech model",
+                            state.sttModel?.let { model ->
+                                listOfNotNull(model.displayName, model.quant).joinToString(" · ")
+                            } ?: "No speech model",
                             style = NocturneType.CardTitleSm,
                             modifier = Modifier.weight(1f),
                         )
@@ -235,16 +240,22 @@ fun VoiceScreen(
                             color = NocturneColors.Text.copy(alpha = 0.8f),
                         )
                     }
-                    // Only worth showing when there is a choice to make. Base
-                    // and small differ enough in speed and accuracy that which
-                    // one runs should not be whichever the database returned
-                    // first.
-                    if (state.sttModels.size > 1) {
+                    // Shown whenever anything is installed, not only when there
+                    // are two. Gating it on a choice being available hid the
+                    // control on every single-model device, so there was no way
+                    // to confirm which model was about to run — and Chat has
+                    // always shown its model row regardless.
+                    if (state.sttModels.isNotEmpty()) {
+                        // Labelled by quant, since a whisper library is normally
+                        // several sizes of the same repo — "tiny-q5_1" and
+                        // "small" distinguish them, the repo name does not.
+                        val labels = state.sttModels.map { it.quant ?: it.displayName }
                         NEnumRow(
-                            options = state.sttModels.map { it.displayName },
-                            selected = state.sttModel?.displayName,
-                            onSelect = { name ->
-                                state.sttModels.firstOrNull { it.displayName == name }
+                            options = labels,
+                            selected = state.sttModel?.let { it.quant ?: it.displayName },
+                            onSelect = { label ->
+                                state.sttModels
+                                    .firstOrNull { (it.quant ?: it.displayName) == label }
                                     ?.let(viewModel::selectSttModel)
                             },
                         )
@@ -505,6 +516,21 @@ private fun SpeakPanel(
             onSelect = { viewModel.selectProvider(engines[it]) },
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         )
+
+        // Which *model* provides the engine, as distinct from which engine. Two
+        // are ordinary — Kokoro and OmniVoice are both voice models — and until
+        // now the app picked by scanning directories and never said which it had
+        // landed on.
+        if (state.ttsModels.isNotEmpty()) {
+            NEnumRow(
+                options = state.ttsModels.map { it.displayName },
+                selected = state.ttsModel?.displayName,
+                onSelect = { name ->
+                    state.ttsModels.firstOrNull { it.displayName == name }
+                        ?.let(viewModel::selectTtsModel)
+                },
+            )
+        }
 
         Text(
             when (provider) {
