@@ -572,6 +572,16 @@ data class ImageState(
     /** Only the ones actually ticked go to the runtime. */
     val attachments: List<ai.ondevice.core.ModelAttachment>
         get() = availableAttachments.filter { it.enabled }
+
+    /**
+     * Combinations that will not work, said before Generate rather than after.
+     *
+     * An IP-Adapter with no CLIP vision encoder is the case that made this
+     * necessary: sd.cpp accepts the load, builds a vision embedder with nothing
+     * behind it, and fails somewhere that reads as a corrupt adapter.
+     */
+    val missingComponents: List<ai.ondevice.core.MissingComponent>
+        get() = ai.ondevice.core.ComponentCheck.forDiffusion(availableAttachments)
     val progress: Float
         get() = if (progressSteps > 0) (step.toFloat() / progressSteps).coerceIn(0f, 1f) else 0f
     /** The denoise dial appears when, and only when, there is a source. */
@@ -1401,6 +1411,21 @@ data class VoiceState(
             .sortedWith(compareByDescending<ai.ondevice.speech.SynthVoice> { it.available }
                 .thenBy { it.localeLabel }
                 .thenBy { it.displayName })
+
+    /**
+     * The chosen engine has no voice it can actually use.
+     *
+     * Kokoro keeps its speakers in separate `.bin` packs rather than inside the
+     * graph, so a Kokoro install whose packs did not arrive loads cleanly and
+     * then fails at synthesis with a tensor-shape error. Asked of the voice list
+     * rather than of a model name: an engine with nothing marked available has
+     * nothing to speak as, whichever engine it is.
+     */
+    val missingVoiceComponent: ai.ondevice.core.MissingComponent?
+        get() = ai.ondevice.core.ComponentCheck.forSpeech(
+            requiresVoicePacks = ttsModel != null,
+            voicePackCount = voices.count { it.provider == selectedProvider && it.available },
+        )
 
     /** ~150 words a minute at 1×, which is a normal reading pace. */
     val estimatedSeconds: Int

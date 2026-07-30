@@ -564,6 +564,19 @@ private fun AttachmentsSection(
         Modifier.padding(top = 20.dp, bottom = 8.dp),
     )
 
+    // Said here, next to the switches that fix it, rather than after Generate
+    // has spent a minute finding out.
+    state.missingComponents.forEach { missing ->
+        NCard(Modifier.padding(bottom = 8.dp)) {
+            Text(missing.what, style = NocturneType.CardTitleSm, color = NocturneColors.Accent200)
+            Text(
+                "${missing.because}. ${missing.remedy}.",
+                style = NocturneType.CardBody,
+                color = NocturneColors.Text.copy(alpha = 0.8f),
+            )
+        }
+    }
+
     state.availableAttachments
         .groupBy { it.role }
         .forEach { (role, items) ->

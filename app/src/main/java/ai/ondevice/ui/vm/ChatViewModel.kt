@@ -217,13 +217,33 @@ class ChatViewModel @Inject constructor(
 
             val pending = when (attachment.kind) {
                 ai.ondevice.data.AttachmentKind.IMAGE -> {
-                    if (_state.value.model?.modality != Modality.VISION) {
+                    val model = _state.value.model
+                    // Two separate ways this fails, and they used to be one
+                    // check. A model can be classified as vision and still have
+                    // arrived without its projector file — the classification
+                    // reads the repo, the companion is a download that can be
+                    // skipped — so the second question has to be asked of the
+                    // files rather than of the label.
+                    val missing = if (model?.modality != Modality.VISION) {
+                        ai.ondevice.core.MissingComponent(
+                            what = "${model?.displayName ?: "This model"} cannot see images",
+                            because = "it is a text model, and images reach one only through a " +
+                                "separate vision projector",
+                            state = ai.ondevice.core.MissingComponent.State.NOT_INSTALLED,
+                        )
+                    } else {
+                        ai.ondevice.core.ComponentCheck.forChatImage(
+                            ai.ondevice.core.SparseParams.parse(model.companionPathsJson).keys
+                                .associateWith { "" },
+                        )
+                    }
+                    if (missing != null) {
                         // Attaching it anyway and letting the model ignore it
                         // silently would be the worst of both worlds.
                         _state.value = _state.value.copy(
-                            error = "${_state.value.model?.displayName ?: "This model"} has no vision projector, " +
-                                "so it cannot see images.",
-                            errorSuggestion = "Add a model with an mmproj companion, or describe the image in text.",
+                            error = "${missing.what} — ${missing.because}.",
+                            errorSuggestion = "Add a model with a projector companion, " +
+                                "or describe the image in text.",
                         )
                         return@launch
                     }

@@ -23,6 +23,14 @@ enum class AttachmentRole(
     val multiple: Boolean = false,
     /** Whether the runtime takes a per-attachment weight. */
     val weighted: Boolean = false,
+    /**
+     * A role this one cannot work without, and why in one clause.
+     *
+     * Declared on the role rather than checked in a screen, so the Image screen
+     * can warn about a broken combination without knowing which combinations
+     * exist. Adding a dependency is a line here, not a branch somewhere.
+     */
+    val requires: Requirement? = null,
 ) {
     /**
      * LoRAs are the only auxiliary that is genuinely a *list* with weights, and
@@ -35,7 +43,14 @@ enum class AttachmentRole(
     CONTROLNET("ControlNet", "control_net"),
 
     /** Style transfer from a reference image rather than from text. */
-    IP_ADAPTER("IP-Adapter", "ip_adapter"),
+    IP_ADAPTER(
+        "IP-Adapter", "ip_adapter",
+        requires = Requirement(
+            roleName = "CLIP_VISION",
+            because = "sd.cpp builds the vision embedder the moment an IP-Adapter path is set, " +
+                "and with no encoder supplied there is nothing for it to bind to",
+        ),
+    ),
 
     /**
      * The image encoder an IP-Adapter reads its reference picture through.
@@ -68,6 +83,15 @@ enum class AttachmentRole(
     ;
 
     val isDiffusionAuxiliary: Boolean get() = true
+
+    /**
+     * Named by string, not by [AttachmentRole], because an enum entry cannot
+     * name a sibling in its own constructor call. Resolved by [required].
+     */
+    data class Requirement(val roleName: String, val because: String)
+
+    /** The role this one cannot work without, or null. */
+    val required: AttachmentRole? get() = requires?.let { valueOf(it.roleName) }
 
     companion object {
         /**

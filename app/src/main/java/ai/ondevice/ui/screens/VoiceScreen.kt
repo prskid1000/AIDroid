@@ -691,6 +691,18 @@ private fun SpeakPanel(
         "Voice · ${engineVoices.count { it.available }} available of ${engineVoices.size}",
         Modifier.padding(top = 20.dp, bottom = 8.dp),
     )
+    // Before Speak rather than after: with no packs the model loads and then
+    // fails inside the graph, which reads as a broken model.
+    state.missingVoiceComponent?.let { missing ->
+        NCard(Modifier.padding(bottom = 8.dp)) {
+            Text(missing.what, style = NocturneType.CardTitleSm, color = NocturneColors.Accent200)
+            Text(
+                "${missing.because}. ${missing.remedy}.",
+                style = NocturneType.CardBody,
+                color = NocturneColors.Text.copy(alpha = 0.8f),
+            )
+        }
+    }
     NInput(
         value = state.voiceQuery,
         onValueChange = viewModel::setVoiceQuery,
