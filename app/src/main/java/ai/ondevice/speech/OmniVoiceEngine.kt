@@ -114,10 +114,14 @@ class OmniVoiceEngine {
                 }
 
                 val loadedTokenizer = QwenTokenizer.load(tokenizerFile).getOrThrow()
-                val emb = env.createSession(files.getValue(EMBEDDINGS).absolutePath, options())
-                val llm = env.createSession(files.getValue(DECODER).absolutePath, options())
-                val head = env.createSession(files.getValue(HEADS).absolutePath, options())
-                val voc = env.createSession(files.getValue(VOCODER).absolutePath, options())
+                fun open(file: java.io.File): OrtSession =
+                    runCatching { env.createSession(file.absolutePath, options()) }
+                        .getOrElse { error(explainLoadFailure(file, it)) }
+
+                val emb = open(files.getValue(EMBEDDINGS))
+                val llm = open(files.getValue(DECODER))
+                val head = open(files.getValue(HEADS))
+                val voc = open(files.getValue(VOCODER))
 
                 environment = env
                 embeddings = emb
@@ -133,6 +137,33 @@ class OmniVoiceEngine {
                 loadedPath = directory.absolutePath
             }
         }.onFailure { lastError = it.message }
+    }
+
+    /**
+     * Turn a graph-load failure into something the user can act on.
+     *
+     * The int4 export quantises its embedding table four bits to a weight and
+     * says so with a `bits` attribute on `com.microsoft.GatherBlockQuantized`.
+     * That attribute is on ONNX Runtime's main branch and is in no released
+     * version — not 1.22, which is the newest Android build published — so the
+     * graph is refused outright with a node dump that reads like a corrupt
+     * download. It is not corrupt and no newer runtime we can depend on will
+     * read it; the answer is the other export, whose embeddings encoder is
+     * 327 MB rather than 87 MB and uses no such op. Everything else in the two
+     * is the same file, `llm_decoder` included.
+     */
+    private fun explainLoadFailure(file: java.io.File, cause: Throwable): String {
+        val message = cause.message.orEmpty()
+        val unsupportedQuant = "GatherBlockQuantized" in message ||
+            ("bits" in message && "Unrecognized attribute" in message)
+        return if (unsupportedQuant) {
+            "${file.name} is a 4-bit export this ONNX Runtime cannot read: it needs the `bits` " +
+                "attribute on GatherBlockQuantized, which no released ONNX Runtime has yet. " +
+                "Install OmniVoice's other variant — the one whose audio_embeddings_encoder is " +
+                "around 327 MB rather than 87 MB. Nothing is wrong with the download."
+        } else {
+            "${file.name} could not be loaded. $message"
+        }
     }
 
     suspend fun unload() = mutex.withLock { unlockedUnload() }
