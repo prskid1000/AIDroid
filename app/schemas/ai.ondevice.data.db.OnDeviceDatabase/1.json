@@ -2,11 +2,11 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "44a9d259c934ef98d13377c057f98e6d",
+    "identityHash": "2054c0721062cd672e7a7e3bd07fce80",
     "entities": [
       {
         "tableName": "models",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `hfRepo` TEXT, `revision` TEXT, `localPath` TEXT NOT NULL, `format` TEXT NOT NULL, `architecture` TEXT, `quant` TEXT, `sizeBytes` INTEGER NOT NULL, `sha256` TEXT, `modality` TEXT NOT NULL, `contextLength` INTEGER, `chatTemplate` TEXT, `bosToken` TEXT, `eosToken` TEXT, `companionPathsJson` TEXT NOT NULL, `installedAt` INTEGER NOT NULL, `lastUsedAt` INTEGER, `pinned` INTEGER NOT NULL, `favourite` INTEGER NOT NULL, `notes` TEXT, `backendOverride` TEXT, `paramOverridesJson` TEXT NOT NULL, `defaultPresetId` TEXT, `displayName` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `hfRepo` TEXT, `revision` TEXT, `localPath` TEXT NOT NULL, `format` TEXT NOT NULL, `architecture` TEXT, `quant` TEXT, `sizeBytes` INTEGER NOT NULL, `sha256` TEXT, `modality` TEXT NOT NULL, `contextLength` INTEGER, `chatTemplate` TEXT, `bosToken` TEXT, `eosToken` TEXT, `companionPathsJson` TEXT NOT NULL, `installedAt` INTEGER NOT NULL, `completedAt` INTEGER, `lastUsedAt` INTEGER, `pinned` INTEGER NOT NULL, `favourite` INTEGER NOT NULL, `notes` TEXT, `backendOverride` TEXT, `paramOverridesJson` TEXT NOT NULL, `defaultPresetId` TEXT, `displayName` TEXT NOT NULL, `attachmentRole` TEXT, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -105,6 +105,12 @@
             "notNull": true
           },
           {
+            "fieldPath": "completedAt",
+            "columnName": "completedAt",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
             "fieldPath": "lastUsedAt",
             "columnName": "lastUsedAt",
             "affinity": "INTEGER",
@@ -151,6 +157,12 @@
             "columnName": "displayName",
             "affinity": "TEXT",
             "notNull": true
+          },
+          {
+            "fieldPath": "attachmentRole",
+            "columnName": "attachmentRole",
+            "affinity": "TEXT",
+            "notNull": false
           }
         ],
         "primaryKey": {
@@ -957,12 +969,80 @@
         },
         "indices": [],
         "foreignKeys": []
+      },
+      {
+        "tableName": "mcp_servers",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `url` TEXT NOT NULL, `authHeader` TEXT, `enabled` INTEGER NOT NULL, `lastToolsJson` TEXT, `lastCheckedAt` INTEGER, `lastError` TEXT, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "url",
+            "columnName": "url",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "authHeader",
+            "columnName": "authHeader",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "enabled",
+            "columnName": "enabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastToolsJson",
+            "columnName": "lastToolsJson",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "lastCheckedAt",
+            "columnName": "lastCheckedAt",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "lastError",
+            "columnName": "lastError",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
       }
     ],
     "views": [],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '44a9d259c934ef98d13377c057f98e6d')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '2054c0721062cd672e7a7e3bd07fce80')"
     ]
   }
 }

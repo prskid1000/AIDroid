@@ -56,15 +56,18 @@ object AppModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): OnDeviceDatabase =
         Room.databaseBuilder(context, OnDeviceDatabase::class.java, OnDeviceDatabase.NAME)
-            // A real migration rather than a destructive one: the conversations
-            // and the per-model parameter overrides in this database are the
-            // user's work, and dropping them to add a table is not a trade the
-            // app gets to make on their behalf.
-            .addMigrations(
-                OnDeviceDatabase.MIGRATION_1_2,
-                OnDeviceDatabase.MIGRATION_2_3,
-                OnDeviceDatabase.MIGRATION_3_4,
-            )
+            // The schema is a single version while the app is pre-release, so
+            // the only databases this can meet are development ones from a
+            // shape that no longer exists. Recreating them is the honest
+            // answer; pretending to migrate them would be writing scripts
+            // against data nobody has.
+            //
+            // This must change before the first release. Once a stranger's
+            // conversations and per-model overrides are in here, dropping the
+            // database to add a column is not a trade the app gets to make on
+            // their behalf, and every schema change from that point needs a
+            // numbered migration and an exported schema to diff against.
+            .fallbackToDestructiveMigration()
             .build()
 
     @Provides @Singleton fun provideModelDao(db: OnDeviceDatabase) = db.models()
