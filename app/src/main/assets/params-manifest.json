@@ -8,31 +8,22 @@
     "described here that the runtime does not report is not shown, and anything the runtime",
     "reports that is not described here is shown as a plain text field.",
     "",
-    "That is why the per-runtime sourceCommit and buildTag fields are gone. They were",
-    "'a1b2c3d' and 'b6482' — a placeholder and a build eleven months stale — and nothing",
-    "read either of them. A provenance claim nobody checks is worse than no claim."
-  ],
-  "_comment": [
-    "GENERATED FILE — do not hand-edit. SPEC 16.2: this manifest is produced in CI by",
-    "parsing the pinned upstream sources (llama.cpp common/arg.cpp + common/common.h +",
-    "include/llama.h; whisper.cpp examples/main/main.cpp + include/whisper.h;",
-    "stable-diffusion.cpp examples/cli/main.cpp + stable-diffusion.h), then merged with the",
-    "curated overlay (16.3), validated against the JSON Schema, diffed against the previous",
-    "version and signed.",
+    "That is why the per-runtime sourceCommit, buildTag, jniContract and the top-level",
+    "generatedAt are gone, along with the header that used to claim this file was produced",
+    "in CI by parsing pinned upstream sources. There was no such job — it was hand-edited,",
+    "under a notice saying not to. sourceCommit was 'a1b2c3d', buildTag a build eleven",
+    "months stale, generatedAt an exact midnight, and nothing read any of them. A",
+    "provenance claim nobody checks is worse than no claim.",
     "",
-    "The overlay may only annotate a parameter, never add one: if a key is absent here it",
-    "does not exist in this build. That invariant is what keeps the app honest about what",
-    "the native lib actually supports.",
+    "manifestVersion stays because it is load-bearing: ParamRepository compares it against",
+    "a downloaded manifest to decide which one wins.",
     "",
-    "Every default carries the SPEC 4-7 warning: verify against the pinned build. Upstream",
-    "renames, deprecates and re-defaults sampler parameters between releases, which is what",
-    "contract test 17.6 #2 exists to catch."
+    "Defaults, ranges and steps below are the description of last resort. Where a runtime",
+    "reports its own live default, that value wins — see ParamRepository.specsFor."
   ],
-  "manifestVersion": 7,
-  "generatedAt": "2026-07-29T00:00:00Z",
+  "manifestVersion": 8,
   "runtimes": {
     "llama.cpp": {
-      "jniContract": 3,
       "params": [
         {
           "key": "temp",
@@ -1029,7 +1020,6 @@
       ]
     },
     "whisper.cpp": {
-      "jniContract": 3,
       "params": [
         {
           "key": "language",
@@ -1384,7 +1374,6 @@
       ]
     },
     "stable-diffusion.cpp": {
-      "jniContract": 3,
       "params": [
         {
           "key": "prompt",
@@ -1814,7 +1803,6 @@
       ]
     },
     "kokoro": {
-      "jniContract": 3,
       "params": [
         {
           "key": "voice",
@@ -1934,7 +1922,6 @@
       ]
     },
     "omnivoice": {
-      "jniContract": 3,
       "params": [
         {
           "key": "voice_design",

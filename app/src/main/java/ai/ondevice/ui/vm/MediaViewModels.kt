@@ -796,7 +796,9 @@ class VoiceViewModel @Inject constructor(
                 speakError = when (provider) {
                     ai.ondevice.speech.SynthProvider.OMNIVOICE ->
                         "OmniVoice is not installed. Models → Add a model, then " +
-                            "onnx-community/OmniVoice-Onnx — about 683 MB."
+                            (ai.ondevice.core.StarterModels.installHint(
+                                ai.ondevice.core.StarterModels.OMNIVOICE_REPO,
+                            ) ?: ai.ondevice.core.StarterModels.OMNIVOICE_REPO) + "."
                     ai.ondevice.speech.SynthProvider.KOKORO ->
                         "Kokoro is not installed. Models → Add a model, and search for Kokoro."
                     else -> "This device has no system speech engine."

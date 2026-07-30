@@ -32,7 +32,6 @@ import kotlinx.serialization.json.intOrNull
 @Serializable
 data class ParamManifest(
     val manifestVersion: Int,
-    val generatedAt: String = "",
     val runtimes: Map<String, RuntimeParams> = emptyMap(),
 ) {
     fun paramsFor(runtimeId: String): List<ParamSpec> = runtimes[runtimeId]?.params.orEmpty()
@@ -42,15 +41,16 @@ data class ParamManifest(
 }
 
 /**
- * `sourceCommit` and `buildTag` used to sit here as provenance. Nothing read
- * either, and their values were `a1b2c3d` and a build eleven months stale — so
- * they were a claim about which upstream this described, made by nobody, checked
- * by nobody. The runtime reports its own build tag ([RuntimeRegistry.buildTag]);
- * a second unverified copy in a data file is not provenance.
+ * `sourceCommit`, `buildTag` and `jniContract` used to sit here as provenance.
+ * Nothing read any of them, and their values were `a1b2c3d`, a build eleven
+ * months stale, and a constant — so they were a claim about which upstream this
+ * described, made by nobody, checked by nobody. The runtime reports its own
+ * build tag ([RuntimeRegistry.buildTag]) and its own contract number
+ * ([RuntimeRegistry.contractSatisfied], read from `runtimes.json`); a second
+ * unverified copy in a data file is not provenance.
  */
 @Serializable
 data class RuntimeParams(
-    val jniContract: Int = 3,
     val params: List<ParamSpec> = emptyList(),
 )
 

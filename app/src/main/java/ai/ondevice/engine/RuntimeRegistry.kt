@@ -138,7 +138,6 @@ data class RuntimeDescriptor(
 
 @Serializable
 private data class RuntimeManifestFile(
-    val generatedAt: String = "",
     val runtimes: List<RuntimeEntry> = emptyList(),
 )
 

@@ -578,12 +578,16 @@ private fun SpeakPanel(
         Text(
             when (provider) {
                 ai.ondevice.speech.SynthProvider.KOKORO ->
-                    "Fast enough to use for anything: about half a second of work per second of " +
-                        "speech. Fifty voices, six languages, no emotion tags."
+                    "The quick one — short lines come back near enough to straight away. " +
+                        "Fifty voices, six languages, no emotion tags."
+                // Both descriptions used to quote figures — "half a second of work per second
+                // of speech", "six to seven times slower", "around a minute for a short
+                // sentence". None was ever timed on a device. The ordering is real and worth
+                // saying; the numbers go back in when they have been measured.
                 ai.ondevice.speech.SynthProvider.OMNIVOICE ->
                     "Reads any language with no phonemiser, takes [laughter] and [sigh], and can " +
-                        "voice several speakers. It is six to seven times slower than Kokoro — " +
-                        "expect around a minute of work for a short sentence on a phone."
+                        "voice several speakers. Much slower than Kokoro — it runs a diffusion " +
+                        "loop per frame, so expect to wait even for a short sentence."
                 ai.ondevice.speech.SynthProvider.SYSTEM ->
                     "Android's own synthesiser. A different voice with different prosody — the app " +
                         "says so rather than passing it off as one of the neural engines."
@@ -593,7 +597,12 @@ private fun SpeakPanel(
         )
 
         if (!state.omniVoiceAvailable && provider != ai.ondevice.speech.SynthProvider.OMNIVOICE) {
-            NHelp("OmniVoice is not installed — Add model lists it under Voice, about 683 MB.")
+            NHelp(
+                "OmniVoice is not installed — Add model lists it under Voice: " +
+                    (ai.ondevice.core.StarterModels.installHint(
+                        ai.ondevice.core.StarterModels.OMNIVOICE_REPO,
+                    ) ?: ai.ondevice.core.StarterModels.OMNIVOICE_REPO) + ".",
+            )
         }
     }
 

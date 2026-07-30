@@ -712,17 +712,11 @@ class ModelResolver(
         if (repeated.isEmpty()) return null
 
         val allDirectories = onnxFiles.groupBy { it.substringBeforeLast('/', "") }
-        // An execution-provider folder is not a choice on this device: a CUDA
-        // export cannot run on a phone. These are ONNX Runtime's own provider
-        // names, so the test describes our runtime rather than any model.
-        //
-        // They are held back from the grouping below — a CUDA build would
-        // otherwise vote on which signature is the primary one — and then put
-        // back at the end, marked. Dropping them silently is what this used to
-        // do, and a variant that vanishes reads as a repo that does not have it,
-        // which sends people looking for the version they can see on the
-        // Hugging Face page.
-        val foreign = allDirectories.filterKeys { it.substringAfterLast('/').lowercase() in FOREIGN_PROVIDERS }
+        // Provider folders are held out of the grouping so a CUDA build cannot
+        // vote on which layout is primary, then added back at the end marked
+        // unrunnable. Dropping them silently reads as a repo that does not have
+        // the variant the Hugging Face page plainly shows.
+        val foreign = allDirectories.filterKeys { OnnxProviders.isForeign(it.substringAfterLast('/')) }
         val byDirectory = allDirectories - foreign.keys
         if (byDirectory.isEmpty()) return null
 
@@ -1029,19 +1023,6 @@ class ModelResolver(
          * fifteen-ControlNet pack, whose roles never needed probing anyway.
          */
         const val HEADER_PROBE_LIMIT = 8
-
-        /**
-         * ONNX Runtime execution providers this build does not have.
-         *
-         * Publishers ship a folder per provider, and a repo that offers `cuda/`
-         * beside `int4/` is not offering a choice on a phone — it is offering a
-         * download that cannot load. Named after providers rather than models,
-         * so the list stays a statement about our runtime.
-         */
-        val FOREIGN_PROVIDERS = setOf(
-            "cuda", "tensorrt", "trt", "dml", "directml", "openvino",
-            "rocm", "migraphx", "cann", "webgpu", "coreml",
-        )
 
         /** What sd.cpp's TinyDecoder block is named — `src/model/vae/tae.hpp`. */
         const val TAESD_TENSOR_PREFIX = "decoder.layers."

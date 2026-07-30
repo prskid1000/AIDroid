@@ -37,6 +37,27 @@ data class StarterModel(
 
 object StarterModels {
 
+    /**
+     * OmniVoice's repo id, named once.
+     *
+     * Screens that find it missing tell the user what to paste, and they used to
+     * each carry their own copy of the id *and* their own size — "about 683 MB"
+     * in two places against "~1.0 GB" here, for the same download. At least one
+     * had to be wrong, and it was the 683: nothing in the repo adds up to it.
+     * [installHint] is how a screen asks instead of remembering.
+     */
+    const val OMNIVOICE_REPO = "onnx-community/OmniVoice-Onnx"
+
+    /**
+     * "`<repo id>` — `<size>`", for a screen nudging the user toward a download.
+     *
+     * Null when the repo is not one we suggest, which is the honest answer: this
+     * list is a starting point, not a catalogue, and the resolver gives the real
+     * byte count once an id is actually pasted.
+     */
+    fun installHint(repoId: String): String? =
+        (ALL + ADDONS).firstOrNull { it.repoId == repoId }?.let { "${it.repoId} — ${it.sizeHint}" }
+
     val ALL: List<StarterModel> = listOf(
         // — chat —
         StarterModel(
@@ -80,10 +101,10 @@ object StarterModels {
             sizeHint = "~116 MB with voices",
         ),
         StarterModel(
-            repoId = "onnx-community/OmniVoice-Onnx",
+            repoId = OMNIVOICE_REPO,
             modality = Modality.TEXT_TO_SPEECH,
             summary = "Any language, [laughter] and [sigh], a voice you describe in words. " +
-                "Six to seven times slower than Kokoro.",
+                "Much slower than Kokoro.",
             // Both variants load as of ONNX Runtime 1.28, which this build now
             // ships. They were refused by 1.22 for two unrelated schema reasons
             // — int4's GatherBlockQuantized `bits` attribute, root's twelve
@@ -92,11 +113,16 @@ object StarterModels {
             // take them, which was me reading 1.22 and main and nothing in
             // between.
             //
-            // int4 saves an 87 MB embeddings encoder against 327 MB and shares
-            // everything else: its llm_decoder is byte-identical to root's and
-            // the Higgs tokenizer graphs are the same files. The figure below is
-            // the root variant's.
-            sizeHint = "~1.0 GB",
+            // Both figures counted from the HF blob sizes against what the
+            // resolver actually bundles — the variant's own three graphs, plus
+            // the shared Higgs tokenizer, for which it picks the deepest
+            // directory (`audio_tokenizer/fp16`, 371 MB) over the fp32 one.
+            //
+            // int4 swaps an 87 MB embeddings encoder for root's 327 MB and a
+            // 4 MB heads decoder for its 17 MB; the llm_decoder is the same
+            // 297 MB file in both. So: 388 + 371 + 11 MB of tokeniser = 770 MB
+            // against root's 641 + 371 + 11 = 1023 MB.
+            sizeHint = "~770 MB at int4, ~1.0 GB full",
         ),
 
         // — images —

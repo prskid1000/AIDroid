@@ -369,7 +369,7 @@ class SpeechSynthesizer(
         val directory = omniVoiceDirectory ?: return Result.failure(
             IllegalStateException(
                 "No OmniVoice model is installed. Models → Add a model, then " +
-                    "onnx-community/OmniVoice-Onnx.",
+                    ai.ondevice.core.StarterModels.OMNIVOICE_REPO + ".",
             ),
         )
         omniVoice.load(directory).onFailure { return Result.failure(it) }

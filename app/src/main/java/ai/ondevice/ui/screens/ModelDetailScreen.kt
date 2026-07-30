@@ -61,7 +61,7 @@ import ai.ondevice.ui.vm.ModelDetailViewModel
 fun ModelDetailScreen(
     modelId: String,
     onBack: () -> Unit,
-    onOpenParameters: (ai.ondevice.core.Tier) -> Unit,
+    onOpenParameters: (ai.ondevice.core.Tier, String) -> Unit,
     viewModel: ModelDetailViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(modelId) { viewModel.bind(modelId) }
@@ -337,7 +337,7 @@ fun ModelDetailScreen(
                     )
                     NButton(
                         "Parameters",
-                        onClick = { onOpenParameters(ai.ondevice.core.Tier.EXPERT) },
+                        onClick = { onOpenParameters(ai.ondevice.core.Tier.EXPERT, state.paramRuntimeId) },
                         style = NButtonStyle.Secondary,
                         modifier = Modifier.weight(1f),
                     )

@@ -190,10 +190,41 @@ class ModelDetailViewModel @Inject constructor(
     private val storage: ModelStorage,
     private val capabilities: DeviceCapabilities,
     private val registry: ai.ondevice.engine.RuntimeRegistry,
+    private val synthesizer: ai.ondevice.speech.SpeechSynthesizer,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ModelDetailState())
     val state: StateFlow<ModelDetailState> = _state.asStateFlow()
+
+    /**
+     * The runtime that would actually load this model, for the Parameters button.
+     *
+     * It used to pass no runtime at all, and the route defaulted to llama.cpp —
+     * so opening Parameters on a Kokoro, whisper, diffusion or OmniVoice model
+     * showed llama.cpp's sampler list. Every control was inapplicable and none
+     * of them said so.
+     *
+     * Text-to-speech is the only modality with two engines, and they are not
+     * interchangeable, so the answer comes from the engines themselves rather
+     * than from the modality — [SpeechSynthesizer.providerFor] tests the folder
+     * for each one's file shape.
+     */
+    private fun runtimeIdFor(model: ModelEntity): String = when (model.modality) {
+        Modality.SPEECH_TO_TEXT -> ai.ondevice.engine.RuntimeRegistry.WHISPER
+        Modality.DIFFUSION -> ai.ondevice.engine.RuntimeRegistry.STABLE_DIFFUSION
+        Modality.TEXT_TO_SPEECH -> {
+            val directory = runCatching { storage.modelDir(model.id) }.getOrNull()
+            when (directory?.let(synthesizer::providerFor)) {
+                ai.ondevice.speech.SynthProvider.OMNIVOICE ->
+                    ai.ondevice.engine.RuntimeRegistry.OMNIVOICE
+                // Kokoro is the fallback rather than a second test: a voice model
+                // that matches neither shape has no parameters either way, and
+                // Kokoro's screen is the one that explains voice packs.
+                else -> ai.ondevice.engine.RuntimeRegistry.KOKORO
+            }
+        }
+        else -> ai.ondevice.engine.RuntimeRegistry.LLAMA
+    }
 
     fun bind(modelId: String) {
         if (_state.value.model?.id == modelId) return
@@ -212,6 +243,7 @@ class ModelDetailViewModel @Inject constructor(
                 companions = SparseParams.parse(model.companionPathsJson).values
                     .map { (role, path) -> role to path.toString().trim('"') },
                 files = installedFilesOf(model),
+                paramRuntimeId = runtimeIdFor(model),
             )
             recompute()
         }
@@ -338,6 +370,8 @@ data class ModelDetailState(
     val availableRamBytes: Long = 0,
     val companions: List<Pair<String, String>> = emptyList(),
     val files: List<InstalledFile> = emptyList(),
+    /** Whose parameters the Parameters button should open. */
+    val paramRuntimeId: String = ai.ondevice.engine.RuntimeRegistry.LLAMA,
 ) {
     val filesTotalBytes: Long get() = files.sumOf { it.sizeBytes }
 }

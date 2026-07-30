@@ -13,8 +13,8 @@ the Nocturne design system.
 
 ## What this build is
 
-The app is a complete, running Kotlin/Compose program. Everything above the native
-boundary is real:
+The app is a complete, running Kotlin/Compose program, and the native layer has
+landed:
 
 | Layer | State |
 |---|---|
@@ -23,25 +23,29 @@ boundary is real:
 | Hugging Face resolver + compatibility gate (SPEC §3) | **Real** — hits the live HF API |
 | GGUF header Range-parser fallback (§3.1) | Real |
 | Downloader + foreground service (§3.4) | **Real** — resumable, sha256-verified |
-| Parameter manifest system (§16) | Real — 74 llama.cpp params, generic renderer |
+| Parameter system (§16) | Real — engines report their own keys, generic renderer |
 | Room / DataStore / Keystore / Hilt | Real |
 | Residency, thermal and memory-pressure policy (§3.5, §8.3, §8.4) | Real |
-| **Inference engines** (llama.cpp, whisper.cpp, sd.cpp, Kokoro) | **Stubbed** behind `InferenceEngine` |
+| **Inference engines** (llama.cpp, whisper.cpp, sd.cpp, Kokoro, OmniVoice) | **Real** — JNI, built from source |
 
-The native layer is the next slice. It is deliberately last: SPEC §14 sequences the
-build by risk so the app is already standing when the unproven parts land. Replacing
-`FakeLlamaEngine` with a JNI implementation requires no change above it — the
-boundary is a string-keyed map from the first call (§16.7).
+Building the native layer last was the point: SPEC §14 sequences by risk so the app
+was already standing when the unproven parts landed. The swap cost no change above
+the boundary, which is a string-keyed map from the first call (§16.7) — the stub it
+replaced has since been deleted rather than left to rot.
 
 ## The three load-bearing decisions
 
 **Parameters are data, never code (§1.5).** There are zero hardcoded parameter
-widgets. Every parameter in SPEC §4–7 is a row in
-[`assets/params-manifest.json`](app/src/main/assets/params-manifest.json), and
-[`ParamRenderer.kt`](app/src/main/java/ai/ondevice/params/ParamRenderer.kt) is one
-composable per *type*. Adding an upstream parameter of an existing type requires no
-Kotlin at all. The Expert screen renders 74 llama.cpp parameters from that file with
-tier, `dependsOn` and `sinceBuild` gating applied.
+widgets, and [`ParamRenderer.kt`](app/src/main/java/ai/ondevice/params/ParamRenderer.kt)
+is one composable per *type*, so adding a parameter of an existing type requires no
+Kotlin at all.
+
+Which parameters exist is not our claim to make. Each engine reports the keys it will
+act on — the native ones enumerate the same dispatch table `apply_params()` uses, over
+JNI — and [`assets/params-manifest.json`](app/src/main/assets/params-manifest.json)
+only *describes* them. llama.cpp reports 57 keys; the manifest describes 66, so nine
+rows that moved nothing are no longer shown. Anything reported but undescribed appears
+as a plain text field rather than disappearing.
 
 **Honest refusal over silent failure (§1.2).** The compatibility gate runs before any
 download and shows its arithmetic — `weights + KV + compute` — recomputed live as the

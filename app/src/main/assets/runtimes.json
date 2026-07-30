@@ -1,15 +1,18 @@
 {
   "_comment": [
-    "GENERATED FILE — do not hand-edit.",
-    "SPEC 2.3 and Appendix A #3: the architecture allowlist is generated from the pinned",
-    "upstream source at build time (llama.cpp's LLM_ARCH enum, whisper.cpp's and sd.cpp's",
-    "equivalents). A hand-maintained list rots and silently reintroduces model-locking, so",
-    "regenerating this asset is step 4 of the CI runtime-bump pipeline in SPEC 17.5 — never",
-    "an edit to Kotlin source.",
-    "Contract test 17.6 #5 gates a bump: the regenerated list must be a superset of the",
-    "previous one, or the removal must be explicit."
+    "Output of tools/generate_runtimes.py — regenerate it there rather than editing here.",
+    "SPEC 2.3 and Appendix A #3: the architecture allowlist comes from the pinned upstream",
+    "source (llama.cpp's LLM_ARCH enum, whisper.cpp's and sd.cpp's equivalents), because a",
+    "hand-maintained list rots and silently reintroduces model-locking.",
+    "",
+    "It said 'GENERATED FILE ... at build time', and called regeneration step 4 of the CI",
+    "runtime-bump pipeline. There is no CI — no .github directory, and no Gradle task runs",
+    "the script. It is a thing a person runs. Saying so is the difference between a rule",
+    "and a rule someone will actually follow.",
+    "",
+    "The top-level generatedAt is gone with the claim: it was an exact midnight, the script",
+    "never wrote such a field, and nothing read it."
   ],
-  "generatedAt": "2026-07-29T00:00:00Z",
   "runtimes": [
     {
       "id": "llama.cpp",

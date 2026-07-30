@@ -53,14 +53,17 @@ object Routes {
     const val SAMPLER_CHAIN = "params/samplers"
 
     /**
-     * S7's two buttons land on the same screen at different tiers, and S11's
-     * "Advanced" lands on it at a different *runtime* — the renderer is generic,
-     * so the route carries which manifest block to read rather than there being
-     * a second screen.
+     * One parameter screen, told which tier and which runtime to render.
+     *
+     * `runtime` has no default on purpose. It used to fall back to llama.cpp,
+     * and the model detail screen never passed one — so Parameters on a Kokoro,
+     * whisper, diffusion or OmniVoice model opened llama.cpp's sampler list. A
+     * default that is right for one caller and silently wrong for the next is
+     * worse than an argument every caller has to state.
      */
     fun parameters(
         tier: ai.ondevice.core.Tier = ai.ondevice.core.Tier.BASIC,
-        runtime: String = ai.ondevice.engine.RuntimeRegistry.LLAMA,
+        runtime: String,
     ) = "params/all?tier=${tier.name}&runtime=${android.net.Uri.encode(runtime)}"
     const val PROMPT_INSPECTOR = "chat/prompt"
     const val MASK_EDITOR = "image/mask"
@@ -106,7 +109,11 @@ fun OnDeviceApp(
             ChatScreen(
                 currentRoute = currentRoute,
                 onNavigate = { navController.navigateToRoot(it) },
-                onOpenParameters = { tier -> navController.navigate(Routes.parameters(tier)) },
+                onOpenParameters = { tier ->
+                    navController.navigate(
+                        Routes.parameters(tier, ai.ondevice.engine.RuntimeRegistry.LLAMA),
+                    )
+                },
                 onOpenPromptInspector = { navController.navigate(Routes.PROMPT_INSPECTOR) },
                 onOpenModels = { navController.navigateToRoot(Routes.MODELS) },
             )
@@ -180,7 +187,9 @@ fun OnDeviceApp(
             ModelDetailScreen(
                 modelId = entry.arguments?.getString("modelId").orEmpty(),
                 onBack = { navController.popBackStack() },
-                onOpenParameters = { tier -> navController.navigate(Routes.parameters(tier)) },
+                onOpenParameters = { tier, runtime ->
+                    navController.navigate(Routes.parameters(tier, runtime))
+                },
             )
         }
         composable(Routes.DOWNLOADS) {
