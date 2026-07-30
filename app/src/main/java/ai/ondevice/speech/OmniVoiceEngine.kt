@@ -66,6 +66,15 @@ class OmniVoiceEngine {
     private var describedGraphs = false
     private var describedShapes = false
 
+    /**
+     * Whether the backbone declares `attention_mask` with four dimensions.
+     *
+     * Read off the graph rather than assumed, so both exports load: the
+     * published causal one wants a 2-D mask, the corrected one a 4-D square.
+     * The bidirectional probe then decides whether it can actually be used.
+     */
+    private var fourDimensionalMask = false
+
     /** Null until measured; see [attentionIsBidirectional]. Reset on unload. */
     private var bidirectional: Boolean? = null
     private var llmEmbedType: OnnxJavaType = OnnxJavaType.FLOAT
@@ -137,6 +146,9 @@ class OmniVoiceEngine {
                 // 28 layers × key and value. Read from the graph rather than
                 // assumed, so a re-export with a different depth still runs.
                 pastNames = llm.inputNames.filter { it.contains("past") }
+                fourDimensionalMask =
+                    (llm.inputInfo["attention_mask"]?.info as? ai.onnxruntime.TensorInfo)
+                        ?.shape?.size == 4
                 llmEmbedType = typeOf(llm, "inputs_embeds")
                 headsInputType = typeOf(head, "hidden_states")
                 loadedPath = directory.absolutePath
@@ -224,6 +236,7 @@ class OmniVoiceEngine {
         vocoder = null
         tokenizer = null
         pastNames = emptyList()
+        fourDimensionalMask = false
         loadedPath = null
         bidirectional = null
         describedGraphs = false
@@ -286,21 +299,18 @@ class OmniVoiceEngine {
      * placeholder invented here. That is a good argument, and it is the one
      * this engine followed first.
      *
-     * `inference.py` — shipped in the ONNX repo, written against these exact
-     * exported graphs — does none of it. It calls `tokenizer.encode(text,
-     * add_special_tokens=True)` and hands the model bare prose.
+     * `inference.py` — shipped in the ONNX repo — does none of it and hands the
+     * model bare prose. Following it was a mistake: the framing above is what
+     * `generate()` builds, verified against the source, and dropping it cost
+     * 33 dB of dynamic range in a measured A/B. Bare prose gave 25.9 dB and an
+     * invented word before the sentence; the framing gave 58.8 dB against the
+     * PyTorch reference's 54.7, and the invented word disappeared. Without
+     * `<|text_start|>` the model has no marker for where the text begins, so it
+     * makes up a lead-in and then runs out of grid.
      *
-     * The wrapped form produced noise on device. So the default is now the
-     * reference script's, on the reasoning that the script distributed with an
-     * export describes that export better than the model code it was converted
-     * from: conversion is where a training-time framing gets baked into the
-     * graph, and if it were baked in, applying it again outside would double it.
-     *
-     * The wrapper survives for the case it is the only expression of — a
-     * language or a written voice description. There is no other way to say
-     * those, and upstream's form is the only documented one. That path is
-     * unverified; if it also comes back as noise, the wrapper is simply wrong
-     * for this export and `lang_code`/`voice_design` cannot be honoured by it.
+     * `inference.py` was wrong in three separate ways — this, the unmasking
+     * schedule, and no classifier-free guidance. It is not a reliable witness
+     * for how these graphs want to be driven; `models/omnivoice.py` is.
      *
      * `<|denoise|>` stays absent: upstream emits it only with a reference clip.
      */
@@ -310,9 +320,6 @@ class OmniVoiceEngine {
         language: String?,
         instruction: String?,
     ): IntArray {
-        val styled = !language.isNullOrBlank() || !instruction.isNullOrBlank()
-        if (!styled) return tok.encode(text)
-
         val style = buildString {
             append("<|lang_start|>").append(language ?: "None").append("<|lang_end|>")
             append("<|instruct_start|>").append(instruction ?: "None").append("<|instruct_end|>")
@@ -469,16 +476,36 @@ class OmniVoiceEngine {
                 // loudly.
                 val hidden = adapt(env, embedded.pick("inputs_embeds"), llmEmbedType)
                     .also(closeables::add)
-                val attentionTensor = OnnxTensor.createTensor(
-                    env, LongBuffer.wrap(attention), longArrayOf(1, sequence.toLong()),
-                )
-                closeables += attentionTensor
+                // A full square mask, every position visible to every other.
+                //
+                // The genai-built graph took a 2-D mask and reduced it to
+                // `seqlens_k` for fused GroupQueryAttention, which is causal and
+                // accepts no arbitrary mask — the reason it could only buzz. The
+                // corrected export takes the 4-D boolean mask that Transformers
+                // passes through verbatim, which is what makes the attention
+                // bidirectional. Supplying it is not optional: it is the fix.
+                val squareMask = if (fourDimensionalMask) {
+                    val cells = ByteBuffer.allocateDirect(sequence * sequence)
+                        .order(ByteOrder.nativeOrder())
+                    repeat(sequence * sequence) { cells.put(1) }
+                    cells.rewind()
+                    OnnxTensor.createTensor(
+                        env, cells,
+                        longArrayOf(1, 1, sequence.toLong(), sequence.toLong()),
+                        OnnxJavaType.BOOL,
+                    )
+                } else {
+                    OnnxTensor.createTensor(
+                        env, LongBuffer.wrap(attention), longArrayOf(1, sequence.toLong()),
+                    )
+                }
+                closeables += squareMask
 
-                // Empty past for every layer: the graph is exported to run a
-                // full-sequence forward, which is what unmasking needs.
                 val inputs = HashMap<String, OnnxTensor>(pastNames.size + 2)
                 inputs["inputs_embeds"] = hidden
-                inputs["attention_mask"] = attentionTensor
+                inputs["attention_mask"] = squareMask
+                // The corrected export has no cache inputs — unmasking runs a
+                // full-sequence forward every step and never reuses one.
                 pastNames.forEach { name ->
                     val empty = emptyPast(env, llmEmbedType)
                     closeables += empty

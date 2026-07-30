@@ -46,7 +46,24 @@ object StarterModels {
      * had to be wrong, and it was the 683: nothing in the repo adds up to it.
      * [installHint] is how a screen asks instead of remembering.
      */
-    const val OMNIVOICE_REPO = "onnx-community/OmniVoice-Onnx"
+    /**
+     * Not `onnx-community/OmniVoice-Onnx`, and the reason is measured.
+     *
+     * That repo's `llm_decoder` was built by onnxruntime-genai's ModelBuilder,
+     * which emits autoregressive decoders: 28 fused `GroupQueryAttention` nodes,
+     * causal by design and taking no arbitrary mask. OmniVoice is a masked
+     * diffusion LM — a frame must attend to frames committed after it — so it
+     * produced a buzz rather than speech. Probe: change the last of twelve
+     * tokens and every earlier hidden state is bit-identical, max|diff| 0.0.
+     *
+     * This repo is that export redone with the attention mask as a real 4-D
+     * input, quantised back to 4 bits (284 MB against the original's 296 MB),
+     * measured at 54.6 dB dynamic range against the PyTorch reference's 54.7.
+     * Every other graph is copied from onnx-community unchanged — the
+     * embeddings encoder, heads decoder, Higgs vocoder and tokenizer were never
+     * at fault.
+     */
+    const val OMNIVOICE_REPO = "prskid1000/OmniVoice-Onnx-bidirectional"
 
     /**
      * "`<repo id>` — `<size>`", for a screen nudging the user toward a download.
@@ -122,7 +139,7 @@ object StarterModels {
             // 4 MB heads decoder for its 17 MB; the llm_decoder is the same
             // 297 MB file in both. So: 388 + 371 + 11 MB of tokeniser = 770 MB
             // against root's 641 + 371 + 11 = 1023 MB.
-            sizeHint = "~770 MB at int4, ~1.0 GB full",
+            sizeHint = "~760 MB",
         ),
 
         // — images —
