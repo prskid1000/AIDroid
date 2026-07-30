@@ -272,6 +272,20 @@ owned_image take_image(JNIEnv * env, jbyteArray bytes, jint width, jint height) 
 
 extern "C" {
 
+/**
+ * The keys this binary will act on. See the note on llama's copy of this. A
+ * diffusion parameter is read when the sampler runs, so none of them require a
+ * reload and every row says so.
+ */
+JNIEXPORT jstring JNICALL
+Java_ai_ondevice_engine_SdBridge_nativeSupportedParams(JNIEnv * env, jobject) {
+    json out = json::object();
+    for (const auto & entry : table()) {
+        out[entry.first] = json{ { "reload", false } };
+    }
+    return jni_from_string(env, out.dump());
+}
+
 JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeSystemInfo(JNIEnv * env, jobject) {
     json info;

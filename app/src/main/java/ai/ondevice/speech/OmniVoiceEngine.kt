@@ -558,6 +558,16 @@ class OmniVoiceEngine {
             }
 
     companion object {
+        /**
+         * The parameter keys this engine reads. See [KokoroEngine.PARAM_KEYS]
+         * for why these are declared rather than enumerated; the reader is the
+         * same one.
+         */
+        val PARAM_KEYS = setOf(
+            "voice_design", "lang_code", "speed", "steps", "frames",
+            "trim_silence", "volume",
+        )
+
         const val SAMPLE_RATE = 24_000
 
         /**

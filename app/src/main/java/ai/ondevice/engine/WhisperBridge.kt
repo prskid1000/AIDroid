@@ -23,6 +23,9 @@ object WhisperBridge {
     var loadError: String? = null
         private set
 
+    /** `{"<key>":{"reload":bool}, …}` — see [LlamaBridge.nativeSupportedParams]. */
+    external fun nativeSupportedParams(): String
+
     external fun nativeLoad(path: String): Long
 
     external fun nativeFree(handle: Long)

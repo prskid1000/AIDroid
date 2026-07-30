@@ -82,7 +82,10 @@ class ParamsViewModel @Inject constructor(
             bundledVersion = repository.bundledVersion(),
             runtimeId = runtimeId,
             buildTag = registry.buildTag(runtimeId),
-            allSpecs = manifest.paramsFor(runtimeId),
+            // What the runtime reports it accepts, described by the manifest
+            // where the manifest has something to say — not what the manifest
+            // claims on the runtime's behalf.
+            allSpecs = repository.specsFor(manifest, runtimeId),
             values = SparseParams.parse(model?.paramOverridesJson),
             modality = (model?.modality ?: modalityOf(runtimeId)).name.lowercase(),
             architecture = model?.architecture,

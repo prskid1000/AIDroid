@@ -442,6 +442,31 @@ Java_ai_ondevice_engine_LlamaBridge_nativeSystemInfo(JNIEnv * env, jobject) {
 }
 
 /**
+ * Every parameter key this binary will actually act on, with the reload flag
+ * that only the table knows.
+ *
+ * The parameter screen used to take that list from the shipped manifest and
+ * gate it with a hand-written `sinceBuild` string. That is a claim about the
+ * `.so` made by a JSON file that has never met it, and the two drift in both
+ * directions: a key upstream removed keeps rendering a control that silently
+ * does nothing, and a key upstream added stays invisible until someone
+ * remembers to edit the manifest.
+ *
+ * The table below is the same one `apply_params` dispatches through, so this is
+ * not a description of the runtime — it is the runtime. No handle is needed
+ * because the table is static, which matters: the screen opens long before any
+ * model is loaded.
+ */
+JNIEXPORT jstring JNICALL
+Java_ai_ondevice_engine_LlamaBridge_nativeSupportedParams(JNIEnv * env, jobject) {
+    json out = json::object();
+    for (const auto & entry : param_table()) {
+        out[entry.first] = json{ { "reload", entry.second.reload } };
+    }
+    return jni_from_string(env, out.dump());
+}
+
+/**
  * Load a model. Every load-time parameter arrives as JSON — nothing about this
  * signature has to change when upstream adds one.
  */

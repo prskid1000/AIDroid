@@ -32,6 +32,14 @@ object LlamaBridge {
 
     external fun nativeSystemInfo(): String
 
+    /**
+     * `{"<key>":{"reload":bool}, …}` — every parameter this binary acts on.
+     *
+     * Static, so it can be called before any model is loaded, which is when the
+     * parameter screen needs it.
+     */
+    external fun nativeSupportedParams(): String
+
     /** @return an opaque handle, or throws with a message that names the file. */
     external fun nativeLoad(path: String, paramsJson: String): Long
 

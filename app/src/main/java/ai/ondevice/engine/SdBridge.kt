@@ -32,6 +32,9 @@ object SdBridge {
 
     external fun nativeSystemInfo(): String
 
+    /** `{"<key>":{"reload":bool}, …}` — see [LlamaBridge.nativeSupportedParams]. */
+    external fun nativeSupportedParams(): String
+
     external fun nativeLoad(
         modelPath: String,
         vaePath: String,

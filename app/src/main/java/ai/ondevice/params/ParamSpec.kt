@@ -18,9 +18,16 @@ import kotlinx.serialization.json.intOrNull
  * new upstream parameter requires touching Kotlin UI source, the design has
  * been violated (Appendix A #9).
  *
- * The manifest is generated in CI from pinned upstream sources (§16.2) and
- * consumed here as signed data. The app never parses upstream C++ (Appendix A
- * #13).
+ * What this document is *not* is the authority on which parameters exist. It
+ * describes them — label, help, range, group, tier — and
+ * [ParamRepository.specsFor] shows only the ones the runtime itself reports it
+ * will act on. §16.2 called for generating this in CI from pinned upstream
+ * sources so the two could not drift; they drifted anyway, because a generator
+ * nobody ran is a hand-written file with a longer story. Asking the binary at
+ * runtime is the version of that idea which cannot go stale.
+ *
+ * The app still never parses upstream C++ (Appendix A #13). It asks the
+ * compiled result what it accepts.
  */
 @Serializable
 data class ParamManifest(
@@ -30,16 +37,19 @@ data class ParamManifest(
 ) {
     fun paramsFor(runtimeId: String): List<ParamSpec> = runtimes[runtimeId]?.params.orEmpty()
 
-    fun buildTagFor(runtimeId: String): String? = runtimes[runtimeId]?.buildTag
-
     fun spec(runtimeId: String, key: String): ParamSpec? =
         runtimes[runtimeId]?.params?.firstOrNull { it.key == key }
 }
 
+/**
+ * `sourceCommit` and `buildTag` used to sit here as provenance. Nothing read
+ * either, and their values were `a1b2c3d` and a build eleven months stale — so
+ * they were a claim about which upstream this described, made by nobody, checked
+ * by nobody. The runtime reports its own build tag ([RuntimeRegistry.buildTag]);
+ * a second unverified copy in a data file is not provenance.
+ */
 @Serializable
 data class RuntimeParams(
-    val sourceCommit: String = "",
-    val buildTag: String = "",
     val jniContract: Int = 3,
     val params: List<ParamSpec> = emptyList(),
 )

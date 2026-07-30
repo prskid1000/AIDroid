@@ -54,6 +54,65 @@ class ParamRepository(
 
     suspend fun bundledVersion(): Int = withContext(Dispatchers.IO) { loadBundled().manifestVersion }
 
+    /**
+     * The parameters a runtime *has*, as opposed to the ones a document claims
+     * for it.
+     *
+     * The manifest describes; [EngineParams] decides. Everything the runtime
+     * reports keeps whatever description the manifest has for it, and anything
+     * the manifest describes that the runtime does not accept is dropped — that
+     * being a control which moves, saves and does nothing, which is a worse
+     * failure than the parameter simply not being there.
+     *
+     * Keys the runtime reports and nobody has described are kept and shown
+     * plainly, in their own group. A text field with the key as its label is a
+     * poor control; an unreachable capability is worse, and the JSON contract
+     * coerces strings on the way through, so typing `40` into one reaches the
+     * runtime as forty.
+     *
+     * @return [described] unchanged when the runtime cannot be asked. A missing
+     *   `.so` must not empty this screen.
+     */
+    fun specsFor(manifest: ParamManifest, runtimeId: String): List<ParamSpec> {
+        val described = manifest.paramsFor(runtimeId)
+        val declared = EngineParams.capabilities(runtimeId)?.takeIf { it.isNotEmpty() } ?: return described
+
+        val kept = described
+            .filter { it.key in declared }
+            .map { spec ->
+                // The reload flag belongs to the runtime, which is the only
+                // party that knows whether a key can be pushed into a live
+                // context. App-applied keys report false and take the
+                // manifest's answer, since the manifest is the only source
+                // for those.
+                val capability = declared.getValue(spec.key)
+                if (capability.appliedBy == ParamCapability.Applier.RUNTIME) {
+                    spec.copy(requiresReload = capability.requiresReload)
+                } else {
+                    spec
+                }
+            }
+
+        val describedKeys = described.mapTo(mutableSetOf()) { it.key }
+        val undescribed = declared.values
+            .filter { it.key !in describedKeys }
+            .sortedBy { it.key }
+            .map { capability ->
+                ParamSpec(
+                    key = capability.key,
+                    group = UNDESCRIBED_GROUP,
+                    type = ParamType.TEXT,
+                    tier = Tier.EXPERT,
+                    label = capability.key,
+                    help = "This build's runtime accepts this parameter and the manifest has no " +
+                        "description for it. The value is passed through as typed.",
+                    requiresReload = capability.requiresReload,
+                )
+            }
+
+        return kept + undescribed
+    }
+
     suspend fun storedManifest(): ParamManifestEntity? = db.manifests().newest()
 
     /**
@@ -166,6 +225,9 @@ class ParamRepository(
 
     companion object {
         const val ASSET = "params-manifest.json"
+
+        /** Where a runtime-reported key with no manifest row is filed. */
+        const val UNDESCRIBED_GROUP = "not described yet"
     }
 }
 

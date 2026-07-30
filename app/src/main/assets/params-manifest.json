@@ -1,4 +1,17 @@
 {
+  "_note": [
+    "This file describes parameters. It does not decide which ones exist.",
+    "",
+    "Each runtime reports the keys it will act on at runtime — the native ones enumerate",
+    "the same dispatch table apply_params() uses, over JNI; the Kotlin voice engines declare",
+    "theirs beside the code that reads them. See ai.ondevice.params.EngineParams. Anything",
+    "described here that the runtime does not report is not shown, and anything the runtime",
+    "reports that is not described here is shown as a plain text field.",
+    "",
+    "That is why the per-runtime sourceCommit and buildTag fields are gone. They were",
+    "'a1b2c3d' and 'b6482' — a placeholder and a build eleven months stale — and nothing",
+    "read either of them. A provenance claim nobody checks is worse than no claim."
+  ],
   "_comment": [
     "GENERATED FILE — do not hand-edit. SPEC 16.2: this manifest is produced in CI by",
     "parsing the pinned upstream sources (llama.cpp common/arg.cpp + common/common.h +",
@@ -19,8 +32,6 @@
   "generatedAt": "2026-07-29T00:00:00Z",
   "runtimes": {
     "llama.cpp": {
-      "sourceCommit": "a1b2c3d",
-      "buildTag": "b6482",
       "jniContract": 3,
       "params": [
         {
@@ -1018,8 +1029,6 @@
       ]
     },
     "whisper.cpp": {
-      "sourceCommit": "d4e5f6a",
-      "buildTag": "v1.7.6",
       "jniContract": 3,
       "params": [
         {
@@ -1375,8 +1384,6 @@
       ]
     },
     "stable-diffusion.cpp": {
-      "sourceCommit": "a9c3f2b",
-      "buildTag": "master-a9c3f2",
       "jniContract": 3,
       "params": [
         {
@@ -1807,8 +1814,6 @@
       ]
     },
     "kokoro": {
-      "sourceCommit": "4870adf",
-      "buildTag": "1.52.0",
       "jniContract": 3,
       "params": [
         {
@@ -1929,8 +1934,6 @@
       ]
     },
     "omnivoice": {
-      "sourceCommit": "65b5f53",
-      "buildTag": "OmniVoice-Onnx",
       "jniContract": 3,
       "params": [
         {

@@ -188,6 +188,21 @@ whisper_full_params build_params(od_whisper & e) {
 
 extern "C" {
 
+/**
+ * The keys this binary will act on. See the note on llama's copy of this: the
+ * parameter screen asks the runtime rather than trusting a manifest that has
+ * never met it. Nothing here needs a reload — whisper's parameters are read
+ * afresh for each transcription — so every row says so.
+ */
+JNIEXPORT jstring JNICALL
+Java_ai_ondevice_engine_WhisperBridge_nativeSupportedParams(JNIEnv * env, jobject) {
+    json out = json::object();
+    for (const auto & entry : table()) {
+        out[entry.first] = json{ { "reload", false } };
+    }
+    return jni_from_string(env, out.dump());
+}
+
 JNIEXPORT jlong JNICALL
 Java_ai_ondevice_engine_WhisperBridge_nativeLoad(JNIEnv * env, jobject, jstring jpath) {
     const auto path = jni_to_string(env, jpath);

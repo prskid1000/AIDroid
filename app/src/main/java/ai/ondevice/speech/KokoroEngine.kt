@@ -505,6 +505,20 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
     }
 
     companion object {
+        /**
+         * The parameter keys this engine reads, for [ai.ondevice.params.EngineParams].
+         *
+         * Declared rather than enumerated, because unlike llama.cpp and friends
+         * there is no dispatch table here to walk — the keys are read one at a
+         * time by `VoiceViewModel.refreshFromOverrides`, which is the list this
+         * has to match. Kept next to the engine so the two are at least in the
+         * same conversation; the reader is named so the match is checkable.
+         */
+        val PARAM_KEYS = setOf(
+            "voice", "speed", "lang_code", "voice_blend", "split_pattern",
+            "trim_silence", "volume",
+        )
+
         const val SAMPLE_RATE = 24_000
         const val STYLE_ROWS = 510
         const val STYLE_DIMENSIONS = 256
