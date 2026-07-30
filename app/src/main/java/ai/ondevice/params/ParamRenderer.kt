@@ -213,7 +213,20 @@ private fun ParamControl(
                 // A dropdown rather than pills: these labels are model names and
                 // filenames, which wrap into a paragraph as chips and stop making
                 // the current value obvious.
-                val labels = listOf("None") + choices.map { it.label }
+                // NDropdown reports the chosen *label*, and the selection is
+                // resolved by looking that string back up — so two choices that
+                // render identically would both resolve to whichever came
+                // first, silently setting the wrong path. Labels are filenames
+                // now and rarely collide, but two roles' worth of files can
+                // live in different directories under the same name, so make
+                // uniqueness a property of the list rather than a hope.
+                val labels = listOf("None") + choices.mapIndexed { index, choice ->
+                    if (choices.count { it.label == choice.label } > 1) {
+                        "${choice.label}  (${index + 1})"
+                    } else {
+                        choice.label
+                    }
+                }
                 val selected = choices.indexOfFirst { it.path == v }
                     .let { if (it < 0) 0 else it + 1 }
                 ai.ondevice.ui.components.NDropdown(

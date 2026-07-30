@@ -59,7 +59,8 @@ class ImageViewModel @Inject constructor(
             // fixes, and SPEC §1.2 says a refusal has to name which one it is.
             val runtimeInstalled = db.runtimes().get(RUNTIME_ID)?.state != RuntimeState.NOT_INSTALLED
             _state.value = _state.value.copy(
-                model = db.models().observeInstalledByModality(Modality.DIFFUSION).first().firstOrNull(),
+                model = baseModelsOnly(db.models().observeInstalledByModality(Modality.DIFFUSION).first())
+                    .firstOrNull(),
                 presets = db.presets().observeFor(Modality.DIFFUSION).first(),
                 runtimeInstalled = runtimeInstalled,
             )
@@ -69,7 +70,8 @@ class ImageViewModel @Inject constructor(
         // Live, so a model that finishes downloading while this screen is open
         // appears — the same mistake the chat picker used to make.
         viewModelScope.launch {
-            db.models().observeInstalledByModality(Modality.DIFFUSION).collect { models ->
+            db.models().observeInstalledByModality(Modality.DIFFUSION).collect { all ->
+                val models = baseModelsOnly(all)
                 _state.value = _state.value.copy(
                     availableModels = models,
                     model = _state.value.model?.let { current ->
@@ -79,6 +81,23 @@ class ImageViewModel @Inject constructor(
             }
         }
     }
+
+    /**
+     * The diffusion entries that can be the *base* model, which is not the same
+     * set as the diffusion entries.
+     *
+     * Modality.DIFFUSION covers everything that belongs to an image run — the
+     * checkpoint and every add-on hanging off it. The picker read that set
+     * straight, so a ControlNet, an IP-Adapter, a LoRA and an ESRGAN upscaler
+     * all appeared as things you could generate *with*, and since the selection
+     * falls back to `firstOrNull()`, whichever the database returned first
+     * became the base model — a ControlNet loaded as a checkpoint.
+     *
+     * The line is drawn by the role the user gave the model on the Add screen:
+     * an add-on has one, a checkpoint does not.
+     */
+    private fun baseModelsOnly(models: List<ModelEntity>): List<ModelEntity> =
+        models.filter { it.attachmentRole == null }
 
     /**
      * With more than one diffusion model installed, which one runs is the
@@ -297,15 +316,14 @@ class ImageViewModel @Inject constructor(
     /**
      * Everything installed that can hang off a diffusion run.
      *
-     * Classified by role from metadata, never from a list of known model names,
+     * Filed by the role the user gave it, never by a list of known model names,
      * so a LoRA for an architecture released tomorrow shows up without an app
      * update. Whether it actually *loads* is the runtime's answer, not ours.
      */
     private suspend fun refreshAttachmentLibrary() {
         val installed = db.models().getInstalled()
         val available = installed.mapNotNull { entity ->
-            val role = ai.ondevice.core.AttachmentRole.classify(entity.localPath)
-                ?: return@mapNotNull null
+            val role = entity.attachmentRole ?: return@mapNotNull null
             ai.ondevice.core.ModelAttachment(
                 modelId = entity.id,
                 role = role,

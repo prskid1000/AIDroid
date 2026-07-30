@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
@@ -44,6 +43,7 @@ import ai.ondevice.ui.components.NBottomBar
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NCard
+import ai.ondevice.ui.components.NDropdown
 import ai.ondevice.ui.components.NField
 import ai.ondevice.ui.components.NHelp
 import ai.ondevice.ui.components.NInput
@@ -121,42 +121,26 @@ fun ImageScreen(
 
         Column(Modifier.verticalScroll(rememberScrollState())) {
 
-            // Which model runs is the user's choice once there is more than
-            // one. Picking whichever the database returned first is how a
-            // broken model gets loaded forever while a working one sits beside
-            // it, unreachable.
-            if (state.availableModels.size > 1) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(bottom = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    state.availableModels.forEach { model ->
-                        val selected = model.id == state.model?.id
-                        Box(
-                            Modifier
-                                .background(
-                                    if (selected) NocturneColors.Accent900 else NocturneColors.Surface,
-                                    Radius.Md,
-                                )
-                                .ring(
-                                    if (selected) NocturneColors.Accent else NocturneColors.Divider,
-                                    Radius.Md,
-                                )
-                                .nClickableFlat { viewModel.selectModel(model) }
-                                .padding(horizontal = 12.dp, vertical = 9.dp),
-                        ) {
-                            Text(
-                                model.displayName,
-                                style = NocturneType.Row,
-                                color = if (selected) NocturneColors.Accent200 else NocturneColors.Text,
-                                maxLines = 1,
-                            )
-                        }
-                    }
-                }
+            // Which model runs is the user's choice. Picking whichever the
+            // database returned first is how a broken model gets loaded forever
+            // while a working one sits beside it, unreachable.
+            //
+            // One base model, so one dropdown — a row of chips read as a set
+            // you combine, which is exactly what the add-ons below *are*, and
+            // put the checkpoint and the things hanging off it on the same
+            // footing. The list holds base models only; see baseModelsOnly.
+            if (state.availableModels.isNotEmpty()) {
+                NHelp("Model", Modifier.padding(bottom = 4.dp))
+                NDropdown(
+                    options = state.availableModels.map { it.displayName },
+                    selected = state.model?.displayName,
+                    onSelect = { name ->
+                        state.availableModels.firstOrNull { it.displayName == name }
+                            ?.let(viewModel::selectModel)
+                    },
+                    placeholder = "Choose a model…",
+                    modifier = Modifier.padding(bottom = 10.dp),
+                )
             }
 
             TaesdPreview(state)

@@ -124,16 +124,23 @@ class ParamsViewModel @Inject constructor(
      *
      * Taken from the library rather than by scanning the filesystem, so what is
      * offered is exactly what the app knows it downloaded and can vouch for.
-     * The role is included in the label because that is the thing the user is
-     * actually choosing by — "the ControlNet", not "a .safetensors".
+     *
+     * Labelled by filename, not by role. The role used to be the label, on the
+     * reasoning that it is what the user chooses by — but each dropdown is
+     * already filtered to one role, so "ControlNet" under the control_net field
+     * only repeats the field's own name, and two installed ControlNets both
+     * read "ControlNet" with nothing to tell them apart. The filename is the
+     * part that differs: repo-derived display names collide too, since every
+     * ControlNet in comfyanonymous/ControlNet-v1-1_fp16_safetensors shares one.
+     * [PathChoice.detail] still carries the display name and size underneath.
      */
     private suspend fun installedFiles(): List<ai.ondevice.params.PathChoice> =
         db.models().getInstalled().mapNotNull { model ->
             val file = java.io.File(model.localPath)
             if (!file.isFile) return@mapNotNull null
-            val role = ai.ondevice.core.AttachmentRole.classify(model.localPath)
+            val role = model.attachmentRole
             ai.ondevice.params.PathChoice(
-                label = role?.label ?: model.displayName,
+                label = if (role != null) file.name else model.displayName,
                 detail = "${model.displayName} · ${file.name} · " +
                     ai.ondevice.core.Fmt.bytes(file.length()),
                 path = model.localPath,

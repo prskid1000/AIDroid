@@ -2,6 +2,7 @@ package ai.ondevice.ui.vm
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import ai.ondevice.core.AttachmentRole
 import ai.ondevice.core.Modality
 import ai.ondevice.core.SparseParams
 import ai.ondevice.core.Verdict
@@ -140,10 +141,25 @@ class AddModelViewModel @Inject constructor(
      * Queue the primary file, every shard, and every required companion as one
      * atomic job (SPEC §3.4).
      */
+    fun setModality(modality: Modality) {
+        _state.value = _state.value.copy(selectedModality = modality)
+    }
+
+    /** Null is a real answer — "no role, this is a base model" — hence the flag. */
+    fun setRole(role: AttachmentRole?) {
+        _state.value = _state.value.copy(selectedRole = role, roleAnswered = true)
+    }
+
     fun download() {
         val resolved = _state.value.resolved ?: return
         val quant = resolved.quants.firstOrNull { it.name == _state.value.selectedQuant } ?: return
         if (_state.value.verdict?.verdict?.runnable != true) return
+        // Type and role are the user's to state. Without them there is nothing
+        // to write, and falling back to the detected value here would quietly
+        // reinstate the guessing this replaced.
+        val modality = _state.value.selectedModality ?: return
+        if (!_state.value.roleAnswered) return
+        val role = _state.value.selectedRole
 
         viewModelScope.launch {
             val modelId = "${resolved.repoId}:${quant.name}"
@@ -185,7 +201,7 @@ class AddModelViewModel @Inject constructor(
                     quant = quant.name,
                     sizeBytes = quant.totalBytes + companions.sumOf { it.sizeBytes },
                     sha256 = quant.files.firstOrNull()?.sha256,
-                    modality = resolved.modality,
+                    modality = modality,
                     contextLength = resolved.contextLength,
                     chatTemplate = resolved.chatTemplate,
                     bosToken = resolved.bosToken,
@@ -202,8 +218,9 @@ class AddModelViewModel @Inject constructor(
                     paramOverridesJson = SparseParams.of(
                         "n_ctx" to _state.value.contextTokens,
                     ).toJsonString(),
-                    defaultPresetId = defaultPresetFor(resolved.modality),
+                    defaultPresetId = defaultPresetFor(modality),
                     displayName = resolved.displayName,
+                    attachmentRole = role,
                 ),
             )
 
@@ -270,7 +287,20 @@ data class AddModelState(
     val verdict: VerdictResult? = null,
     val totalRamBytes: Long = 0,
     val pendingAction: RemedyAction? = null,
+    /**
+     * What this model *is*, and which add-on slot it fills — both chosen here
+     * rather than inferred, which is why they start unset. The header parse
+     * still supplies context length, architecture, chat template and the fit
+     * estimate; it just no longer decides these two.
+     */
+    val selectedModality: Modality? = null,
+    val selectedRole: AttachmentRole? = null,
+    /** True once [selectedRole] has been answered, including answered as "none". */
+    val roleAnswered: Boolean = false,
 ) {
     val runnable: Boolean get() = verdict?.verdict?.runnable == true
     val isRefused: Boolean get() = refusal != null || verdict?.verdict == Verdict.WONT_FIT
+
+    /** Type and role are required, so Download stays closed until both are set. */
+    val classified: Boolean get() = selectedModality != null && roleAnswered
 }

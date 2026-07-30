@@ -3,6 +3,7 @@ package ai.ondevice.data.db
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import ai.ondevice.core.AttachmentRole
 import ai.ondevice.core.BackendId
 import ai.ondevice.core.DownloadState
 import ai.ondevice.core.MessageRole
@@ -52,6 +53,18 @@ data class ModelEntity(
     val paramOverridesJson: String,
     val defaultPresetId: String?,
     val displayName: String,
+    /**
+     * Which add-on slot this model fills, or null for a base model.
+     *
+     * Stored because the user said so on the Add screen, not derived from the
+     * filename. It used to be re-derived on every read by
+     * AttachmentRole.classify(localPath), and a path is a weak thing to hang it
+     * on: `model.safetensors` in an `image_encoder/` directory is a CLIP vision
+     * encoder, the same basename elsewhere is a base checkpoint, and a
+     * ControlNet that classified as nothing became a *diffusion model* and got
+     * loaded as one. Now the answer is recorded once, by someone who knows.
+     */
+    val attachmentRole: AttachmentRole? = null,
 )
 
 @Entity(

@@ -20,12 +20,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ai.ondevice.core.AttachmentRole
 import ai.ondevice.core.Fmt
+import ai.ondevice.core.Modality
 import ai.ondevice.core.SpeedClass
 import ai.ondevice.core.VerdictTone
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NCard
+import ai.ondevice.ui.components.NDropdown
 import ai.ondevice.ui.components.NFieldLabel
 import ai.ondevice.ui.components.NHelp
 import ai.ondevice.ui.components.NInput
@@ -284,6 +287,50 @@ fun AddModelScreen(
                     NHelp("Queued with the weights — a multi-file model is never hand-assembled.")
                 }
 
+                // Type and role, stated rather than guessed.
+                //
+                // The header parse still reads context length, architecture,
+                // chat template and the quant list off the file — those are
+                // facts written into it. What it cannot read is which *slot* a
+                // file fills: `model.safetensors` is a base checkpoint in one
+                // repo and a CLIP vision encoder in another, and a ControlNet
+                // that matched no filename pattern was filed as a diffusion
+                // model and offered as one to generate with. Both answers are
+                // recorded on the row now, so nothing downstream re-guesses.
+                SectionKicker("What this is", Modifier.padding(top = 20.dp, bottom = 8.dp))
+
+                NHelp("Type", Modifier.padding(bottom = 4.dp))
+                // UNKNOWN is what the resolver said when it could not tell. It is
+                // not something a person would ever mean to choose.
+                val modalities = Modality.entries.filterNot { it == Modality.UNKNOWN }
+                NDropdown(
+                    options = modalities.map { it.label },
+                    selected = state.selectedModality?.label,
+                    onSelect = { label ->
+                        modalities.firstOrNull { it.label == label }?.let(viewModel::setModality)
+                    },
+                    placeholder = "Choose what this model is…",
+                )
+
+                NHelp("Role", Modifier.padding(top = 10.dp, bottom = 4.dp))
+                // "Base model" is a role answer, not the absence of one — it is
+                // what makes a checkpoint pickable on the Image and Chat screens
+                // while an add-on stays in the Attachments list.
+                val baseLabel = "Base model — nothing hangs off it"
+                val roleLabels = listOf(baseLabel) + AttachmentRole.entries.map { it.label }
+                NDropdown(
+                    options = roleLabels,
+                    selected = when {
+                        !state.roleAnswered -> null
+                        state.selectedRole == null -> baseLabel
+                        else -> state.selectedRole?.label
+                    },
+                    onSelect = { label ->
+                        viewModel.setRole(AttachmentRole.entries.firstOrNull { it.label == label })
+                    },
+                    placeholder = "Base model, or which add-on slot…",
+                )
+
                 val selectedQuant = resolved.quants.firstOrNull { it.name == state.selectedQuant }
                 val runnable = state.verdict?.verdict?.runnable == true
                 // The required companions are downloaded with the weights, so
@@ -295,15 +342,15 @@ fun AddModelScreen(
                     resolved.companions.filter { it.role.required || it.autoSelected }
                         .sumOf { it.file.sizeBytes }
                 NButton(
-                    text = if (runnable) {
-                        "Download ${Fmt.bytes(downloadBytes)}"
-                    } else {
-                        state.verdict?.verdict?.label ?: "Not runnable"
+                    text = when {
+                        !runnable -> state.verdict?.verdict?.label ?: "Not runnable"
+                        !state.classified -> "Choose a type and a role"
+                        else -> "Download ${Fmt.bytes(downloadBytes)}"
                     },
                     onClick = { viewModel.download(); onDownloadStarted() },
                     style = NButtonStyle.Primary,
                     block = true,
-                    enabled = runnable,
+                    enabled = runnable && state.classified,
                     minHeight = Touch.Primary,
                     modifier = Modifier.padding(top = 16.dp),
                 )

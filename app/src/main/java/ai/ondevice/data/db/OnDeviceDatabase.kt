@@ -6,6 +6,7 @@ import androidx.room.TypeConverter
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import ai.ondevice.core.AttachmentRole
 import ai.ondevice.core.BackendId
 import ai.ondevice.core.DownloadState
 import ai.ondevice.core.MessageRole
@@ -36,6 +37,10 @@ class Converters {
 
     @TypeConverter fun rtStateTo(v: RuntimeState?): String? = v?.name
     @TypeConverter fun rtStateFrom(v: String?): RuntimeState? = v?.let { runCatching { RuntimeState.valueOf(it) }.getOrNull() }
+
+    @TypeConverter fun attachmentRoleTo(v: AttachmentRole?): String? = v?.name
+    @TypeConverter fun attachmentRoleFrom(v: String?): AttachmentRole? =
+        v?.let { runCatching { AttachmentRole.valueOf(it) }.getOrNull() }
 }
 
 @Database(
@@ -53,7 +58,7 @@ class Converters {
         ParamManifestEntity::class,
         McpServerEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -93,6 +98,42 @@ abstract class OnDeviceDatabase : RoomDatabase() {
                     )
                     """.trimIndent(),
                 )
+            }
+        }
+
+        /**
+         * v3 records the add-on role the user chose, rather than re-deriving it
+         * from the file path on every read.
+         *
+         * Rows installed before this version have no answer to migrate, and
+         * leaving them NULL would read as "base model" — putting every already
+         * installed ControlNet and upscaler back in the base-model picker, the
+         * exact fault this column exists to end. So they are backfilled once,
+         * here, with the path classifier that used to run on every read.
+         *
+         * A one-time backfill of rows that predate the field is a different
+         * thing from inferring the answer forever: it runs once, its result is
+         * visible and correctable, and nothing downstream re-derives anything.
+         * Where the classifier has no opinion the row stays NULL, which for a
+         * checkpoint is the right answer anyway.
+         */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `models` ADD COLUMN `attachmentRole` TEXT DEFAULT NULL")
+                db.query("SELECT `id`, `localPath` FROM `models`").use { cursor ->
+                    val updates = mutableListOf<Pair<String, String>>()
+                    while (cursor.moveToNext()) {
+                        val id = cursor.getString(0) ?: continue
+                        val path = cursor.getString(1) ?: continue
+                        AttachmentRole.classify(path)?.let { updates += id to it.name }
+                    }
+                    updates.forEach { (id, role) ->
+                        db.execSQL(
+                            "UPDATE `models` SET `attachmentRole` = ? WHERE `id` = ?",
+                            arrayOf<Any>(role, id),
+                        )
+                    }
+                }
             }
         }
     }

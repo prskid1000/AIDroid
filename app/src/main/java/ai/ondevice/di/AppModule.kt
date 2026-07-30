@@ -60,7 +60,7 @@ object AppModule {
             // and the per-model parameter overrides in this database are the
             // user's work, and dropping them to add a table is not a trade the
             // app gets to make on their behalf.
-            .addMigrations(OnDeviceDatabase.MIGRATION_1_2)
+            .addMigrations(OnDeviceDatabase.MIGRATION_1_2, OnDeviceDatabase.MIGRATION_2_3)
             .build()
 
     @Provides @Singleton fun provideModelDao(db: OnDeviceDatabase) = db.models()
