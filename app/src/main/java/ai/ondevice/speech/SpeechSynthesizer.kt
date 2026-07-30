@@ -7,6 +7,7 @@ import android.speech.tts.UtteranceProgressListener
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flow
@@ -298,6 +299,10 @@ class SpeechSynthesizer(
 
     companion object {
         const val OMNIVOICE_VOICE_ID = "omnivoice"
+
+        /** How long past the audio's own duration playback is given to drain. */
+        private const val PLAYBACK_GRACE_MS = 750L
+        private const val PLAYBACK_POLL_MS = 20L
     }
 
     // — Kokoro —
@@ -401,7 +406,7 @@ class SpeechSynthesizer(
      * buffer — and [stop] would then cut off audio the user was told had
      * finished. Hence the drain on the playback head.
      */
-    private fun play(audio: KokoroAudio) {
+    private suspend fun play(audio: KokoroAudio) {
         val minimum = android.media.AudioTrack.getMinBufferSize(
             audio.sampleRate,
             android.media.AudioFormat.CHANNEL_OUT_MONO,
@@ -441,8 +446,28 @@ class SpeechSynthesizer(
             offset += written
         }
 
-        while (player === track && track.playbackHeadPosition < audio.samples.size) {
-            Thread.sleep(20)
+        // Wait on what was actually queued, not on what we hoped to queue.
+        // `write` can return short — the loop above breaks when it does — and
+        // this used to wait for a playback head that had reached
+        // `audio.samples.size`, a position it could then never reach. The wait
+        // never ended, so `play` never returned, so the flow never completed
+        // and Speak sat reading "Stop" for a passage that had already finished.
+        //
+        // The deadline covers the other direction: the head position only
+        // advances while the track really is playing, and an underrun or a
+        // silent audio HAL leaves it short of even the honest count. Waiting a
+        // little past the audio's own duration is enough for any real playback.
+        //
+        // `delay`, not Thread.sleep, so pressing Stop actually interrupts this —
+        // coroutine cancellation does not interrupt a sleeping thread.
+        val queued = offset
+        val deadline = System.currentTimeMillis() +
+            (queued * 1000L / audio.sampleRate.coerceAtLeast(1)) + PLAYBACK_GRACE_MS
+        while (player === track &&
+            track.playbackHeadPosition < queued &&
+            System.currentTimeMillis() < deadline
+        ) {
+            delay(PLAYBACK_POLL_MS)
         }
         stopPlayback()
     }
