@@ -658,14 +658,37 @@ class VoiceViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            val ttsModel = db.models().observeInstalledByModality(Modality.TEXT_TO_SPEECH).first().firstOrNull()
-            _state.value = _state.value.copy(
-                sttModel = db.models().observeInstalledByModality(Modality.SPEECH_TO_TEXT).first().firstOrNull(),
-                sttModels = db.models().observeInstalledByModality(Modality.SPEECH_TO_TEXT).first(),
-                ttsModel = ttsModel,
-                transcripts = db.transcripts().observeAll().first(),
-            )
-            loadVoices()
+            _state.value = _state.value.copy(transcripts = db.transcripts().observeAll().first())
+        }
+
+        // Both model lists are collected, not sampled once with `first()`.
+        //
+        // A download finishing while this screen is open used to leave the
+        // screen certain the model was absent — OmniVoice sat fully installed,
+        // listed on the Models screen, 759 MB on disk, while Speak said "not
+        // installed" and named the repo to fetch. The only way out was to kill
+        // the app, which is not a thing a user should have to discover. The
+        // Image and Chat pickers were fixed for this exact reason and this one
+        // was missed.
+        viewModelScope.launch {
+            db.models().observeInstalledByModality(Modality.SPEECH_TO_TEXT).collect { models ->
+                _state.value = _state.value.copy(
+                    sttModels = models,
+                    // Keep the current choice if it survives; otherwise fall back.
+                    sttModel = _state.value.sttModel
+                        ?.let { current -> models.firstOrNull { it.id == current.id } }
+                        ?: models.firstOrNull(),
+                )
+            }
+        }
+
+        viewModelScope.launch {
+            db.models().observeInstalledByModality(Modality.TEXT_TO_SPEECH).collect {
+                // loadVoices re-reads the list and rebuilds the engine/voice
+                // membership from what each engine says about the files it can
+                // see, so it is the whole refresh rather than half of one.
+                loadVoices(preferred = _state.value.ttsModel)
+            }
         }
     }
 
@@ -1341,8 +1364,19 @@ data class VoiceState(
      * The unavailable ones stay — knowing what installing Kokoro would get you
      * is the point — they just stop being the first thing you see.
      */
+    /** The engine currently chosen, which is whichever the selected voice belongs to. */
+    val selectedProvider: ai.ondevice.speech.SynthProvider
+        get() = selectedVoice?.provider ?: ai.ondevice.speech.SynthProvider.SYSTEM
+
     val filteredVoices: List<ai.ondevice.speech.SynthVoice>
         get() = voices
+            // Only the chosen engine's voices. The list held all of them at
+            // once, so selecting OmniVoice left fifty Kokoro names underneath it
+            // — each tagged "Kokoro", each unusable by the engine named at the
+            // top of the screen, and picking one silently switched the engine
+            // back. The engine tabs already promise this separation; the list
+            // was the one place still ignoring it.
+            .filter { it.provider == selectedProvider }
             .filter {
                 voiceQuery.isBlank() ||
                     it.displayName.contains(voiceQuery, true) ||

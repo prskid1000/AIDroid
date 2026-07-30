@@ -648,8 +648,12 @@ private fun SpeakPanel(
     )
 
     // — the voice —
+    // Counted over this engine's voices, since those are the only ones listed.
+    // "51 available of 339" above a list of one engine's voices described the
+    // library, not the choice on offer.
+    val engineVoices = state.voices.filter { it.provider == state.selectedProvider }
     SectionKicker(
-        "Voice · ${state.voices.count { it.available }} available of ${state.voices.size}",
+        "Voice · ${engineVoices.count { it.available }} available of ${engineVoices.size}",
         Modifier.padding(top = 20.dp, bottom = 8.dp),
     )
     NInput(
