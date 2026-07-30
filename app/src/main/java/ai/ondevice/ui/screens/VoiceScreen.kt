@@ -399,6 +399,28 @@ fun VoiceScreen(
                         modifier = Modifier.padding(bottom = 8.dp),
                     )
 
+                    // The transcript panel is always here, the way Microphone's
+                    // is. It used to appear only once segments existed, so File
+                    // mode jumped from a line of help text to four live export
+                    // buttons with nothing to export — the one mode that reads
+                    // its confidence off a finished decode looked like it did not
+                    // report confidence at all.
+                    if (state.segments.isEmpty()) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .background(NocturneColors.Surface, Radius.Md)
+                                .padding(12.dp),
+                        ) {
+                            Text(
+                                "Choose a file and its segments appear here with timings, shaded by " +
+                                    "confidence.",
+                                style = NocturneType.Message,
+                                color = NocturneColors.TextMuted,
+                            )
+                        }
+                    }
+
                     state.segments.forEachIndexed { index, segment ->
                         Row(
                             Modifier
@@ -425,7 +447,15 @@ fun VoiceScreen(
                         }
                     }
 
-                    Row(
+                    if (state.segments.isNotEmpty()) {
+                        NHelp(
+                            "Opacity tracks the decoder's own confidence for each segment.",
+                            Modifier.padding(top = 8.dp),
+                        )
+                    }
+
+                    // Exports only once there is a transcript behind them.
+                    if (state.segments.isNotEmpty()) Row(
                         Modifier.fillMaxWidth().padding(top = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
@@ -522,12 +552,23 @@ private fun SpeakPanel(
         // are ordinary — Kokoro and OmniVoice are both voice models — and until
         // now the app picked by scanning directories and never said which it had
         // landed on.
-        if (state.ttsModels.isNotEmpty()) {
+        //
+        // Only the models this engine can load, and only when the engine loads
+        // one at all: Android's synthesiser is part of the OS and has no file to
+        // choose, so a picker over it is a control with nothing behind it. The
+        // unfiltered list was worse than useless — the OmniVoice tab listed
+        // Kokoro and showed it as the selection, which is a promise the engine
+        // cannot keep.
+        val engineModels = state.ttsModels.filter {
+            state.ttsModelProviders[it.id] == provider
+        }
+        if (provider != ai.ondevice.speech.SynthProvider.SYSTEM && engineModels.isNotEmpty()) {
             NDropdown(
-                options = state.ttsModels.map { it.displayName },
-                selected = state.ttsModel?.displayName,
+                options = engineModels.map { it.displayName },
+                selected = engineModels.firstOrNull { it.id == state.ttsModel?.id }?.displayName
+                    ?: engineModels.first().displayName,
                 onSelect = { name ->
-                    state.ttsModels.firstOrNull { it.displayName == name }
+                    engineModels.firstOrNull { it.displayName == name }
                         ?.let(viewModel::selectTtsModel)
                 },
                 modifier = Modifier.padding(top = 8.dp),

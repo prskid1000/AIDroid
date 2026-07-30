@@ -284,7 +284,7 @@ JNIEXPORT jlong JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeLoad(
         JNIEnv * env, jobject, jstring jmodel, jstring jvae, jstring jtaesd, jstring jcontrolNet,
         jstring jclipL, jstring jclipG, jstring jt5xxl, jstring jipAdapter, jstring jembeddings,
-        jint threads) {
+        jstring jclipVision, jint threads) {
     const auto model      = jni_to_string(env, jmodel);
     const auto vae        = jni_to_string(env, jvae);
     const auto taesd      = jni_to_string(env, jtaesd);
@@ -299,6 +299,12 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
     const auto t5xxl      = jni_to_string(env, jt5xxl);
     const auto ipAdapter  = jni_to_string(env, jipAdapter);
     const auto embeddings = jni_to_string(env, jembeddings);
+    // An IP-Adapter cannot work without this. sd.cpp constructs a
+    // FrozenCLIPVisionEmbedder the moment ip_adapter_path is set and binds it
+    // from the shared tensor map, and SD 1.5 contributes only a *text* encoder
+    // to that map — so with no image encoder loaded there is nothing for the
+    // vision embedder to find.
+    const auto clipVision = jni_to_string(env, jclipVision);
 
     static std::once_flag once;
     std::call_once(once, [] {
@@ -325,6 +331,7 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
     params.t5xxl_path       = t5xxl.empty() ? nullptr : t5xxl.c_str();
     params.ip_adapter_path  = ipAdapter.empty() ? nullptr : ipAdapter.c_str();
     params.embeddings_connectors_path = embeddings.empty() ? nullptr : embeddings.c_str();
+    params.clip_vision_path = clipVision.empty() ? nullptr : clipVision.c_str();
     params.n_threads        = threads > 0 ? threads : sd_get_num_physical_cores();
     params.enable_mmap      = true;
     // The GPU backends are not compiled in on this platform, so asking for

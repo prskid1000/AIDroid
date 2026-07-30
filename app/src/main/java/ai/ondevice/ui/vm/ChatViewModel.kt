@@ -23,6 +23,8 @@ import ai.ondevice.engine.RenderedPrompt
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -358,10 +360,19 @@ class ChatViewModel @Inject constructor(
             try {
                 runTurn(conversation, params, images, parentId = userMessage.id)
             } finally {
+                // Stop is a cancellation, and a cancelled coroutine cannot
+                // suspend: the first suspending call in this block throws
+                // CancellationException again and everything after it is
+                // skipped. That is why Stop appeared not to work — `touch`
+                // threw, so `generating` was never cleared and the UI kept
+                // showing a running turn over a native loop that had already
+                // finished. Teardown has to be uncancellable to run at all.
                 InferenceService.releaseWakeLock(context)
-                db.conversations().touch(conversation.id, System.currentTimeMillis())
-                _state.value = _state.value.copy(generating = false, streaming = null)
-                refreshMessages()
+                withContext(NonCancellable) {
+                    db.conversations().touch(conversation.id, System.currentTimeMillis())
+                    _state.value = _state.value.copy(generating = false, streaming = null)
+                    refreshMessages()
+                }
             }
         }
     }
@@ -473,31 +484,37 @@ class ChatViewModel @Inject constructor(
             } finally {
                 // Persist whatever was generated, including on cancellation — a
                 // half-finished reply is still the user's, and it carries the
-                // parameters it was produced under.
-                if (content.isNotEmpty() || thinking.isNotEmpty() || toolCalls.isNotEmpty()) {
-                    db.messages().upsert(
-                        MessageEntity(
-                            id = assistantId,
-                            conversationId = conversation.id,
-                            role = MessageRole.ASSISTANT,
-                            content = content.toString(),
-                            thinking = thinking.toString().takeIf { it.isNotBlank() },
-                            thinkingMillis = thinkingMillis,
-                            thinkingTokens = thinkingTokens,
-                            imagePathsJson = "{}",
-                            toolCallsJson = toolCalls.takeIf { it.isNotEmpty() }?.let(::encodeToolCalls),
-                            tokenCount = promptTokens,
-                            imageTokenCount = null,
-                            generationParamsJson = params.toJsonString(),
-                            tokensPerSecond = tps,
-                            backend = backend,
-                            createdAt = System.currentTimeMillis(),
-                            parentMessageId = lastParent,
-                        ),
-                    )
-                    lastParent = assistantId
+                // parameters it was produced under. NonCancellable is what makes
+                // that true rather than aspirational: Stop cancels this
+                // coroutine, and without it the upsert below is itself a
+                // suspending call on a cancelled job, so the partial reply was
+                // thrown away every single time.
+                withContext(NonCancellable) {
+                    if (content.isNotEmpty() || thinking.isNotEmpty() || toolCalls.isNotEmpty()) {
+                        db.messages().upsert(
+                            MessageEntity(
+                                id = assistantId,
+                                conversationId = conversation.id,
+                                role = MessageRole.ASSISTANT,
+                                content = content.toString(),
+                                thinking = thinking.toString().takeIf { it.isNotBlank() },
+                                thinkingMillis = thinkingMillis,
+                                thinkingTokens = thinkingTokens,
+                                imagePathsJson = "{}",
+                                toolCallsJson = toolCalls.takeIf { it.isNotEmpty() }?.let(::encodeToolCalls),
+                                tokenCount = promptTokens,
+                                imageTokenCount = null,
+                                generationParamsJson = params.toJsonString(),
+                                tokensPerSecond = tps,
+                                backend = backend,
+                                createdAt = System.currentTimeMillis(),
+                                parentMessageId = lastParent,
+                            ),
+                        )
+                        lastParent = assistantId
+                    }
+                    refreshMessages()
                 }
-                refreshMessages()
             }
 
             if (toolCalls.isEmpty() || registry == null) return

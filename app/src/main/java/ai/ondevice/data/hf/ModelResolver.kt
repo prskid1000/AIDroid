@@ -1,5 +1,6 @@
 package ai.ondevice.data.hf
 
+import ai.ondevice.core.AttachmentRole
 import ai.ondevice.core.Fmt
 import ai.ondevice.core.Modality
 import ai.ondevice.core.ModelFormat
@@ -151,7 +152,7 @@ class ModelResolver(
         // is tolerated only when its own filename classifies it as a diffusion
         // auxiliary, which is also the only route by which it reaches that
         // non-executing reader. Anything else still refuses.
-        val pickleAuxiliaries = pickles.filter { ai.ondevice.core.AttachmentRole.classify(it) != null }
+        val pickleAuxiliaries = pickles.filter { AttachmentRole.classify(it) != null }
         val unsafePickles = pickles - pickleAuxiliaries.toSet()
 
         if (blockPickle && unsafePickles.isNotEmpty()) {
@@ -178,7 +179,7 @@ class ModelResolver(
             safetensors +
                 files.filter { it.endsWith(".ckpt", ignoreCase = true) } +
                 pickleAuxiliaries
-            ).filter { ai.ondevice.core.AttachmentRole.classify(it) != null }
+            ).filter { AttachmentRole.classify(it) != null }
 
         if (ggufFiles.isEmpty() && ggmlBins.isEmpty() && onnxFiles.isEmpty() && auxiliaries.isEmpty()) {
             return@withContext if (safetensors.isNotEmpty() || files.any { it.endsWith(".bin") }) {
@@ -202,17 +203,6 @@ class ModelResolver(
             else -> ModelFormat.SAFETENSORS
         }
 
-        // Step 4/6 — enumerate quant variants, folding shard sets into one entry.
-        val primaryFiles = when (format) {
-            ModelFormat.GGUF -> ggufFiles.filterNot { isCompanionFilename(it) }
-            ModelFormat.GGML_BIN -> ggmlBins
-            ModelFormat.ONNX -> onnxFiles
-            // For an auxiliary pack the "variants" are the individual
-            // auxiliaries — canny, depth, openpose — and picking one is the
-            // point, not a quality trade-off.
-            else -> auxiliaries
-        }
-
         // Step 7 — pin *first*, then read everything at the pin.
         //
         // This ordering is the whole point. "main" is a moving target: a repo
@@ -224,6 +214,17 @@ class ModelResolver(
         // concrete commit once, and using that same commit for paths-info and
         // for every download URL, is what makes the sha256 check meaningful.
         val pinnedRevision = info.sha?.takeIf { it.isNotBlank() } ?: repoRef.revision
+
+        // Step 4/6 — enumerate quant variants, folding shard sets into one entry.
+        val primaryFiles = when (format) {
+            ModelFormat.GGUF -> ggufFiles.filterNot { isCompanionFilename(it) }
+            ModelFormat.GGML_BIN -> ggmlBins
+            ModelFormat.ONNX -> onnxFiles
+            // For an auxiliary pack the "variants" are the individual
+            // auxiliaries — canny, depth, openpose — and picking one is the
+            // point, not a quality trade-off.
+            else -> refineAuxiliaries(repoId, pinnedRevision, safetensors, auxiliaries)
+        }
 
         // A multi-graph ONNX model is grouped by directory, not by file — see
         // onnxGraphSets. Null for every other shape.
@@ -432,6 +433,56 @@ class ModelResolver(
             role = role,
         )
     }.distinctBy { it.role to it.file.filename }
+
+    /**
+     * Correct the filename's verdict against the file's own tensor names.
+     *
+     * `madebyollin/taesd` is the case this exists for. It publishes three files
+     * that look installable, and the naming is exactly backwards: the two called
+     * `taesd_encoder`/`taesd_decoder` are standalone `nn.Sequential` dumps whose
+     * tensors are `0.weight`, `1.conv.0.bias`, matching nothing sd.cpp looks
+     * for — and each is half an autoencoder besides — while the one that
+     * actually loads is `diffusion_pytorch_model.safetensors`, whose name says
+     * nothing at all. So the app offered two files that cannot work, side by side
+     * as if they were alternatives, and hid the one that can.
+     *
+     * sd.cpp resolves TAESD by looking for `decoder.layers.*` (see
+     * `src/model/vae/tae.hpp`), so agreeing with it means reading the same names.
+     *
+     * Deliberately narrow. Only files that are unclassified or classified TAESD
+     * are read, and only for repos with a handful of candidates — a probe per
+     * file would otherwise add 29 round trips to resolving the ControlNet pack,
+     * whose role never depended on tensor names in the first place. An
+     * unreadable header leaves the filename's verdict standing: "cannot tell"
+     * must not become "refused".
+     */
+    private suspend fun refineAuxiliaries(
+        repoId: String,
+        revision: String,
+        safetensors: List<String>,
+        classified: List<String>,
+    ): List<String> {
+        val ambiguous = safetensors.filter {
+            it !in classified || AttachmentRole.classify(it) == AttachmentRole.TAESD
+        }
+        if (ambiguous.isEmpty() || safetensors.size > HEADER_PROBE_LIMIT) return classified
+
+        val verdicts = ambiguous.associateWith { filename ->
+            val url = api.resolveUrl(repoId, filename, revision)
+            api.rangeGet(url, SafetensorsHeaderReader.HEADER_BYTES).getOrNull()
+                ?.let(SafetensorsHeaderReader::parse)
+        }
+
+        fun isTaesd(filename: String) = verdicts[filename]?.hasPrefix(TAESD_TENSOR_PREFIX) == true
+        fun unreadable(filename: String) = filename in verdicts && verdicts[filename] == null
+
+        val kept = classified.filter { filename ->
+            AttachmentRole.classify(filename) != AttachmentRole.TAESD ||
+                isTaesd(filename) || unreadable(filename)
+        }
+        val recovered = ambiguous.filter { it !in classified && isTaesd(it) }
+        return (kept + recovered).distinct()
+    }
 
     private fun companionRole(name: String): CompanionRole? {
         val n = name.lowercase()
@@ -735,6 +786,16 @@ class ModelResolver(
     private companion object {
         /** Known to stable-diffusion.cpp; matched on architecture, not repo name. */
         val DIFFUSION_ARCHITECTURES = setOf("sd1", "sd2", "sdxl", "sd3", "flux", "unet", "dit")
+
+        /**
+         * How many safetensors a repo may hold before header probing is skipped.
+         * One request per file is fine for an autoencoder repo and absurd for a
+         * fifteen-ControlNet pack, whose roles never needed probing anyway.
+         */
+        const val HEADER_PROBE_LIMIT = 8
+
+        /** What sd.cpp's TinyDecoder block is named — `src/model/vae/tae.hpp`. */
+        const val TAESD_TENSOR_PREFIX = "decoder.layers."
     }
 }
 

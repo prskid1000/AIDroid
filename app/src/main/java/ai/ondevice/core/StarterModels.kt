@@ -159,12 +159,19 @@ object StarterModels {
             repoId = "ai-forever/Real-ESRGAN",
             modality = Modality.DIFFUSION,
             role = AttachmentRole.UPSCALER,
-            // ×2, ×4 and ×8, and all three are named RealESRGAN_* so the role
-            // is read off the filename. Chosen over the larger community packs
-            // because those name most of their files things like
-            // "4x-UltraSharp", which classifies as nothing at all.
-            summary = "Enlarge a finished picture ×2, ×4 or ×8. Pick one file.",
-            sizeHint = "~67 MB each",
+            // The repo holds ×2, ×4 and ×8, all named RealESRGAN_* so the role is
+            // read off the filename. Only the ×4 file runs here, and that is a
+            // property of the bundled upscaler rather than of the weights:
+            // sd.cpp's RRDBNet reads its scale back from the tensors it finds
+            // (`conv_up2` present → ×4) and builds no `conv_up3`, so the ×8
+            // network's third upsample block has nowhere to load. The ×2 file is
+            // worse than unsupported — BasicSR trains scale-2 with a
+            // pixel-unshuffled input, giving `conv_first` twelve input channels
+            // where this build assumes three, so it cannot even bind. Saying so
+            // beats a 67 MB download that fails at load.
+            summary = "Enlarge a finished picture ×4. Pick RealESRGAN_x4 — the ×2 and ×8 " +
+                "networks need upsample blocks this build's upscaler does not have.",
+            sizeHint = "~67 MB",
         ),
     )
 

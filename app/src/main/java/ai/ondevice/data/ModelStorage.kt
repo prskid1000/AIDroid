@@ -3,6 +3,8 @@ package ai.ondevice.data
 import android.content.Context
 import ai.ondevice.data.db.ModelEntity
 import ai.ondevice.data.db.OnDeviceDatabase
+import ai.ondevice.data.download.Downloader
+import ai.ondevice.data.download.toJob
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -68,6 +70,12 @@ class ModelStorage(private val context: Context, private val db: OnDeviceDatabas
     suspend fun findOrphans(): OrphanReport = withContext(Dispatchers.IO) {
         val records = db.models().getAll()
         val knownPaths = records.map { it.localPath }.toSet()
+        // A download in flight owns everything it has written so far, including
+        // the record that has no file yet.
+        val downloading = db.models().pendingModelIds().toSet()
+        val livePartFiles = db.downloads().getUnfinished()
+            .flatMap { job -> job.toJob().files.map { it.destPath + Downloader.PART_SUFFIX } }
+            .toSet()
         // Canonical, because the walk yields canonical paths and a record could
         // have been written with a symlinked or differently-cased parent.
         val ownedDirs = records
@@ -84,12 +92,22 @@ class ModelStorage(private val context: Context, private val db: OnDeviceDatabas
             return false
         }
 
+        // Every format, not an allowlist of three.
+        //
+        // The old filter was `gguf`, `bin` or `onnx`, which silently excluded
+        // most of what this app installs: a diffusion auxiliary is
+        // `.safetensors`, an upscaler is `.pth`, and — the expensive one — an
+        // ONNX model's weights live in `.onnx.data` sidecars, so an interrupted
+        // OmniVoice install left ~700 MB that the report could not see and the
+        // storage meter counted anyway. Anything unowned under the models
+        // directory is a stray whatever it is named; `isOwned` already keeps a
+        // real model's config and tokenizer files out of this.
         val strayFiles = modelsDir().walkTopDown()
-            .filter { it.isFile && (it.extension == "gguf" || it.extension == "bin" || it.extension == "onnx") }
+            .filter { it.isFile && it.absolutePath !in livePartFiles }
             .filterNot(::isOwned)
             .toList()
 
-        val missingFiles = records.filter { !File(it.localPath).exists() }
+        val missingFiles = records.filter { it.id !in downloading && !File(it.localPath).exists() }
 
         OrphanReport(strayFiles = strayFiles, recordsWithoutFiles = missingFiles)
     }

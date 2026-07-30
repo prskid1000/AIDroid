@@ -37,6 +37,19 @@ enum class AttachmentRole(
     /** Style transfer from a reference image rather than from text. */
     IP_ADAPTER("IP-Adapter", "ip_adapter"),
 
+    /**
+     * The image encoder an IP-Adapter reads its reference picture through.
+     *
+     * Not optional, and not part of the adapter file. sd.cpp builds a
+     * `FrozenCLIPVisionEmbedder` as soon as `ip_adapter_path` is set, populating
+     * it from the same tensor map every other module loads from — so with no
+     * `clip_vision_path` supplied there is nothing in that map for it to bind,
+     * because SD 1.5's own CLIP is a *text* encoder. The adapter had no way to
+     * work without this, which is why it needed its own role rather than being
+     * treated as a detail of the adapter.
+     */
+    CLIP_VISION("CLIP vision encoder", "clip_vision"),
+
     /** A replacement decoder — usually to fix washed-out colour. */
     VAE("VAE", "vae"),
 
@@ -69,9 +82,17 @@ enum class AttachmentRole(
          */
         fun classify(filename: String, tags: List<String> = emptyList()): AttachmentRole? {
             val name = filename.substringAfterLast('/').lowercase()
+            val path = filename.lowercase()
             val tagSet = tags.map { it.lowercase() }.toSet()
 
             return when {
+                // Read from the *directory*, because the file is called
+                // `model.safetensors` and says nothing about itself. That is a
+                // diffusers layout convention rather than a curated name — every
+                // repo publishing an image encoder puts it under
+                // `image_encoder/` — and without it h94/IP-Adapter's encoder was
+                // skipped entirely, leaving the adapter unusable.
+                path.contains("image_encoder") -> CLIP_VISION
                 // ControlNet is tested *before* LoRA on purpose. The most widely
                 // used ControlNet pack ships its weights as
                 // `control_lora_rank128_v11p_sd15_canny_fp16.safetensors` — a

@@ -47,6 +47,8 @@ object SdBridge {
         t5xxlPath: String,
         ipAdapterPath: String,
         embeddingsPath: String,
+        /** Required whenever [ipAdapterPath] is set — see AttachmentRole.CLIP_VISION. */
+        clipVisionPath: String,
         threads: Int,
     ): Long
 

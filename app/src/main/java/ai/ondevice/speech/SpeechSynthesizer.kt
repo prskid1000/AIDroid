@@ -72,6 +72,23 @@ class SpeechSynthesizer(
     /** So the caller can sort several installed models into the right engine. */
     fun omniVoiceLooksInstalled(directory: File): Boolean = omniVoice.looksInstalled(directory)
 
+    fun kokoroLooksInstalled(directory: File): Boolean = kokoro.looksInstalled(directory)
+
+    /**
+     * Which engine, if any, can run the model in [directory].
+     *
+     * The library holds "text-to-speech models" as one modality, but the engines
+     * are not interchangeable, so a picker that lists every voice model under
+     * whichever engine is selected is offering models that engine cannot load.
+     * Each engine answers for itself, by file shape — OmniVoice first because
+     * its four-graph layout is the more specific claim.
+     */
+    fun providerFor(directory: File): SynthProvider? = when {
+        omniVoice.looksInstalled(directory) -> SynthProvider.OMNIVOICE
+        kokoro.looksInstalled(directory) -> SynthProvider.KOKORO
+        else -> null
+    }
+
     val kokoroReady: Boolean get() = kokoro.runtimeAvailable && kokoroDirectory != null
 
     val omniVoiceReady: Boolean get() = omniVoice.runtimeAvailable && omniVoiceDirectory != null

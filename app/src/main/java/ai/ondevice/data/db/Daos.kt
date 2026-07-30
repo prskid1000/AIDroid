@@ -95,6 +95,23 @@ interface ModelDao {
     )
     fun observePendingModelIds(): Flow<List<String>>
 
+    /**
+     * The same set, read once.
+     *
+     * Orphan cleanup needs it: a row is written when a download *starts*, and
+     * the bytes land in a `.part` until the checksum passes, so a model that is
+     * three per cent downloaded has a record whose `localPath` does not exist
+     * yet. Judged on the file alone it looks like a record whose file has gone,
+     * and "Clean up" would delete the row out from under the running download.
+     */
+    @Query(
+        """
+        SELECT modelId FROM download_jobs
+        WHERE state IN ('QUEUED','RUNNING','PAUSED','VERIFYING')
+        """,
+    )
+    suspend fun pendingModelIds(): List<String>
+
     @Query("SELECT * FROM models WHERE id = :id")
     fun observe(id: String): Flow<ModelEntity?>
 

@@ -424,6 +424,24 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
             .takeIf { it.isNotEmpty() }
     }.getOrNull()
 
+    /**
+     * Whether a directory holds a Kokoro install: one graph and at least one
+     * style pack.
+     *
+     * Tested by shape, not by name. A pack is exactly [STYLE_ROWS] ×
+     * [STYLE_DIMENSIONS] floats, which is a far more specific claim than "there
+     * is a `.bin` in here somewhere" — and specificity is the point, because the
+     * library can hold two ONNX voice models at once and each engine has to be
+     * able to recognise its own without either of them being identified by the
+     * repository it came from.
+     */
+    fun looksInstalled(directory: File): Boolean =
+        findModel(directory) != null && voicePacks(directory).isNotEmpty()
+
+    /** The style packs in [directory], identified by their exact byte length. */
+    fun voicePacks(directory: File): List<File> =
+        directory.walkTopDown().filter { it.isFile && it.length() == PACK_BYTES }.toList()
+
     private fun findModel(directory: File): File? =
         directory.walkTopDown()
             .filter { it.isFile && it.extension.equals("onnx", ignoreCase = true) }
@@ -469,6 +487,9 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
 
         /** The model's positional limit, less the two pad tokens. */
         const val MAX_TOKENS = STYLE_ROWS - 2
+
+        /** A voice pack's exact size, which is how one is recognised on disk. */
+        const val PACK_BYTES: Long = STYLE_ROWS.toLong() * STYLE_DIMENSIONS * Float.SIZE_BYTES
 
         /** What counts as silence, as a fraction of the chunk's own peak. */
         const val SILENCE_FRACTION = 0.02f

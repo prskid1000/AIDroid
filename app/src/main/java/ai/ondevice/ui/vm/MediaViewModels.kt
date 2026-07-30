@@ -405,6 +405,12 @@ class ImageViewModel @Inject constructor(
                         )
                     },
                 )
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                // Cancelling is not failing. Caught separately and rethrown
+                // because `Throwable` below would otherwise turn every Stop
+                // into an "Upscaling failed" banner and break the coroutine's
+                // cancellation contract on the way.
+                throw cancelled
             } catch (failure: Throwable) {
                 _state.value = _state.value.copy(error = failure.message ?: "Upscaling failed.")
             } finally {
@@ -691,8 +697,18 @@ class VoiceViewModel @Inject constructor(
         val directories = ordered.mapNotNull { model ->
             java.io.File(model.localPath).let { if (it.isDirectory) it else it.parentFile }
         }
-        synthesizer.useKokoroModel(directories.firstOrNull { java.io.File(it, "voices").exists() || it.walkTopDown().any { f -> f.extension == "bin" } })
+        synthesizer.useKokoroModel(directories.firstOrNull { synthesizer.kokoroLooksInstalled(it) })
         synthesizer.useOmniVoiceModel(directories.firstOrNull { synthesizer.omniVoiceLooksInstalled(it) })
+
+        // Which engine each installed model belongs to, so the picker can offer
+        // an engine only the models it can actually load. Without this the
+        // OmniVoice tab listed — and preselected — Kokoro.
+        val providers = ordered.mapNotNull { model ->
+            val directory = java.io.File(model.localPath)
+                .let { if (it.isDirectory) it else it.parentFile }
+                ?: return@mapNotNull null
+            synthesizer.providerFor(directory)?.let { model.id to it }
+        }.toMap()
 
         val system = synthesizer.systemVoices()
         val kokoro = synthesizer.kokoroVoices()
@@ -701,6 +717,7 @@ class VoiceViewModel @Inject constructor(
         _state.value = _state.value.copy(
             voices = all,
             ttsModels = ttsModels,
+            ttsModelProviders = providers,
             ttsModel = preferred ?: _state.value.ttsModel ?: ttsModels.firstOrNull(),
             systemEngineAvailable = system.isNotEmpty(),
             kokoroAvailable = synthesizer.kokoroReady,
@@ -1225,6 +1242,14 @@ data class VoiceState(
     val ttsModel: ModelEntity? = null,
     /** Every installed voice model, so the Speak tab can offer a choice. */
     val ttsModels: List<ModelEntity> = emptyList(),
+    /**
+     * Which engine can run each voice model, keyed by model id.
+     *
+     * The picker needs this to stay honest: "text-to-speech" is one modality but
+     * two incompatible engines, so listing every voice model under whichever
+     * engine is selected offers files that engine cannot load.
+     */
+    val ttsModelProviders: Map<String, ai.ondevice.speech.SynthProvider> = emptyMap(),
     val recording: Boolean = false,
     val elapsedMillis: Long = 0,
     val waveform: List<Float> = List(40) { 0.15f },
