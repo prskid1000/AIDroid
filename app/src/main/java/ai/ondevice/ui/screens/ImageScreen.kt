@@ -776,11 +776,29 @@ private fun TaesdPreview(state: ImageState) {
         // a preview with, so that state used to last the entire run.
         if (!showingSource && preview == null) {
             Text(
+                // Driven by the phase, because the phase is the thing that
+                // knows. Keyed on `step <= 0` alone this said "warming up…"
+                // through the whole of weight loading and the whole of VAE
+                // decoding — neither of which is warming up, and both of which
+                // contradicted the status line directly underneath already
+                // naming the phase correctly.
+                //
+                // There is no step count to show in those two phases and that
+                // is not an omission: sd.cpp funnels loading, decoding and
+                // sampling through one callback with no tag, and only the
+                // sampling one has a total that means anything. Naming the
+                // phase is the honest alternative to counting the loader's
+                // graph nodes, which is how this screen once said "step
+                // 686/686" for a three-step run.
                 when {
                     state.loadingModel -> "loading model…"
-                    state.generating && state.step <= 0 -> "warming up…"
-                    state.generating -> "sampling · no preview decoder installed"
-                    else -> "No preview yet"
+                    !state.generating -> "No preview yet"
+                    state.phase == ai.ondevice.engine.DiffusionPhase.PREPARING ->
+                        "preparing · loading weights, no steps to count yet"
+                    state.phase == ai.ondevice.engine.DiffusionPhase.DECODING ->
+                        "decoding the latent to pixels · almost done"
+                    state.step <= 0 -> "warming up…"
+                    else -> "sampling · no preview decoder installed"
                 },
                 style = NocturneType.MonoSm,
                 color = if (state.generating) {

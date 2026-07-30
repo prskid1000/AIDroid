@@ -18,7 +18,13 @@ securityCrypto = "1.1.0-alpha06"
 media3 = "1.5.0"
 # Kokoro is an ONNX graph, not a GGUF, so it needs a second runtime. The AAR
 # carries prebuilt .so files for every ABI this app ships.
-onnxruntime = "1.20.0"
+# 1.22, not 1.20: OmniVoice's int4 backbone uses com.microsoft.GatherBlockQuantized
+# with a `bits` attribute, and 1.20 refuses the graph outright —
+#   ORT_INVALID_GRAPH ... Unrecognized attribute: bits for operator GatherBlockQuantized
+# which is a load failure, not a bad download. 4-bit block quantisation is exactly
+# what makes the backbone fit on a phone, so the runtime has to be new enough to
+# read it.
+onnxruntime = "1.22.0"
 junit = "4.13.2"
 androidxJunit = "1.2.1"
 
