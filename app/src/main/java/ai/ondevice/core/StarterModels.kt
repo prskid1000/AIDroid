@@ -82,19 +82,20 @@ object StarterModels {
         StarterModel(
             repoId = "onnx-community/OmniVoice-Onnx",
             modality = Modality.TEXT_TO_SPEECH,
-            summary = "Any language, [laughter] and [sigh], a voice you describe in words — but " +
-                "neither variant loads on the ONNX Runtime this build ships. Use Kokoro until " +
-                "a newer runtime is available.",
-            // The int4 export cannot be loaded by any released ONNX Runtime. Its
-            // embedding table is 4-bit block-quantised and says so with a `bits`
-            // attribute on com.microsoft.GatherBlockQuantized, which is on ORT's
-            // main branch and in no shipped version — not 1.22, the newest
-            // Android build. Only that one file differs: int4/llm_decoder is
-            // byte-identical to the root one and the Higgs tokenizer graphs are
-            // shared, so the whole saving is an embeddings encoder of 87 MB
-            // against 327 MB, and it buys a model that refuses to open.
+            summary = "Any language, [laughter] and [sigh], a voice you describe in words. " +
+                "Six to seven times slower than Kokoro.",
+            // Both variants load as of ONNX Runtime 1.28, which this build now
+            // ships. They were refused by 1.22 for two unrelated schema reasons
+            // — int4's GatherBlockQuantized `bits` attribute, root's twelve
+            // inputs to GroupQueryAttention — and both were fixed by 1.23. The
+            // note that used to sit here said no released runtime would ever
+            // take them, which was me reading 1.22 and main and nothing in
+            // between.
             //
-            // The figure is the root variant's, and is not the int4 one.
+            // int4 saves an 87 MB embeddings encoder against 327 MB and shares
+            // everything else: its llm_decoder is byte-identical to root's and
+            // the Higgs tokenizer graphs are the same files. The figure below is
+            // the root variant's.
             sizeHint = "~1.0 GB",
         ),
 

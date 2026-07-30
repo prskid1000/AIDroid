@@ -18,13 +18,26 @@ securityCrypto = "1.1.0-alpha06"
 media3 = "1.5.0"
 # Kokoro is an ONNX graph, not a GGUF, so it needs a second runtime. The AAR
 # carries prebuilt .so files for every ABI this app ships.
-# 1.22, not 1.20: OmniVoice's int4 backbone uses com.microsoft.GatherBlockQuantized
-# with a `bits` attribute, and 1.20 refuses the graph outright —
-#   ORT_INVALID_GRAPH ... Unrecognized attribute: bits for operator GatherBlockQuantized
-# which is a load failure, not a bad download. 4-bit block quantisation is exactly
-# what makes the backbone fit on a phone, so the runtime has to be new enough to
-# read it.
-onnxruntime = "1.22.0"
+#
+# 1.28, and the reason is OmniVoice. Both of its exports were refused by 1.22,
+# for two unrelated schema reasons, and both are fixed in releases that already
+# exist:
+#
+#   int4  needs com.microsoft.GatherBlockQuantized to take a `bits` attribute.
+#         1.22 has no such attribute and rejects the graph outright with
+#         ORT_INVALID_GRAPH ... Unrecognized attribute: bits.
+#   root  feeds com.microsoft.GroupQueryAttention twelve inputs — Qwen3 puts its
+#         QK-norm tensors there — where 1.22's schema allows seven to eleven.
+#
+# Reading the tagged ContribOperators.md for each release: 1.23 is the first
+# with both (`bits` present, GQA 7-12), 1.25 widens GQA to 7-14, 1.28 to 7-16.
+# 1.24 was never published as an Android AAR; 1.28 is the newest that was.
+#
+# I had this backwards for a while and said so in commit 6e24e12 — that the
+# input range had *grown* from 7-11 to 7-16 and therefore no runtime would take
+# twelve. It grew the right way. Everything between 1.22 and main was releases I
+# had not looked at.
+onnxruntime = "1.28.0"
 junit = "4.13.2"
 androidxJunit = "1.2.1"
 

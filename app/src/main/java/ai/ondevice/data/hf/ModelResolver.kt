@@ -266,7 +266,7 @@ class ModelResolver(
             info = info,
             allFiles = files,
             preGrouped = graphSets,
-        ).let { if (graphSets != null) markUnloadableGraphs(repoId, pinnedRevision, it) else it }
+        )
         if (quants.isEmpty()) {
             return@withContext Resolution.Refused(
                 kind = RefusalKind.NO_RUNTIME,
@@ -472,40 +472,6 @@ class ModelResolver(
      * unreadable header leaves the filename's verdict standing: "cannot tell"
      * must not become "refused".
      */
-    /**
-     * Mark the variants this build's ONNX Runtime cannot open.
-     *
-     * Asked before the download rather than after, because the answer is in the
-     * cheap half of the model. Only graphs with a weight sidecar are fetched —
-     * those are kilobytes — so this costs a handful of small requests and saves
-     * OmniVoice's 759 MB from being the pre-selected choice when it cannot load
-     * at all.
-     *
-     * A graph that cannot be fetched or read is left alone. "Could not check"
-     * must not become "refused": the whole point of the earlier taesd work was
-     * that an unreadable header leaves the previous verdict standing.
-     */
-    private suspend fun markUnloadableGraphs(
-        repoId: String,
-        revision: String,
-        quants: List<QuantVariant>,
-    ): List<QuantVariant> = quants.map { variant ->
-        val sidecarOwners = variant.files
-            .map { it.filename }
-            .filter { it.endsWith(".onnx", ignoreCase = true) }
-            .filter { graph -> variant.files.any { it.filename.startsWith("$graph.") } }
-
-        val reason = sidecarOwners.firstNotNullOfOrNull { graph ->
-            val size = variant.files.firstOrNull { it.filename == graph }?.sizeBytes ?: 0
-            if (size <= 0 || size > OnnxGraphProbe.MAX_GRAPH_BYTES) return@firstNotNullOfOrNull null
-            val url = api.resolveUrl(repoId, graph, revision)
-            api.rangeGet(url, size.toInt()).getOrNull()
-                ?.let(OnnxGraphProbe::blockedReason)
-                ?.let { "${graph.substringAfterLast('/')} $it" }
-        }
-        if (reason == null) variant else variant.copy(blockedReason = reason)
-    }
-
     private suspend fun refineAuxiliaries(
         repoId: String,
         revision: String,
