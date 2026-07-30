@@ -63,6 +63,7 @@ class OmniVoiceEngine {
     private var vocoder: OrtSession? = null
     private var tokenizer: QwenTokenizer? = null
     private var pastNames: List<String> = emptyList()
+    private var describedGraphs = false
     private var llmEmbedType: OnnxJavaType = OnnxJavaType.FLOAT
     private var headsInputType: OnnxJavaType = OnnxJavaType.FLOAT
 
@@ -362,6 +363,20 @@ class OmniVoiceEngine {
         val llm = decoder!!
         val head = heads!!
 
+        // Once per load. Reading these graphs positionally is what produced
+        // noise; if it ever does again, this says in one line whether the names
+        // are being found or whether `pick` is silently falling back to output
+        // zero, which is the failure it was written to end.
+        if (!describedGraphs) {
+            describedGraphs = true
+            android.util.Log.i(
+                "OmniVoice",
+                "llm outputs=${llm.outputNames.take(4)} (${llm.outputNames.size} total) " +
+                    "heads outputs=${head.outputNames} " +
+                    "embeddings outputs=${emb.outputNames}",
+            )
+        }
+
         val flat = LongArray(CODEBOOKS * sequence)
         for (cb in 0 until CODEBOOKS) ids[cb].copyInto(flat, cb * sequence)
 
@@ -386,7 +401,8 @@ class OmniVoiceEngine {
                 // whatever each declares rather than assuming they match — an
                 // unadapted feed is rejected outright, which at least fails
                 // loudly.
-                val hidden = adapt(env, embedded[0] as OnnxTensor, llmEmbedType).also(closeables::add)
+                val hidden = adapt(env, embedded.pick("inputs_embeds"), llmEmbedType)
+                    .also(closeables::add)
                 val attentionTensor = OnnxTensor.createTensor(
                     env, LongBuffer.wrap(attention), longArrayOf(1, sequence.toLong()),
                 )
@@ -404,10 +420,10 @@ class OmniVoiceEngine {
                 }
 
                 llm.run(inputs).use { decoded ->
-                    val states = adapt(env, decoded[0] as OnnxTensor, headsInputType)
+                    val states = adapt(env, decoded.pick("hidden_states"), headsInputType)
                         .also(closeables::add)
                     head.run(mapOf("hidden_states" to states)).use { scored ->
-                        return readFloats(scored[0] as OnnxTensor)
+                        return readFloats(scored.pick("logits"))
                     }
                 }
             }
@@ -488,12 +504,32 @@ class OmniVoiceEngine {
         )
         return try {
             voc.run(mapOf(voc.inputNames.first() to tensor)).use { result ->
-                readAudio(result[0] as OnnxTensor)
+                readAudio(result.pick("waveform_24k"))
             }
         } finally {
             runCatching { tensor.close() }
         }
     }
+
+    /**
+     * The named output, or the first one if the graph does not use that name.
+     *
+     * Every one of these graphs was read positionally — `result[0]` — and for
+     * `llm_decoder` that is a coin flip it was losing. The graph returns
+     * `hidden_states` *and* a `present.N.key`/`present.N.value` pair for all
+     * twenty-eight layers; `genai_config.json` lists only the cache tensors. If
+     * a cache tensor comes first, the heads decoder was being handed twenty-odd
+     * megabytes of attention memory and asked to score it as if it were the
+     * backbone's output. It scores it perfectly happily, and every code that
+     * falls out is noise.
+     *
+     * The repository's own `inference.py` asks by name at all three stages —
+     * `["hidden_states"]`, `["logits"]`, `["waveform_24k"]` — which is the
+     * detail this was translated past. Falling back to the first output keeps a
+     * differently-named export working rather than failing outright.
+     */
+    private fun OrtSession.Result.pick(name: String): OnnxTensor =
+        (get(name).orElse(null) ?: get(0)) as OnnxTensor
 
     /**
      * The vocoder is exported at fp16, so its output is half-precision. ORT's
