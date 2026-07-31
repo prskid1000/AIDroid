@@ -41,6 +41,7 @@ import ai.ondevice.core.Fmt
 import ai.ondevice.core.TranscriptFormat
 import ai.ondevice.ui.BottomDestinations
 import ai.ondevice.ui.components.NBottomBar
+import ai.ondevice.ui.components.NAudioPlayer
 import ai.ondevice.ui.components.NBottomSheet
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
@@ -804,10 +805,17 @@ private fun SpeakPanel(
         minHeight = 44.dp,
         modifier = Modifier.padding(top = 7.dp),
     )
-    state.lastAudioPath?.let {
+    // The take itself, playable. Before this the only way to hear a render was
+    // to render it again, which for OmniVoice is minutes of compute to replay
+    // four seconds of audio.
+    state.lastAudioPath?.let { path ->
+        NAudioPlayer(
+            file = java.io.File(path),
+            label = path.substringAfterLast('/'),
+            modifier = Modifier.padding(top = 8.dp),
+        )
         NHelp(
-            "Rendered ${it.substringAfterLast('/')} and listed it in the library — open it there " +
-                "to save or share it.",
+            "Listed in the library — open it there to save it to a folder or share it.",
             Modifier.padding(top = 6.dp),
         )
     }
