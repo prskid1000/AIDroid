@@ -1044,7 +1044,7 @@ data class ChatState(
      */
     val loadedBackend: ai.ondevice.core.BackendId? = null,
     /** The global preference, for describing what *would* be used. */
-    val backendPreference: String = ai.ondevice.data.prefs.AppPrefs.BACKEND_AUTO,
+    val backendPreference: String = ai.ondevice.core.BackendId.CPU.name,
     val error: String? = null,
     val errorSuggestion: String? = null,
     /** Sampled while the current turn runs; null when nothing is generating. */

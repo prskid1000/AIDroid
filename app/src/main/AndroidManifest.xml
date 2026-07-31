@@ -31,6 +31,25 @@
         android:theme="@style/Theme.OnDeviceAI"
         tools:targetApi="34">
 
+        <!--
+            The GPU, declared.
+
+            An app's linker namespace permits /data and nothing else, so a
+            library under /vendor is unreachable however it is asked for:
+            linking against libOpenCL.so failed at load, and dlopening the
+            Adreno driver by path failed with the permitted_paths spelled out
+            in the log. Shipping our own copy of the Khronos loader only moved
+            the failure — it could link, and then had no driver it was allowed
+            to open.
+
+            This is the declaration Android added in 11 for exactly that: a
+            vendor-provided native library the app depends on, which the
+            platform then exposes to its namespace. required="false" because
+            most devices have no OpenCL at all and none of them should fail to
+            install over a GPU backend that degrades to the CPU.
+        -->
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

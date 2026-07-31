@@ -38,7 +38,24 @@ enum class BackendId {
     CPU,
     ;
 
+    /**
+     * The piece of silicon, which is the question a user is actually asking.
+     *
+     * These were named for their APIs — "OpenCL", "Hexagon HTP" — and that is
+     * the wrong axis to offer a choice on: nobody wants OpenCL, they want the
+     * GPU, and OpenCL is one of several ways to get there. The API is still
+     * worth showing where the subject really is the build (see [api] and the
+     * Runtimes screen); it is not what a settings list should ask.
+     */
     val label: String
+        get() = when (this) {
+            OPENCL -> "GPU"
+            HEXAGON -> "NPU"
+            CPU -> "CPU"
+        }
+
+    /** How this build reaches [label] — the detail, for the screen about builds. */
+    val api: String
         get() = when (this) {
             OPENCL -> "OpenCL"
             HEXAGON -> "Hexagon HTP"
@@ -48,13 +65,16 @@ enum class BackendId {
     /**
      * Whether a name ggml registered means this backend.
      *
-     * ggml names its registries for people — "OpenCL", "CPU" — and this enum
-     * names them for a database column, so the two only coincide by luck.
+     * ggml names its registries after the API — "OpenCL", "CPU" — this enum
+     * names them for a database column, and [label] names them for a person,
+     * so all three only coincide by luck.
      * Matching on both spellings, case-insensitively, means a rename upstream
      * degrades to "unrecognised backend" rather than to a wrong one.
      */
     fun matches(registered: String): Boolean =
-        registered.equals(name, ignoreCase = true) || registered.equals(label, ignoreCase = true)
+        registered.equals(name, ignoreCase = true) ||
+            registered.equals(api, ignoreCase = true) ||
+            registered.equals(label, ignoreCase = true)
 }
 
 /**

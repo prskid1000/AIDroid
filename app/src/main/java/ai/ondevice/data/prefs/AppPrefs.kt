@@ -40,13 +40,24 @@ class AppPrefs(private val context: Context) {
     }
 
     /**
-     * "auto" takes the first backend the installed runtime registers.
+     * Which piece of silicon to run on: one of [BackendId], by name.
      *
-     * It used to mean benchmark-driven selection, which sounded better than
-     * it was: llama.cpp registers one backend in this build, so the benchmark
-     * compared CPU with itself and auto then picked the only candidate.
+     * There is no "auto" any more, and its history is the argument against it.
+     * It first meant benchmark-driven selection, which sounded better than it
+     * was — llama.cpp registered one backend, so the benchmark compared CPU
+     * with itself. It then meant "the first backend registered", which is not a
+     * choice, it is an ordering. A device with three real options deserves to
+     * be asked, and every answer is clamped to what actually registered, so a
+     * wrong one degrades rather than fails.
+     *
+     * CPU is the default because it is the one that always works. Anything
+     * stored by an older build — including the literal string "auto" — reads
+     * back as CPU.
      */
-    val backendMode: Flow<String> = context.dataStore.data.map { it[Keys.backendMode] ?: BACKEND_AUTO }
+    val backendMode: Flow<String> = context.dataStore.data.map { stored ->
+        val raw = stored[Keys.backendMode]
+        BackendId.entries.firstOrNull { it.name == raw }?.name ?: BackendId.CPU.name
+    }
 
     /** Default to performance-core count, not total cores (SPEC §8.1). */
     val threadCount: Flow<Int> = context.dataStore.data.map { it[Keys.threadCount] ?: 0 }
@@ -115,11 +126,7 @@ class AppPrefs(private val context: Context) {
     }
 
     companion object {
-        const val BACKEND_AUTO = "auto"
-
-        fun backendModeLabel(mode: String): String = when (mode) {
-            BACKEND_AUTO -> "Auto (what the runtime registers)"
-            else -> runCatching { BackendId.valueOf(mode).label }.getOrDefault(mode)
-        }
+        fun backendModeLabel(mode: String): String =
+            runCatching { BackendId.valueOf(mode).label }.getOrDefault(mode)
     }
 }

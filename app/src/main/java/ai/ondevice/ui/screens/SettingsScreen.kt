@@ -72,24 +72,35 @@ fun SettingsScreen(
                 InfoRow("Models on disk", Fmt.bytes(state.storageUsedBytes))
             }
 
-            SectionKicker("Backend", Modifier.padding(top = 20.dp, bottom = 8.dp))
+            // Three devices, named as devices.
+            //
+            // The list used to open with "Auto" and then name APIs — OpenCL,
+            // Hexagon HTP — which asked the wrong question twice over. Nobody
+            // wants OpenCL; they want the GPU, and OpenCL is one route to it.
+            // And auto was never a choice: it meant "the first backend
+            // registered", an ordering dressed up as a decision.
+            //
+            // All three are always listed, including ones this build cannot
+            // reach, because "the NPU is not an option here" is information and
+            // a missing row is not. An unreachable one says why and cannot be
+            // selected (§1.2 — a refusal names what went wrong).
+            SectionKicker("Compute device", Modifier.padding(top = 20.dp, bottom = 8.dp))
             NCard(gap = 7.dp) {
-                listOf(
-                    AppPrefs.BACKEND_AUTO,
-                    BackendId.OPENCL.name,
-                    BackendId.HEXAGON.name,
-                    BackendId.CPU.name,
-                ).forEach { mode ->
+                val available = state.availableBackends
+                listOf(BackendId.HEXAGON, BackendId.OPENCL, BackendId.CPU).forEach { device ->
+                    val usable = device in available
                     NRadio(
-                        label = AppPrefs.backendModeLabel(mode),
-                        selected = state.backendMode == mode,
-                        onSelect = { viewModel.setBackendMode(mode) },
+                        label = device.label + if (usable) "" else " — not available on this device",
+                        selected = state.backendMode == device.name,
+                        enabled = usable,
+                        onSelect = { viewModel.setBackendMode(device.name) },
                     )
                 }
             }
             NHelp(
-                "Auto picks whichever backend measured fastest for each model on this device. " +
-                    "Hexagon needs its runtime installed and is capped at ~3.5 GB a session.",
+                "What ggml registered on this phone, not what the build contains: a backend " +
+                    "compiled in still needs a driver behind it. The GPU runs through OpenCL; " +
+                    "the NPU needs a Hexagon build this one does not have.",
                 Modifier.padding(top = 8.dp),
             )
 

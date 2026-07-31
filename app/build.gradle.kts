@@ -203,15 +203,15 @@ android {
             "/META-INF/{AL2.0,LGPL2.1}",
             "META-INF/DEPENDENCY",
         )
-        // The Khronos ICD loader is built as a link target and must not ship.
+        // The Khronos ICD loader is a link target and must not ship.
         //
-        // Every device that has OpenCL exposes its own libOpenCL.so as a vendor
-        // public library, and that one knows where its driver is; ours knows
-        // nothing — it exists so the NDK linker has symbols to resolve. An
-        // APK-local copy would win the soname and hand ggml a loader with no
-        // driver behind it, which fails at context creation rather than at
-        // load, i.e. as far from the cause as it is possible to get. See the
-        // OpenCL block in src/main/cpp/CMakeLists.txt.
+        // The phone's own libOpenCL.so is the one that has to run: it is the
+        // only loader allowed to open the Adreno driver, since an app's linker
+        // namespace permits /data and nothing else. Shipping ours would win the
+        // soname and hand ggml a loader that can find no driver — which is
+        // exactly what it did when tried, one dlopen refusal per candidate
+        // path. What makes the platform's reachable at all is the
+        // <uses-native-library> declaration in AndroidManifest.xml.
         jniLibs.excludes += "**/libOpenCL.so"
     }
 }

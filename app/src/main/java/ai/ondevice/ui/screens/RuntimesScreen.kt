@@ -243,5 +243,8 @@ private fun RuntimeCard(runtime: RuntimeBundleEntity, viewModel: SettingsViewMod
 }
 
 private fun backendLabel(raw: String): String = runCatching {
-    ai.ondevice.core.BackendId.valueOf(raw.trim()).label
+    // The API rather than the device, because this screen is about what the
+    // build contains — "OpenCL" says which of several routes to the GPU was
+    // compiled, and that is the distinction a runtime card exists to draw.
+    ai.ondevice.core.BackendId.valueOf(raw.trim()).api
 }.getOrDefault(raw.trim())

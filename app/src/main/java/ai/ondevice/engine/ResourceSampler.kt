@@ -44,6 +44,21 @@ data class ResourceTrace(
     val rssMb: List<Int>,
     /** What the whole device had free, in MB. */
     val availMb: List<Int>,
+    /**
+     * GPU busy, 0..100, or empty when this device does not expose it.
+     *
+     * Empty and zero are different answers and are kept different: a run with
+     * no GPU series means "nobody could tell you", a run of zeroes means "the
+     * GPU sat idle". Defaulted so traces written before this existed still
+     * parse — they are the first case, and correctly so.
+     *
+     * Device-wide, not this process': the counter is the kernel's, and it
+     * counts every client of the GPU including the compositor drawing this
+     * screen. On a phone running one heavy job that is close enough to be
+     * useful and dishonest to present as exact, which is why the caption says
+     * "device" and not "app".
+     */
+    val gpuPercent: List<Int> = emptyList(),
     /** RSS before the run started, so the model's own footprint is legible. */
     val baselineRssMb: Int,
     val totalRamMb: Int,
@@ -54,6 +69,10 @@ data class ResourceTrace(
     val peakCpuPercent: Int get() = cpuPercent.maxOrNull() ?: 0
     val meanCpuPercent: Int get() = if (cpuPercent.isEmpty()) 0 else cpuPercent.average().toInt()
     val peakRssMb: Int get() = rssMb.maxOrNull() ?: 0
+
+    /** Null when unmeasured, so a caption can say so rather than print 0%. */
+    val peakGpuPercent: Int? get() = gpuPercent.maxOrNull()
+    val meanGpuPercent: Int? get() = if (gpuPercent.isEmpty()) null else gpuPercent.average().toInt()
 
     /**
      * The lowest memory reading of the run, and the bottom of the graph's RAM
@@ -88,6 +107,7 @@ data class ResourceTrace(
     fun halved(): ResourceTrace = copy(
         intervalMillis = intervalMillis * 2,
         cpuPercent = cpuPercent.mergePairs { a, b -> (a + b) / 2 },
+        gpuPercent = gpuPercent.mergePairs { a, b -> (a + b) / 2 },
         rssMb = rssMb.mergePairs { a, b -> maxOf(a, b) },
         availMb = availMb.mergePairs { a, b -> minOf(a, b) },
     )
@@ -101,6 +121,7 @@ data class ResourceTrace(
             cpuPercent = emptyList(),
             rssMb = emptyList(),
             availMb = emptyList(),
+            gpuPercent = emptyList(),
             baselineRssMb = 0,
             totalRamMb = 0,
             cores = 1,
@@ -225,6 +246,7 @@ class ResourceRecorder(private val capabilities: DeviceCapabilities) {
         private val cpu = mutableListOf<Int>()
         private val rss = mutableListOf<Int>()
         private val avail = mutableListOf<Int>()
+        private val gpu = mutableListOf<Int>()
 
         private val _live = MutableStateFlow(ResourceTrace.EMPTY)
         override val live: StateFlow<ResourceTrace> = _live.asStateFlow()
@@ -261,6 +283,7 @@ class ResourceRecorder(private val capabilities: DeviceCapabilities) {
             cpu += (cpuDelta * 100 / wallDelta / cores).toInt().coerceIn(0, 100)
             rss += (readRssBytes() / ResourceTrace.BYTES_PER_MB).toInt()
             avail += (capabilities.availableRamBytes / ResourceTrace.BYTES_PER_MB).toInt()
+            readGpuBusyPercent()?.let { gpu += it }
 
             if (cpu.size > MAX_TRACE_POINTS) decimate()
         }
@@ -275,6 +298,7 @@ class ResourceRecorder(private val capabilities: DeviceCapabilities) {
             cpu.replaceWith(halved.cpuPercent)
             rss.replaceWith(halved.rssMb)
             avail.replaceWith(halved.availMb)
+            gpu.replaceWith(halved.gpuPercent)
             intervalMillis = halved.intervalMillis
         }
 
@@ -290,6 +314,7 @@ class ResourceRecorder(private val capabilities: DeviceCapabilities) {
             cpuPercent = cpu.toList(),
             rssMb = rss.toList(),
             availMb = avail.toList(),
+            gpuPercent = gpu.toList(),
             baselineRssMb = baselineRssMb,
             totalRamMb = totalRamMb,
             cores = cores,
@@ -317,5 +342,33 @@ class ResourceRecorder(private val capabilities: DeviceCapabilities) {
         val PAGE_SIZE: Long = runCatching { android.system.Os.sysconf(android.system.OsConstants._SC_PAGESIZE) }
             .getOrDefault(4096L)
             .takeIf { it > 0 } ?: 4096L
+
+        /**
+         * Adreno's own busy counter, in the only place an app can read it.
+         *
+         * `gpubusy` holds two microsecond figures — busy and total — accumulated
+         * *since the last read*, and reading resets them. That makes it exactly
+         * a utilisation over the sampling interval, and also means two readers
+         * would steal each other's numbers; there is one sampler in this process
+         * and it is the only thing here that opens the file.
+         *
+         * `/sys/class/kgsl` is unreadable to `adb shell` on this device and
+         * readable to the app, which is the reverse of the usual arrangement and
+         * worth writing down — the check that matters is the one run as the app.
+         *
+         * Null on a device with no Adreno, no counter, or no permission: the
+         * series stays empty and the graph says the GPU was not measured rather
+         * than drawing a flat zero.
+         */
+        fun readGpuBusyPercent(): Int? = runCatching {
+            val parts = java.io.File(GPU_BUSY_PATH).readText().trim().split(WHITESPACE)
+            val busy = parts[0].toLong()
+            val total = parts[1].toLong()
+            if (total <= 0L) null else (busy * 100 / total).toInt().coerceIn(0, 100)
+        }.getOrNull()
+
+        const val GPU_BUSY_PATH = "/sys/class/kgsl/kgsl-3d0/gpubusy"
+
+        private val WHITESPACE = Regex("""\s+""")
     }
 }

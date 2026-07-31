@@ -232,6 +232,7 @@ class SettingsViewModel @Inject constructor(
     private val capabilities: DeviceCapabilities,
     private val storage: ModelStorage,
     private val paramRepository: ParamRepository,
+    private val registry: ai.ondevice.engine.RuntimeRegistry,
 ) : ViewModel() {
 
     val settings: StateFlow<SettingsState> = combine(
@@ -240,6 +241,10 @@ class SettingsViewModel @Inject constructor(
     ) { backend, wifiOnly ->
         SettingsState(
             backendMode = backend,
+            // Asked of the runtime, not of the manifest: a backend compiled in
+            // still needs a driver behind it, and the settings list is exactly
+            // where that difference has to show.
+            availableBackends = registry.backendsFor(ai.ondevice.engine.RuntimeRegistry.LLAMA),
             wifiOnly = wifiOnly,
             hasToken = tokens.hasToken,
             maskedToken = tokens.maskedToken(),
@@ -314,7 +319,9 @@ class SettingsViewModel @Inject constructor(
 }
 
 data class SettingsState(
-    val backendMode: String = AppPrefs.BACKEND_AUTO,
+    val backendMode: String = ai.ondevice.core.BackendId.CPU.name,
+    /** What ggml registered here — the rest are shown, dimmed, and inert. */
+    val availableBackends: List<ai.ondevice.core.BackendId> = emptyList(),
     val wifiOnly: Boolean = true,
     val hasToken: Boolean = false,
     val maskedToken: String? = null,

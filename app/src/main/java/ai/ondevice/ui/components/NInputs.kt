@@ -142,9 +142,15 @@ fun NRadio(
     selected: Boolean,
     onSelect: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * A choice that exists but cannot be taken here — shown, dimmed, inert.
+     * Removing the row instead would answer a different question: absent reads
+     * as "no such option", where the truth is usually "not on this device".
+     */
+    enabled: Boolean = true,
 ) {
     Row(
-        modifier = modifier.selectable(selected = selected, onClick = onSelect),
+        modifier = modifier.selectable(selected = selected, enabled = enabled, onClick = onSelect),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -157,7 +163,11 @@ fun NRadio(
         ) {
             if (selected) Box(Modifier.size(8.dp).background(NocturneColors.Bg, CircleShape))
         }
-        Text(label, style = NocturneType.Input)
+        Text(
+            label,
+            style = NocturneType.Input,
+            color = if (enabled) NocturneColors.Text else NocturneColors.TextMuted,
+        )
     }
 }
 

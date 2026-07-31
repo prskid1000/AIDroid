@@ -87,7 +87,22 @@ class EngineManager(
             if (engine.isLoaded) engine.unload()
 
             val backend = resolveBackend(model)
-            val params = SparseParams.parse(model.paramOverridesJson).overlaidWith(paramOverrides)
+            // The device choice, turned into the one number llama.cpp acts on.
+            //
+            // Registering a GPU backend does nothing by itself: llama.cpp puts
+            // every layer on the CPU unless `n_gpu_layers` says otherwise, so
+            // without this the setting would change a badge and nothing else.
+            // 999 means "all of them" upstream — it clamps to the model's layer
+            // count — and a GPU that cannot hold them falls back per layer,
+            // which is the hybrid split rather than a failure.
+            //
+            // An explicit per-model override still wins: someone who has typed
+            // a number into the parameter screen has said something more
+            // specific than the global setting, and this is applied first so
+            // that overlay can overwrite it.
+            val params = SparseParams.of("n_gpu_layers" to if (backend == BackendId.CPU) 0 else 999)
+                .overlaidWith(SparseParams.parse(model.paramOverridesJson))
+                .overlaidWith(paramOverrides)
 
             val result = engine.load(
                 LoadRequest(
@@ -115,34 +130,28 @@ class EngineManager(
     }
 
     /**
-     * Backend selection: an explicit per-model override wins, then the global
-     * setting, then the first backend the installed runtime registered.
+     * Which device runs this model: a per-model override, else the setting.
      *
-     * Both preferences are clamped to what the runtime actually has. This used
-     * to end in a bare `return BackendId.OPENCL`, and since the value is what
-     * the Chat header reads, the badge said "OpenCL" on a build with no GPU
-     * backend compiled in at all — runtimes.json honestly reports ["CPU"], and
-     * whisper_jni sets `use_gpu = false` for the same reason. A cosmetic lie,
-     * but an expensive one: it sent a plain-CPU slowness straight at the GPU.
+     * Both are clamped to what the runtime actually registered, and the clamp is
+     * the load-bearing part. This used to end in a bare `return
+     * BackendId.OPENCL`, and since the value is what the Chat header reads, the
+     * badge said OpenCL on a build with no GPU backend compiled in at all —
+     * a cosmetic lie, but an expensive one, because it sent plain CPU slowness
+     * straight at the GPU.
      *
-     * The middle step used to be a stored benchmark result. That measurement was
-     * the right instinct — §8.2 says not to assume backend performance — but a
-     * measurement over a one-element set is not a measurement. With ["CPU"]
-     * registered, the benchmark ran CPU against itself, wrote one row, and the
-     * selection then "chose" the only candidate. Falling back to the first
-     * registered backend says the same thing without the ceremony, and the day a
-     * GPU backend is compiled in is the day measuring is worth rebuilding.
+     * There is no "auto" step in the middle any more. It was a benchmark once,
+     * which compared CPU with itself because one backend was registered, and
+     * then "the first registered backend", which is an ordering rather than a
+     * choice. Now that more than one device can register, the setting is a real
+     * question with a real answer, and the answer is the user's.
      */
     private suspend fun resolveBackend(model: ModelEntity): BackendId {
         val available = registry.backendsFor(RuntimeRegistry.LLAMA)
         fun clamp(backend: BackendId) = backend.takeIf { it in available } ?: BackendId.CPU
 
         model.backendOverride?.let { return clamp(it) }
-        val mode = prefs.backendMode.first()
-        if (mode != AppPrefs.BACKEND_AUTO) {
-            runCatching { BackendId.valueOf(mode) }.getOrNull()?.let { return clamp(it) }
-        }
-        return available.firstOrNull() ?: BackendId.CPU
+        val chosen = runCatching { BackendId.valueOf(prefs.backendMode.first()) }.getOrNull()
+        return clamp(chosen ?: BackendId.CPU)
     }
 
     /**

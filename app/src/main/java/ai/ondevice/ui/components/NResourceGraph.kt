@@ -91,6 +91,27 @@ fun ResourceGraph(
             )
         }
 
+        // The GPU, on the same 0–100 axis as the CPU, because the whole point
+        // of drawing them together is that they trade against each other: a run
+        // that moved onto the GPU shows one line fall as the other rises, and
+        // two different axes would hide exactly that. Dashed rather than filled
+        // — two filled areas stacked read as a total, and these overlap.
+        series(trace.gpuPercent, floor = 0, ceiling = 100)?.let { points ->
+            drawPath(
+                path = Path().apply {
+                    moveTo(points.first().x, points.first().y)
+                    points.drop(1).forEach { lineTo(it.x, it.y) }
+                },
+                color = NocturneColors.Accent500,
+                style = Stroke(
+                    width = 1.6.dp.toPx(),
+                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
+                        floatArrayOf(6f, 4f),
+                    ),
+                ),
+            )
+        }
+
         // Memory is a level, not a quantity of work, so it is a line and never
         // a fill — nothing meaningful sits underneath it.
         series(trace.rssMb, floor = trace.floorRssMb, ceiling = trace.peakRssMb)?.let { points ->
@@ -159,7 +180,8 @@ fun ResourceBlock(
             )
             Text(
                 if (live) {
-                    "CPU ${trace.cpuPercent.lastOrNull() ?: 0}% · " +
+                    "CPU ${trace.cpuPercent.lastOrNull() ?: 0}%" +
+                        (trace.gpuPercent.lastOrNull()?.let { " · GPU $it%" } ?: "") + " · " +
                         "RAM ${Fmt.bytes(trace.rssMb.lastOrNull().orZeroMb())}"
                 } else {
                     "CPU ${trace.peakCpuPercent}% peak · RAM ${Fmt.bytes(trace.peakRssBytes)} peak"
@@ -189,6 +211,11 @@ fun ResourceDetail(trace: ResourceTrace, modifier: Modifier = Modifier) {
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             GraphLegend("CPU", "0–100%", NocturneColors.Accent)
+            if (trace.gpuPercent.isNotEmpty()) {
+                // "device" because the counter is: the kernel counts every
+                // client of the GPU, this app included but not only.
+                GraphLegend("GPU", "device 0–100%", NocturneColors.Accent500)
+            }
             val floor = Fmt.bytes(trace.floorRssMb.toLong() * ResourceTrace.BYTES_PER_MB)
             val peak = Fmt.bytes(trace.peakRssBytes)
             // "2.50 GB–2.50 GB" is a range that is not one. A run whose memory
@@ -209,6 +236,8 @@ fun ResourceDetail(trace: ResourceTrace, modifier: Modifier = Modifier) {
                     "device free" to "${Fmt.bytes(trace.minAvailMb.toLong() * ResourceTrace.BYTES_PER_MB)} " +
                         "of ${Fmt.bytes(trace.totalRamMb.toLong() * ResourceTrace.BYTES_PER_MB)}",
                 )
+                trace.peakGpuPercent?.let { add("gpu peak" to "$it% device-wide") }
+                trace.meanGpuPercent?.let { add("gpu mean" to "$it%") }
                 add("sampled" to "${trace.cpuPercent.size} × ${trace.intervalMillis} ms")
             }
             rows.forEach { (key, value) ->
