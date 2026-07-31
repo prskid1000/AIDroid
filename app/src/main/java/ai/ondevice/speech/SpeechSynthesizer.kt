@@ -94,6 +94,10 @@ class SpeechSynthesizer(
 
     val omniVoiceReady: Boolean get() = omniVoice.runtimeAvailable && omniVoiceDirectory != null
 
+    /** Whether the installed OmniVoice can copy a voice from a recording. */
+    val omniVoiceCloningReady: Boolean
+        get() = omniVoiceReady && omniVoiceDirectory?.let { omniVoice.cloningLooksInstalled(it) } == true
+
     /** Kokoro's voices, marked available only if this build can speak them. */
     fun kokoroVoices(): List<SynthVoice> = KokoroVoices.catalogue(available = kokoroReady)
 
@@ -395,6 +399,7 @@ class SpeechSynthesizer(
                 classTemperature = request.classTemperature
                     ?: OmniVoiceEngine.DEFAULT_CLASS_TEMPERATURE,
                 seed = request.seed,
+                reference = request.voiceReference,
             ),
         ).map { audio ->
             // OmniVoice has no gain input either, so volume is applied here for
@@ -589,6 +594,14 @@ data class SpeechRequest(
     val classTemperature: Float? = null,
     /** 0 picks a fresh seed per run; anything else makes the run repeatable. */
     val seed: Long = 0L,
+    /**
+     * OmniVoice only: a recording to copy the voice from, with what it said.
+     *
+     * Kokoro ignores it because it cannot do anything with it — its voice comes
+     * from a fixed pack, and silently accepting a reference it will not use
+     * would be the substitution this class exists to avoid.
+     */
+    val voiceReference: ai.ondevice.speech.VoiceReference? = null,
 ) {
     val isKokoro: Boolean get() = provider == SynthProvider.KOKORO
 }

@@ -773,6 +773,7 @@ class VoiceViewModel @Inject constructor(
             systemEngineAvailable = system.isNotEmpty(),
             kokoroAvailable = synthesizer.kokoroReady,
             omniVoiceAvailable = synthesizer.omniVoiceReady,
+            cloningAvailable = synthesizer.omniVoiceCloningReady,
             // Default to something that can actually speak right now.
             voice = _state.value.voice.takeIf { id -> all.any { it.id == id && it.available } }
                 ?: all.firstOrNull { it.available }?.id
@@ -1059,6 +1060,97 @@ class VoiceViewModel @Inject constructor(
             positionTemperature = _state.value.omniPositionTemperature,
             classTemperature = _state.value.omniClassTemperature,
             seed = _state.value.omniSeed.toLong(),
+            voiceReference = _state.value.referenceSamples?.let { samples ->
+                ai.ondevice.speech.VoiceReference(
+                    samples = samples,
+                    sampleRate = REFERENCE_SAMPLE_RATE,
+                    transcript = _state.value.referenceTranscript.takeIf { it.isNotBlank() },
+                )
+            },
+        )
+    }
+
+    /**
+     * Take a recording as the voice to copy.
+     *
+     * Decoded straight away rather than kept as a path: a content URI may not
+     * still be readable when Speak is pressed, and decoding now is what lets the
+     * screen say how long the clip is before anyone commits a minute of compute
+     * to it.
+     */
+    fun useReferenceClip(uri: android.net.Uri) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(speakError = null)
+            // Copied in the same way an attachment is: a content URI granted to
+            // the picker is not guaranteed to still be readable by the time
+            // Speak is pressed.
+            val attachment = attachments.copyIn(uri)
+            if (attachment == null) {
+                _state.value = _state.value.copy(speakError = "That recording could not be read.")
+                return@launch
+            }
+            val file = java.io.File(attachment.path)
+            val decoded = transcriber.decodeAudio(file, REFERENCE_SAMPLE_RATE)
+            decoded.onFailure {
+                _state.value = _state.value.copy(
+                    speakError = it.message ?: "That recording could not be decoded.",
+                )
+                return@launch
+            }
+            val samples = decoded.getOrThrow()
+            val seconds = samples.size.toFloat() / REFERENCE_SAMPLE_RATE
+            _state.value = _state.value.copy(
+                referenceSamples = samples,
+                referenceName = attachment.displayName,
+                referenceSeconds = seconds,
+                referenceTranscript = "",
+            )
+            transcribeReference(samples)
+        }
+    }
+
+    /**
+     * Fill in what the reference says, using the speech model already installed.
+     *
+     * Upstream transcribes the clip when no transcript is given, for the reason
+     * the engine's own comment gives: cloning is continuation, so the model
+     * needs the reference's words as well as its sound. Doing it here means the
+     * user usually does not have to type them — but it is only a first guess,
+     * and the field stays editable because whisper will get names and unusual
+     * words wrong and those are exactly the words worth fixing.
+     */
+    private suspend fun transcribeReference(samples: FloatArray) {
+        val speech = db.models().observeInstalledByModality(Modality.SPEECH_TO_TEXT).first()
+            .firstOrNull() ?: return
+        _state.value = _state.value.copy(transcribingReference = true)
+        val text = runCatching {
+            if (transcriber.loadedModelId != speech.id) {
+                transcriber.load(
+                    speech.id, speech.localPath, SparseParams.parse(speech.paramOverridesJson),
+                ).getOrThrow()
+            }
+            // The engine wants 24 kHz and whisper wants 16, so this is decoded
+            // twice rather than resampled between them.
+            transcriber.transcribeSamples(samples, REFERENCE_SAMPLE_RATE)
+                .getOrThrow().joinToString(" ") { it.text }.trim()
+        }.getOrDefault("")
+        _state.value = _state.value.copy(
+            transcribingReference = false,
+            referenceTranscript = text,
+        )
+    }
+
+    fun setReferenceTranscript(text: String) {
+        _state.value = _state.value.copy(referenceTranscript = text)
+    }
+
+    fun clearReferenceClip() {
+        _state.value = _state.value.copy(
+            referenceSamples = null,
+            referenceName = "",
+            referenceSeconds = 0f,
+            referenceTranscript = "",
+            transcribingReference = false,
         )
     }
 
@@ -1320,6 +1412,12 @@ enum class SpeakSource(val label: String) { TYPED("Type"), FILE("File") }
 /** One bar per read of the input buffer, sized to the canvas' waveform. */
 private const val WAVEFORM_BARS = 40
 
+/**
+ * A reference clip is decoded at the rate OmniVoice works in, so nothing has to
+ * guess later what a bare FloatArray is.
+ */
+private const val REFERENCE_SAMPLE_RATE = ai.ondevice.speech.OmniVoiceEngine.SAMPLE_RATE
+
 data class PartialSegment(val text: String, val confidence: Float)
 
 data class VoiceState(
@@ -1353,6 +1451,21 @@ data class VoiceState(
         ai.ondevice.speech.OmniVoiceEngine.DEFAULT_CLASS_TEMPERATURE,
     /** 0 picks a fresh seed per run; anything else makes the run repeatable. */
     val omniSeed: Int = 0,
+    /**
+     * The reference clip a clone copies, once decoded, and what it said.
+     *
+     * Held as samples rather than a path because the file may be a content URI
+     * the app cannot re-open later, and because decoding it once is the point
+     * at which its length can be checked and reported.
+     */
+    val referenceSamples: FloatArray? = null,
+    val referenceName: String = "",
+    val referenceSeconds: Float = 0f,
+    val referenceTranscript: String = "",
+    /** True while whisper is working out what the reference says. */
+    val transcribingReference: Boolean = false,
+    /** Whether this OmniVoice install has the encoders a clone needs. */
+    val cloningAvailable: Boolean = false,
     val ttsModels: List<ModelEntity> = emptyList(),
     /**
      * Which engine can run each voice model, keyed by model id.

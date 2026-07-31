@@ -64,6 +64,17 @@ class OmniVoiceEngine {
     private var decoder: OrtSession? = null
     private var heads: OrtSession? = null
     private var vocoder: OrtSession? = null
+
+    /**
+     * The encode half of the Higgs audio tokenizer, for voice cloning.
+     *
+     * Optional rather than required: they are 328 MB and only a clone needs
+     * them, so an install without them still speaks. [supportsCloning] is what
+     * a screen asks before offering the feature.
+     */
+    private var acousticEncoder: OrtSession? = null
+    private var semanticEncoder: OrtSession? = null
+    private var quantizer: OrtSession? = null
     private var tokenizer: QwenTokenizer? = null
     private var pastNames: List<String> = emptyList()
     private var describedGraphs = false
@@ -92,6 +103,139 @@ class OmniVoiceEngine {
 
     val isLoaded: Boolean get() = decoder != null
 
+    /** Whether this install carries the encoders a reference clip needs. */
+    val supportsCloning: Boolean
+        get() = acousticEncoder != null && semanticEncoder != null && quantizer != null
+
+    /**
+     * A reference clip, as the eight codebooks the backbone reads.
+     *
+     * [samples] is mono at [SAMPLE_RATE]. The two encoders disagree about rate —
+     * acoustic wants 24 kHz and semantic 16 kHz — so the resample happens here
+     * rather than being the caller's problem, and they can disagree by a frame
+     * at the tail, which the quantizer will not accept.
+     */
+    private fun encodeReference(samples: FloatArray): Array<LongArray> {
+        val env = environment ?: OrtEnvironment.getEnvironment()
+        val acoustic = acousticEncoder!!
+        val semantic = semanticEncoder!!
+        val quant = quantizer!!
+
+        // Whole frames only; a partial one has no codes to be.
+        val usable = samples.size - samples.size % SAMPLES_PER_FRAME
+        check(usable >= SAMPLES_PER_FRAME) {
+            "The reference clip is shorter than one ${SAMPLES_PER_FRAME * 1000 / SAMPLE_RATE} ms frame."
+        }
+        val trimmed = samples.copyOf(usable)
+        val resampled = resample(trimmed, SAMPLE_RATE, SEMANTIC_SAMPLE_RATE)
+
+        val closeables = mutableListOf<OnnxTensor>()
+        try {
+            fun feed(session: OrtSession, name: String, data: FloatArray, shape: LongArray): OnnxTensor {
+                val type = typeOf(session, name)
+                return if (type == OnnxJavaType.FLOAT16) {
+                    val shorts = java.nio.ShortBuffer.allocate(data.size)
+                    data.forEach { shorts.put(floatToHalf(it)) }
+                    shorts.rewind()
+                    OnnxTensor.createTensor(env, shorts, shape, OnnxJavaType.FLOAT16)
+                } else {
+                    OnnxTensor.createTensor(env, FloatBuffer.wrap(data), shape)
+                }.also(closeables::add)
+            }
+
+            val acousticIn = feed(
+                acoustic, "waveform_24k", trimmed, longArrayOf(1, 1, usable.toLong()),
+            )
+            val semanticIn = feed(
+                semantic, "waveform_16k", resampled, longArrayOf(1, resampled.size.toLong()),
+            )
+
+            acoustic.run(mapOf("waveform_24k" to acousticIn)).use { acousticOut ->
+                semantic.run(mapOf("waveform_16k" to semanticIn)).use { semanticOut ->
+                    val acousticFeatures = acousticOut.pick("acoustic_features")
+                    val semanticFeatures = semanticOut.pick("semantic_features")
+                    val frames = minOf(
+                        acousticFeatures.info.shape.last(), semanticFeatures.info.shape.last(),
+                    ).toInt()
+
+                    val quantType = typeOf(quant, "semantic_features")
+                    val inputs = mapOf(
+                        "acoustic_features" to trimFrames(
+                            env, acousticFeatures, frames, typeOf(quant, "acoustic_features"),
+                        ).also(closeables::add),
+                        "semantic_features" to trimFrames(
+                            env, semanticFeatures, frames, quantType,
+                        ).also(closeables::add),
+                    )
+                    quant.run(inputs).use { coded ->
+                        val codes = coded.pick("codes")
+                        // [codebooks, batch, frames], batch of one.
+                        val flat = codes.longBuffer
+                        val values = LongArray(flat.remaining()).also(flat::get)
+                        return Array(CODEBOOKS) { cb ->
+                            LongArray(frames) { f -> values[cb * frames + f] }
+                        }
+                    }
+                }
+            }
+        } finally {
+            closeables.forEach { runCatching { it.close() } }
+        }
+    }
+
+    /**
+     * `[batch, channels, frames]` cut to [frames] and converted to [target].
+     *
+     * The cut is why this exists: at 25 frames a second from two different
+     * sample rates the encoders can differ by one frame, and the quantizer
+     * multiplies them together.
+     */
+    private fun trimFrames(
+        env: OrtEnvironment,
+        tensor: OnnxTensor,
+        frames: Int,
+        target: OnnxJavaType,
+    ): OnnxTensor {
+        val shape = tensor.info.shape
+        val channels = shape[1].toInt()
+        val sourceFrames = shape[2].toInt()
+        val source = readFloats(tensor)
+        val cut = FloatArray(channels * frames)
+        for (c in 0 until channels) {
+            System.arraycopy(source, c * sourceFrames, cut, c * frames, frames)
+        }
+        val cutShape = longArrayOf(1, channels.toLong(), frames.toLong())
+        return if (target == OnnxJavaType.FLOAT16) {
+            val shorts = java.nio.ShortBuffer.allocate(cut.size)
+            cut.forEach { shorts.put(floatToHalf(it)) }
+            shorts.rewind()
+            OnnxTensor.createTensor(env, shorts, cutShape, OnnxJavaType.FLOAT16)
+        } else {
+            OnnxTensor.createTensor(env, FloatBuffer.wrap(cut), cutShape)
+        }
+    }
+
+    /**
+     * Linear resampling.
+     *
+     * Good enough because of what it feeds: the semantic encoder is a speech
+     * model reading 16 kHz, and the artefacts linear interpolation adds sit
+     * above 8 kHz where it has nothing to hear. A polyphase filter would be
+     * more correct and no more accurate here.
+     */
+    private fun resample(samples: FloatArray, from: Int, to: Int): FloatArray {
+        if (from == to || samples.isEmpty()) return samples
+        val length = (samples.size.toLong() * to / from).toInt()
+        val ratio = from.toDouble() / to
+        return FloatArray(length) { i ->
+            val position = i * ratio
+            val left = position.toInt()
+            val right = (left + 1).coerceAtMost(samples.size - 1)
+            val fraction = (position - left).toFloat()
+            samples[left] * (1f - fraction) + samples[right] * fraction
+        }
+    }
+
     val runtimeAvailable: Boolean get() = ONNX_AVAILABLE
 
     /**
@@ -104,6 +248,16 @@ class OmniVoiceEngine {
      */
     fun looksInstalled(directory: File): Boolean =
         REQUIRED.all { find(directory, it) != null }
+
+    /**
+     * Whether a directory also carries the encoders a voice clone needs.
+     *
+     * Asked of the files rather than of [supportsCloning], because a screen has
+     * to decide whether to offer the feature before anything is loaded, and
+     * loading is a minute of work.
+     */
+    fun cloningLooksInstalled(directory: File): Boolean =
+        CLONING.all { find(directory, it) != null }
 
     suspend fun load(directory: File, threads: Int = 0): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
@@ -140,11 +294,25 @@ class OmniVoiceEngine {
                 val head = open(files.getValue(HEADS))
                 val voc = open(files.getValue(VOCODER))
 
+                // Cloning is all-or-nothing — one encoder short and the
+                // quantizer has nothing to pair — so the three are opened
+                // together or not at all. A failure here is not a failure to
+                // load the model; it costs the clone, not the voice.
+                val cloningGraphs = runCatching {
+                    CLONING.map { open(find(directory, it) ?: error("$it is missing")) }
+                }.getOrElse {
+                    android.util.Log.i("OmniVoice", "no voice cloning: ${it.message}")
+                    emptyList()
+                }
+
                 environment = env
                 embeddings = emb
                 decoder = llm
                 this@OmniVoiceEngine.heads = head
                 vocoder = voc
+                acousticEncoder = cloningGraphs.getOrNull(0)
+                semanticEncoder = cloningGraphs.getOrNull(1)
+                quantizer = cloningGraphs.getOrNull(2)
                 tokenizer = loadedTokenizer
                 // 28 layers × key and value. Read from the graph rather than
                 // assumed, so a re-export with a different depth still runs.
@@ -232,11 +400,15 @@ class OmniVoiceEngine {
     suspend fun unload() = mutex.withLock { unlockedUnload() }
 
     private fun unlockedUnload() {
-        listOf(embeddings, decoder, heads, vocoder).forEach { runCatching { it?.close() } }
+        listOf(embeddings, decoder, heads, vocoder, acousticEncoder, semanticEncoder, quantizer)
+            .forEach { runCatching { it?.close() } }
         embeddings = null
         decoder = null
         heads = null
         vocoder = null
+        acousticEncoder = null
+        semanticEncoder = null
+        quantizer = null
         tokenizer = null
         pastNames = emptyList()
         fourDimensionalMask = false
@@ -253,10 +425,43 @@ class OmniVoiceEngine {
                 val text = request.text.trim()
                 check(text.isNotEmpty()) { "There is nothing to say." }
 
-                val textTokens = buildPrompt(tok, text, request.language, request.instruction)
+                val reference = request.reference
+                if (reference != null) {
+                    check(supportsCloning) {
+                        "This OmniVoice install cannot clone a voice: it is missing the three " +
+                            "encoder graphs that turn a recording into audio tokens. Reinstalling " +
+                            "the model adds them; the voice you describe in words still works."
+                    }
+                }
+
+                val textTokens = buildPrompt(
+                    tok, text, request.language, request.instruction,
+                    referenceText = reference?.transcript,
+                    cloning = reference != null,
+                )
                 check(textTokens.isNotEmpty()) { "That text produced no tokens." }
 
                 val frames = request.frames ?: estimateFrames(text, request.speed)
+
+                // Lift a quiet reference to a working level before encoding, and
+                // remember by how much so the generated audio can be put back
+                // down to match. Doing only the first half makes a clone of a
+                // softly-spoken voice come out loud.
+                var referenceLoudness = 0f
+                val referenceCodes = reference?.let {
+                    val prepared = if (it.sampleRate == SAMPLE_RATE) it.samples
+                    else resample(it.samples, it.sampleRate, SAMPLE_RATE)
+                    check(prepared.isNotEmpty()) { "The reference recording is empty." }
+                    referenceLoudness = kotlin.math.sqrt(
+                        prepared.fold(0.0) { sum, s -> sum + s.toDouble() * s } / prepared.size,
+                    ).toFloat()
+                    val levelled = if (referenceLoudness > 0f && referenceLoudness < QUIET_RMS) {
+                        FloatArray(prepared.size) { i -> prepared[i] * QUIET_RMS / referenceLoudness }
+                    } else {
+                        prepared
+                    }
+                    mutex.withLock { encodeReference(levelled) }
+                }
 
                 // Measured once per load, before spending a minute of compute on
                 // a grid the backbone cannot unmask.
@@ -273,8 +478,14 @@ class OmniVoiceEngine {
                         "would work; nothing is wrong with your download or this device."
                 }
 
-                val codes = mutex.withLock { unmask(textTokens, frames, request) }
-                val samples = mutex.withLock { decodeToWaveform(codes, frames) }
+                val codes = mutex.withLock { unmask(textTokens, referenceCodes, frames, request) }
+                val decoded = mutex.withLock { decodeToWaveform(codes, frames) }
+                // Put the clone back to the reference's own level.
+                val samples = if (referenceLoudness > 0f && referenceLoudness < QUIET_RMS) {
+                    FloatArray(decoded.size) { i -> decoded[i] * referenceLoudness / QUIET_RMS }
+                } else {
+                    decoded
+                }
 
                 KokoroAudio(
                     samples = if (request.trimSilence) trimTail(samples) else samples,
@@ -322,12 +533,26 @@ class OmniVoiceEngine {
         text: String,
         language: String?,
         instruction: String?,
+        referenceText: String?,
+        cloning: Boolean,
     ): IntArray {
         val style = buildString {
+            // Only ever with a reference clip — upstream emits it nowhere else.
+            if (cloning) append("<|denoise|>")
             append("<|lang_start|>").append(language ?: "None").append("<|lang_end|>")
             append("<|instruct_start|>").append(instruction ?: "None").append("<|instruct_end|>")
         }
-        return tok.encodeWithMarkup(style) + tok.encodeWithMarkup("<|text_start|>$text<|text_end|>")
+        // Cloning is continuation rather than conditioning: the reference
+        // transcript goes in front of the text as one sentence, so the model
+        // reads what the reference said and carries straight on into the new
+        // words. That is also why a clone needs a transcript and not just audio.
+        val combined = if (!referenceText.isNullOrBlank()) {
+            referenceText.trim() + " " + text.trim()
+        } else {
+            text.trim()
+        }
+        return tok.encodeWithMarkup(style) +
+            tok.encodeWithMarkup("<|text_start|>$combined<|text_end|>")
     }
 
     // — the unmasking loop —
@@ -370,12 +595,18 @@ class OmniVoiceEngine {
      */
     private suspend fun unmask(
         textTokens: IntArray,
+        referenceCodes: Array<LongArray>?,
         frames: Int,
         request: OmniVoiceRequest,
     ): Array<LongArray> {
         val steps = request.steps.coerceIn(1, MAX_STEPS)
         val textLength = textTokens.size
-        val condSequence = textLength + frames
+        // A reference clip sits between the text and the grid as real codes the
+        // model can see. It is context, never a target, so the grid it fills is
+        // the same size either way and only the sequence in front of it grows.
+        val referenceLength = referenceCodes?.firstOrNull()?.size ?: 0
+        val gridStart = textLength + referenceLength
+        val condSequence = gridStart + frames
         val slots = CODEBOOKS * frames
 
         // The grid being filled, [codebook][frame]. Everything starts masked.
@@ -388,12 +619,17 @@ class OmniVoiceEngine {
             if (request.seed != 0L) request.seed else System.nanoTime(),
         )
 
-        // The conditional branch: text, then the grid. Only the grid half is
-        // rewritten between steps, so the text is laid in once.
+        // The conditional branch: text, the reference if there is one, then the
+        // grid. Only the grid is rewritten between steps, so everything in front
+        // of it is laid in once.
         val condIds = Array(CODEBOOKS) { LongArray(condSequence) }
         for (cb in 0 until CODEBOOKS) {
             for (i in 0 until textLength) condIds[cb][i] = textTokens[i].toLong()
+            referenceCodes?.get(cb)?.copyInto(condIds[cb], textLength)
         }
+        // Audio starts where the text ends, which puts the reference on the
+        // audio side of the line — it is sound the model hears, not words it
+        // reads, and the transcript in the text is what tells it what was said.
         val condAudio = BooleanArray(condSequence) { it >= textLength }
         val condAttention = LongArray(condSequence) { 1L }
         // The unconditional branch is the grid alone — not the same sequence
@@ -412,7 +648,7 @@ class OmniVoiceEngine {
             if (take <= 0) continue
             currentCoroutineContext().ensureActive()
 
-            for (cb in 0 until CODEBOOKS) tokens[cb].copyInto(condIds[cb], textLength)
+            for (cb in 0 until CODEBOOKS) tokens[cb].copyInto(condIds[cb], gridStart)
             val conditional = forward(condIds, condAudio, condAttention, condSequence)
             val unconditional = if (request.guidance != 0f) {
                 forward(tokens, uncondAudio, uncondAttention, frames)
@@ -431,7 +667,7 @@ class OmniVoiceEngine {
                     }
                     predicted[slot] = scoreSlot(
                         conditional = conditional,
-                        condBase = ((cb.toLong() * condSequence + (textLength + f)) * AUDIO_VOCAB).toInt(),
+                        condBase = ((cb.toLong() * condSequence + (gridStart + f)) * AUDIO_VOCAB).toInt(),
                         unconditional = unconditional,
                         uncondBase = ((cb.toLong() * frames + f) * AUDIO_VOCAB).toInt(),
                         guidance = request.guidance,
@@ -938,6 +1174,25 @@ class OmniVoiceEngine {
         private const val SILENCE_FRACTION = 0.02f
         private const val TWO_POW_NEG_24 = 5.9604645e-8f
 
+        /**
+         * The encode half of the audio tokenizer, in the order they chain:
+         * waveform to acoustic features, waveform to semantic features, both to
+         * codes. Not in [REQUIRED] — an install without them still speaks.
+         */
+        private val CLONING = listOf(
+            "acoustic_encoder.onnx", "semantic_encoder.onnx", "quantizer_encoder.onnx",
+        )
+
+        /** What the semantic encoder wants, where everything else is at 24 kHz. */
+        const val SEMANTIC_SAMPLE_RATE = 16_000
+
+        /**
+         * Below this, upstream lifts a reference clip to a working level and
+         * puts the generated audio back down to match afterwards. Doing only
+         * the first half makes every clone of a quiet voice come out loud.
+         */
+        private const val QUIET_RMS = 0.1f
+
         private const val EMBEDDINGS = "audio_embeddings_encoder.onnx"
         private const val DECODER = "llm_decoder.onnx"
         private const val HEADS = "audio_heads_decoder.onnx"
@@ -1000,4 +1255,35 @@ data class OmniVoiceRequest(
     val classTemperature: Float = OmniVoiceEngine.DEFAULT_CLASS_TEMPERATURE,
     /** Zero picks a fresh one per run; anything else makes the run repeatable. */
     val seed: Long = 0L,
+    /** A voice to copy, or null for the one the instruction describes. */
+    val reference: VoiceReference? = null,
 )
+
+/**
+ * A recording to copy the voice from, and what was said in it.
+ *
+ * The transcript is not optional in the way it looks. Cloning is continuation:
+ * the model is given the reference's words *and* its sound, and asked to keep
+ * going. Without the words it has audio it cannot account for, and the
+ * generated speech drifts to fit whatever it assumes was said. Three to ten
+ * seconds is upstream's recommendation; beyond twenty it warns that quality
+ * falls off as well as speed.
+ */
+data class VoiceReference(
+    /** Mono, any rate — resampled to the model's 24 kHz on the way in. */
+    val samples: FloatArray,
+    val sampleRate: Int,
+    val transcript: String?,
+) {
+    // FloatArray gives data classes reference equality, which for a few seconds
+    // of audio is both what we want and cheap. Spelled out because the generated
+    // versions would compare arrays by identity silently.
+    override fun equals(other: Any?): Boolean =
+        this === other || (other is VoiceReference &&
+            samples === other.samples &&
+            sampleRate == other.sampleRate &&
+            transcript == other.transcript)
+
+    override fun hashCode(): Int =
+        (System.identityHashCode(samples) * 31 + sampleRate) * 31 + (transcript?.hashCode() ?: 0)
+}

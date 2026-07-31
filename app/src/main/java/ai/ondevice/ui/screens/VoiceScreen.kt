@@ -117,6 +117,14 @@ fun VoiceScreen(
     ) { uri -> uri?.let(viewModel::transcribeFile) }
     val pickAudio = { audioLauncher.launch(arrayOf("audio/*", "video/*")) }
 
+    // A separate launcher from the one above: both take a recording, but one is
+    // audio to read out and the other is a voice to copy, and routing them
+    // through one callback would make which happened depend on the tab.
+    val referenceLauncher = rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri -> uri?.let(viewModel::useReferenceClip) }
+    val pickReference = { referenceLauncher.launch(arrayOf("audio/*", "video/*")) }
+
     var hasMicPermission by remember {
         mutableStateOf(
             context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
@@ -478,6 +486,7 @@ fun VoiceScreen(
                     state = state,
                     viewModel = viewModel,
                     onPickScript = pickScript,
+                    onPickReference = pickReference,
                     onShareAudio = { file -> shareAudio(context, file) },
                     onOpenAdvanced = onOpenAdvanced,
                 )
@@ -502,6 +511,7 @@ private fun SpeakPanel(
     state: ai.ondevice.ui.vm.VoiceState,
     viewModel: VoiceViewModel,
     onPickScript: () -> Unit,
+    onPickReference: () -> Unit,
     onShareAudio: (java.io.File) -> Unit,
     onOpenAdvanced: (String) -> Unit,
 ) {
@@ -637,10 +647,87 @@ private fun SpeakPanel(
             )
             Text(
                 "Who is speaking is not set here — describe them under Advanced · voice design, " +
-                    "e.g. \"female, low pitch, british accent\".",
+                    "e.g. \"female, low pitch, british accent\", or copy a real voice below.",
                 style = NocturneType.CardBody,
                 color = NocturneColors.Text.copy(alpha = 0.8f),
             )
+        }
+
+        // — the voice to copy —
+        NCard(gap = 8.dp, modifier = Modifier.padding(top = 8.dp)) {
+            Text("Copy a voice", style = NocturneType.CardTitleSm)
+            if (!state.cloningAvailable) {
+                Text(
+                    "This OmniVoice install does not have the three encoders that turn a " +
+                        "recording into something the model can copy. Reinstalling it adds them; " +
+                        "describing a voice in words works either way.",
+                    style = NocturneType.CardBody,
+                    color = NocturneColors.Text.copy(alpha = 0.8f),
+                )
+            } else if (state.referenceSamples == null) {
+                Text(
+                    "Give it a few seconds of someone speaking and it will read your text in " +
+                        "that voice. Three to ten seconds is the sweet spot — past twenty it gets " +
+                        "slower and worse, not better.",
+                    style = NocturneType.CardBody,
+                    color = NocturneColors.Text.copy(alpha = 0.8f),
+                )
+                NButton(
+                    "Choose a recording",
+                    onClick = onPickReference,
+                    style = NButtonStyle.Secondary,
+                    block = true,
+                    minHeight = 46.dp,
+                )
+            } else {
+                Text(
+                    "${state.referenceName} · ${"%.1f".format(state.referenceSeconds)} s",
+                    style = NocturneType.Row,
+                )
+                if (state.referenceSeconds > 20f) {
+                    NHelp(
+                        "Longer than twenty seconds. Upstream's own warning is that this makes " +
+                            "generation slower and the copy worse — trimming to a clean few " +
+                            "seconds usually sounds better.",
+                    )
+                }
+                Text(
+                    if (state.transcribingReference) {
+                        "Working out what it says…"
+                    } else {
+                        // Not a nicety: the model is given the reference's words
+                        // and its sound and asked to carry on, so a wrong
+                        // transcript pulls the new speech towards the wrong thing.
+                        "What the recording says. Filled in by the speech model where one is " +
+                            "installed — correct it if it got a name wrong, because the copy " +
+                            "follows these words as well as the voice."
+                    },
+                    style = NocturneType.CardBody,
+                    color = NocturneColors.Text.copy(alpha = 0.8f),
+                )
+                NTextArea(
+                    value = state.referenceTranscript,
+                    onValueChange = viewModel::setReferenceTranscript,
+                    minHeight = 64.dp,
+                    textStyle = NocturneType.Row,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    NButton(
+                        "Replace",
+                        onClick = onPickReference,
+                        style = NButtonStyle.Secondary,
+                        modifier = Modifier.weight(1f),
+                        minHeight = 44.dp,
+                    )
+                    NButton(
+                        "Remove",
+                        onClick = viewModel::clearReferenceClip,
+                        style = NButtonStyle.Ghost,
+                        modifier = Modifier.weight(1f),
+                        minHeight = 44.dp,
+                    )
+                }
+            }
         }
     }
 

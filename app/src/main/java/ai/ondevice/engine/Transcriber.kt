@@ -206,6 +206,56 @@ class Transcriber(
             }
         }
 
+    /**
+     * The same decode, at whatever rate the caller needs.
+     *
+     * Exposed for OmniVoice's voice cloning, which wants the reference clip at
+     * 24 kHz rather than whisper's 16. Going through 16 kHz and back up would
+     * throw away everything above 8 kHz and then invent it again, and that band
+     * is a large part of what makes one voice sound different from another —
+     * which is the entire point of the clip.
+     */
+    suspend fun decodeAudio(file: File, targetRate: Int): Result<FloatArray> =
+        withContext(Dispatchers.Default) {
+            runCatching {
+                val samples = decodeToPcm(file, targetRate)
+                check(samples.isNotEmpty()) { "No audio could be decoded from ${file.name}." }
+                samples
+            }
+        }
+
+    /**
+     * Transcribe audio the caller already has in memory, at [sampleRate].
+     *
+     * OmniVoice's voice cloning uses this to work out what a reference clip
+     * says, which it needs before it can copy the voice — and it holds that clip
+     * at 24 kHz, so the rate whisper wants is converted here rather than being
+     * a number the caller has to know.
+     */
+    suspend fun transcribeSamples(
+        samples: FloatArray,
+        sampleRate: Int,
+    ): Result<List<TranscriptSegment>> =
+        withContext(Dispatchers.Default) {
+            runCatching {
+                check(handle != 0L) { "No speech model is loaded." }
+                check(samples.isNotEmpty()) { "There is no audio to transcribe." }
+                decode(toWhisperRate(samples, sampleRate))
+            }
+        }
+
+    private fun toWhisperRate(samples: FloatArray, sampleRate: Int): FloatArray {
+        if (sampleRate == SAMPLE_RATE) return samples
+        val ratio = sampleRate.toDouble() / SAMPLE_RATE
+        return FloatArray((samples.size / ratio).toInt()) { i ->
+            val position = i * ratio
+            val left = position.toInt()
+            val right = (left + 1).coerceAtMost(samples.size - 1)
+            val fraction = (position - left).toFloat()
+            samples[left] * (1f - fraction) + samples[right] * fraction
+        }
+    }
+
     private fun decode(samples: FloatArray): List<TranscriptSegment> {
         if (handle == 0L) return emptyList()
         val result = json.parseToJsonElement(WhisperBridge.nativeTranscribe(handle, samples)).jsonObject
@@ -221,15 +271,17 @@ class Transcriber(
     }
 
     /**
-     * Container → 16 kHz mono float, which is the only shape whisper accepts.
+     * Container → mono float at [targetRate], defaulting to the 16 kHz whisper
+     * is the only consumer of.
      *
-     * The resample is nearest-neighbour. For speech at 44.1 or 48 kHz down to
-     * 16 kHz that is audibly poor but transcription-equivalent — whisper's own
-     * front end throws most of that bandwidth away building the mel
-     * spectrogram. A polyphase resampler here would cost code and buy nothing
-     * measurable in word error rate.
+     * The resample averages the samples falling in each output period. For
+     * speech at 44.1 or 48 kHz down to 16 kHz that is audibly poor but
+     * transcription-equivalent — whisper's own front end throws most of that
+     * bandwidth away building the mel spectrogram — and it is a genuine
+     * low-pass rather than nearest-neighbour, so it holds up for the 24 kHz a
+     * voice clone asks for too.
      */
-    private fun decodeToPcm(file: File): FloatArray {
+    private fun decodeToPcm(file: File, targetRate: Int = SAMPLE_RATE): FloatArray {
         val extractor = MediaExtractor()
         extractor.setDataSource(file.absolutePath)
 
@@ -256,7 +308,7 @@ class Transcriber(
         var outputDone = false
         var accumulator = 0.0
         var accumulated = 0
-        val ratio = sourceRate.toDouble() / SAMPLE_RATE
+        val ratio = sourceRate.toDouble() / targetRate
 
         var position = 0.0
 
@@ -304,10 +356,10 @@ class Transcriber(
                     if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) outputDone = true
                 } else if (index == MediaCodec.INFO_TRY_AGAIN_LATER && inputDone) {
                     // Guard against a decoder that never signals end-of-stream.
-                    if (out.size > SAMPLE_RATE * MAX_FILE_SECONDS) outputDone = true
+                    if (out.size > targetRate * MAX_FILE_SECONDS) outputDone = true
                 }
 
-                if (out.size > SAMPLE_RATE * MAX_FILE_SECONDS) outputDone = true
+                if (out.size > targetRate * MAX_FILE_SECONDS) outputDone = true
             }
         } finally {
             runCatching { codec.stop() }
