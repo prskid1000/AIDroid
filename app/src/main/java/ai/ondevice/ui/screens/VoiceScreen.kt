@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,6 +41,7 @@ import ai.ondevice.core.Fmt
 import ai.ondevice.core.TranscriptFormat
 import ai.ondevice.ui.BottomDestinations
 import ai.ondevice.ui.components.NBottomBar
+import ai.ondevice.ui.components.NBottomSheet
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NCard
@@ -58,6 +60,7 @@ import ai.ondevice.ui.components.NTextArea
 import ai.ondevice.ui.components.PhoneScaffold
 import ai.ondevice.ui.components.RootToolbar
 import ai.ondevice.ui.components.SectionKicker
+import ai.ondevice.ui.components.ToolbarAction
 import ai.ondevice.ui.components.nClickableFlat
 import ai.ondevice.ui.theme.NIcons
 import ai.ondevice.ui.theme.NocturneColors
@@ -138,14 +141,18 @@ fun VoiceScreen(
         if (granted) viewModel.startRecording()
     }
 
+    var settingsOpen by rememberSaveable { mutableStateOf(false) }
+
     PhoneScaffold(
         toolbar = {
             // No engine tag up here. Which model does the work depends on the
             // tab, so a single toolbar badge was either wrong on one of them or
-            // duplicating the card below it. Each tab names its own engine in
-            // its own panel instead, in the same shape, so the two tabs read
-            // alike.
-            RootToolbar("Voice")
+            // duplicating the card below it — and the sheet behind the sliders
+            // names it in one place for both.
+            RootToolbar("Voice") {
+                ToolbarAction(NIcons.Plus, "Start over", viewModel::reset)
+                ToolbarAction(NIcons.Settings, "Voice settings", { settingsOpen = true })
+            }
         },
         bottomBar = { NBottomBar(BottomDestinations, currentRoute) { onNavigate(it.route) } },
         contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 18.dp),
@@ -488,10 +495,21 @@ fun VoiceScreen(
                     onPickScript = pickScript,
                     onPickReference = pickReference,
                     onShareAudio = { file -> shareAudio(context, file) },
-                    onOpenAdvanced = onOpenAdvanced,
                 )
             }
         }
+    }
+
+    // Left open on the way to Advanced on purpose — see the note on the Image
+    // screen's sheet. Back from Parameters returns to the panel it was opened
+    // from rather than to a bare screen.
+    if (settingsOpen) {
+        VoiceSettingsSheet(
+            state = state,
+            viewModel = viewModel,
+            onDismiss = { settingsOpen = false },
+            onOpenAdvanced = onOpenAdvanced,
+        )
     }
 }
 
@@ -513,17 +531,11 @@ private fun SpeakPanel(
     onPickScript: () -> Unit,
     onPickReference: () -> Unit,
     onShareAudio: (java.io.File) -> Unit,
-    onOpenAdvanced: (String) -> Unit,
 ) {
-    // — which engine is actually speaking —
-    //
-    // A switch rather than an automatic choice. The two neural engines are not
-    // interchangeable: Kokoro is an order of magnitude faster, OmniVoice can do
-    // things Kokoro cannot do at all. Picking on the user's behalf would mean
-    // either surprising them with a minute of compute or silently dropping the
-    // feature they came for.
+    // Which engine will speak, stated but not chosen here — the picker moved to
+    // the settings sheet with the voice list and the dials, so this panel is the
+    // script and the act, not the configuration.
     val provider = state.selectedVoice?.provider ?: ai.ondevice.speech.SynthProvider.SYSTEM
-    val engines = ai.ondevice.speech.SynthProvider.entries
     NCard(ring = if (provider != ai.ondevice.speech.SynthProvider.SYSTEM) NocturneColors.Accent700 else NocturneColors.Divider) {
         Row(
             Modifier.fillMaxWidth(),
@@ -537,11 +549,14 @@ private fun SpeakPanel(
                 modifier = Modifier.size(16.dp),
             )
             Text(
-                when (provider) {
-                    ai.ondevice.speech.SynthProvider.KOKORO -> "Kokoro · on-device neural"
-                    ai.ondevice.speech.SynthProvider.OMNIVOICE -> "OmniVoice · expressive, slow"
-                    ai.ondevice.speech.SynthProvider.SYSTEM -> "System engine"
-                },
+                listOfNotNull(
+                    when (provider) {
+                        ai.ondevice.speech.SynthProvider.KOKORO -> "Kokoro"
+                        ai.ondevice.speech.SynthProvider.OMNIVOICE -> "OmniVoice"
+                        ai.ondevice.speech.SynthProvider.SYSTEM -> "System engine"
+                    },
+                    state.selectedVoice?.displayName,
+                ).joinToString(" · "),
                 style = NocturneType.CardTitleSm,
                 modifier = Modifier.weight(1f),
             )
@@ -550,69 +565,13 @@ private fun SpeakPanel(
                 style = if (provider == ai.ondevice.speech.SynthProvider.SYSTEM) NTagStyle.Outline else NTagStyle.Accent,
             )
         }
-
-        NSeg(
-            options = engines.map { it.label },
-            selectedIndex = engines.indexOf(provider).coerceAtLeast(0),
-            onSelect = { viewModel.selectProvider(engines[it]) },
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        )
-
-        // Which *model* provides the engine, as distinct from which engine. Two
-        // are ordinary — Kokoro and OmniVoice are both voice models — and until
-        // now the app picked by scanning directories and never said which it had
-        // landed on.
-        //
-        // Only the models this engine can load, and only when the engine loads
-        // one at all: Android's synthesiser is part of the OS and has no file to
-        // choose, so a picker over it is a control with nothing behind it. The
-        // unfiltered list was worse than useless — the OmniVoice tab listed
-        // Kokoro and showed it as the selection, which is a promise the engine
-        // cannot keep.
-        val engineModels = state.ttsModels.filter {
-            state.ttsModelProviders[it.id] == provider
-        }
-        if (provider != ai.ondevice.speech.SynthProvider.SYSTEM && engineModels.isNotEmpty()) {
-            NDropdown(
-                options = engineModels.map { it.displayName },
-                selected = engineModels.firstOrNull { it.id == state.ttsModel?.id }?.displayName
-                    ?: engineModels.first().displayName,
-                onSelect = { name ->
-                    engineModels.firstOrNull { it.displayName == name }
-                        ?.let(viewModel::selectTtsModel)
-                },
-                modifier = Modifier.padding(top = 8.dp),
-            )
-        }
-
-        Text(
-            when (provider) {
-                ai.ondevice.speech.SynthProvider.KOKORO ->
-                    "The quick one — short lines come back near enough to straight away. " +
-                        "Fifty voices, six languages, no emotion tags."
-                // Both descriptions used to quote figures — "half a second of work per second
-                // of speech", "six to seven times slower", "around a minute for a short
-                // sentence". None was ever timed on a device. The ordering is real and worth
-                // saying; the numbers go back in when they have been measured.
-                ai.ondevice.speech.SynthProvider.OMNIVOICE ->
-                    "Reads any language with no phonemiser, takes [laughter] and [sigh], and can " +
-                        "voice several speakers. Much slower than Kokoro — it runs the whole " +
-                        "model twice per step and there are thirty-two of them, so expect to " +
-                        "wait even for a short sentence."
-                ai.ondevice.speech.SynthProvider.SYSTEM ->
-                    "Android's own synthesiser. A different voice with different prosody — the app " +
-                        "says so rather than passing it off as one of the neural engines."
-            },
-            style = NocturneType.CardBody,
-            color = NocturneColors.Text.copy(alpha = 0.8f),
-        )
-
-        if (!state.omniVoiceAvailable && provider != ai.ondevice.speech.SynthProvider.OMNIVOICE) {
-            NHelp(
-                "OmniVoice is not installed — Add model lists it under Voice: " +
-                    (ai.ondevice.core.StarterModels.installHint(
-                        ai.ondevice.core.StarterModels.OMNIVOICE_REPO,
-                    ) ?: ai.ondevice.core.StarterModels.OMNIVOICE_REPO) + ".",
+        // Before Speak rather than after: with no packs the model loads and then
+        // fails inside the graph, which reads as a broken model.
+        state.missingVoiceComponent?.let { missing ->
+            Text(
+                "${missing.what} — ${missing.because}. ${missing.remedy}.",
+                style = NocturneType.CardBody,
+                color = NocturneColors.Text.copy(alpha = 0.8f),
             )
         }
     }
@@ -779,136 +738,6 @@ private fun SpeakPanel(
         Modifier.padding(top = 6.dp),
     )
 
-    // — the voice —
-    // Counted over this engine's voices, since those are the only ones listed.
-    // "51 available of 339" above a list of one engine's voices described the
-    // library, not the choice on offer.
-    val engineVoices = state.voices.filter { it.provider == state.selectedProvider }
-    SectionKicker(
-        "Voice · ${engineVoices.count { it.available }} available of ${engineVoices.size}",
-        Modifier.padding(top = 20.dp, bottom = 8.dp),
-    )
-    // Before Speak rather than after: with no packs the model loads and then
-    // fails inside the graph, which reads as a broken model.
-    state.missingVoiceComponent?.let { missing ->
-        NCard(Modifier.padding(bottom = 8.dp)) {
-            Text(missing.what, style = NocturneType.CardTitleSm, color = NocturneColors.Accent200)
-            Text(
-                "${missing.because}. ${missing.remedy}.",
-                style = NocturneType.CardBody,
-                color = NocturneColors.Text.copy(alpha = 0.8f),
-            )
-        }
-    }
-    NInput(
-        value = state.voiceQuery,
-        onValueChange = viewModel::setVoiceQuery,
-        placeholder = "Search by name or language",
-        minHeight = 40.dp,
-    )
-    Column(
-        Modifier.fillMaxWidth().padding(top = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(5.dp),
-    ) {
-        // Capped, with the count stated — a silent truncation would read as
-        // "these are all of them".
-        val shown = state.filteredVoices.take(VOICE_ROWS)
-        shown.forEach { voice ->
-            val selected = voice.id == state.voice
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .background(
-                        if (selected) NocturneColors.Accent900 else NocturneColors.Surface,
-                        Radius.Md,
-                    )
-                    .ring(if (selected) NocturneColors.Accent else NocturneColors.Divider, Radius.Md)
-                    .alpha(if (voice.available) 1f else 0.45f)
-                    .nClickableFlat { viewModel.selectVoice(voice.id) }
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(9.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        voice.displayName,
-                        style = NocturneType.Row,
-                        color = if (selected) NocturneColors.Accent200 else NocturneColors.Text,
-                    )
-                    Text(
-                        voice.localeLabel,
-                        style = NocturneType.MonoXs,
-                        color = NocturneColors.TextMuted,
-                    )
-                }
-                if (!voice.available) {
-                    NTag("not installed", style = NTagStyle.Outline)
-                } else {
-                    NTag(voice.provider.label, style = NTagStyle.Neutral)
-                }
-            }
-        }
-        if (state.filteredVoices.size > shown.size) {
-            NHelp("${state.filteredVoices.size - shown.size} more — narrow the search to see them.")
-        }
-    }
-
-    // — expression —
-    //
-    // Which dials exist depends on the engine, because the two engines genuinely
-    // differ. Kokoro's graph takes token ids, a style vector and a speed — there
-    // is no pitch input at all. Showing a Pitch slider for it would leave the
-    // user adjusting something inert, so it is absent rather than ignored.
-    val kokoroSelected = state.selectedVoice?.provider == ai.ondevice.speech.SynthProvider.KOKORO
-    SectionKicker("Expression", Modifier.padding(top = 20.dp, bottom = 8.dp))
-    NCard(gap = 4.dp) {
-        SpeakSlider("Speed", String.format("%.2f×", state.speed), state.speed, 0.5f..2f, viewModel::setSpeed)
-        if (!kokoroSelected) {
-            SpeakSlider("Pitch", String.format("%.2f", state.pitch), state.pitch, 0.5f..2f, viewModel::setPitch)
-        }
-        SpeakSlider("Volume", Fmt.percent(state.volume), state.volume, 0f..1f, viewModel::setVolume)
-        Text(
-            if (kokoroSelected) {
-                "Speed is applied during synthesis, not by resampling, so the voice does not turn " +
-                    "chipmunk when you raise it. Kokoro has no pitch input, so there is no pitch " +
-                    "dial here — the system engine does, and shows one."
-            } else {
-                "Speed and pitch are applied by the engine, not by resampling, so the voice does " +
-                    "not turn chipmunk when you raise it."
-            },
-            style = NocturneType.CardBody,
-            color = NocturneColors.Text.copy(alpha = 0.8f),
-        )
-    }
-
-    // — blend, Kokoro only —
-    //
-    // Gated on Kokoro being *selected*, not merely installed. Blending mixes two
-    // Kokoro style vectors, which is a thing only Kokoro's graph takes; keyed on
-    // availability it sat under OmniVoice offering af_heart and bm_george to an
-    // engine with no style input at all.
-    if (kokoroSelected) {
-        SectionKicker("Blend", Modifier.padding(top = 20.dp, bottom = 8.dp))
-        NCard(gap = 6.dp) {
-            Text("Mix a second voice", style = NocturneType.CardTitleSm)
-            NEnumRow(
-                options = state.voices.filter { it.provider == ai.ondevice.speech.SynthProvider.KOKORO }
-                    .take(12).map { it.id },
-                selected = state.blendVoice,
-                onSelect = { viewModel.setBlendVoice(if (it == state.blendVoice) null else it) },
-            )
-            if (state.blendVoice != null) {
-                SpeakSlider(
-                    "Mix",
-                    "${Fmt.percent(1f - state.blendRatio)} / ${Fmt.percent(state.blendRatio)}",
-                    state.blendRatio,
-                    0f..1f,
-                    viewModel::setBlendRatio,
-                )
-            }
-        }
-    }
-
     state.speakError?.let { error ->
         NCard(Modifier.padding(top = 14.dp), ring = NocturneColors.Neutral700) {
             Row(
@@ -954,36 +783,11 @@ private fun SpeakPanel(
     }
     state.lastAudioPath?.let {
         NHelp(
-            "Saved to ${it.substringAfterLast('/')} in the transcripts folder — an ordinary file you " +
-                "can open in any player.",
+            "Saved as ${it.substringAfterLast('/')} in the speech folder — an ordinary file you " +
+                "can open in any player, and it is listed in the library.",
             Modifier.padding(top = 6.dp),
         )
     }
-
-    // Each engine's own parameter set. Kokoro and OmniVoice are both
-    // text-to-speech but share almost no controls: Kokoro has a voice list, a
-    // phonemiser language and a style blend, OmniVoice has a written voice
-    // design and a step count. Sending both here to Kokoro's set is what put
-    // af_* voice names and a 510-token chunk note in front of OmniVoice.
-    NButton(
-        when (provider) {
-            ai.ondevice.speech.SynthProvider.OMNIVOICE -> "Advanced · voice design, language, steps"
-            ai.ondevice.speech.SynthProvider.KOKORO -> "Advanced · language, chunking, trim, gain"
-            else -> "Advanced · system engine"
-        },
-        onClick = {
-            onOpenAdvanced(
-                when (provider) {
-                    ai.ondevice.speech.SynthProvider.OMNIVOICE ->
-                        ai.ondevice.engine.RuntimeRegistry.OMNIVOICE
-                    else -> ai.ondevice.engine.RuntimeRegistry.KOKORO
-                },
-            )
-        },
-        style = NButtonStyle.Secondary,
-        block = true,
-        modifier = Modifier.padding(top = 14.dp),
-    )
 }
 
 @Composable
@@ -1045,6 +849,277 @@ private fun voiceDescription(voice: String, speed: Float): String {
     }
     val gender = if (voice.getOrNull(1) == 'f') "female" else "male"
     return "$region · $gender · ${String.format("%.1f", speed)}×"
+}
+
+/**
+ * Which engine, which model, which voice, and how it is shaped.
+ *
+ * All of it used to sit in the same scroll as the script and the Speak button —
+ * the engine card, a fifty-row voice list, three sliders and a blend picker
+ * between what you wrote and the button that reads it. None of that is about
+ * this passage; it is how this device is set up to speak.
+ */
+@Composable
+private fun VoiceSettingsSheet(
+    state: ai.ondevice.ui.vm.VoiceState,
+    viewModel: VoiceViewModel,
+    onDismiss: () -> Unit,
+    onOpenAdvanced: (String) -> Unit,
+) {
+    NBottomSheet("Voice settings", onDismiss, note = "applies to the next run") {
+        if (state.mode == VoiceMode.TRANSCRIBE) {
+            TranscribeSettings(state, viewModel)
+            return@NBottomSheet
+        }
+
+        // A switch rather than an automatic choice. The two neural engines are
+        // not interchangeable: Kokoro is an order of magnitude faster, OmniVoice
+        // can do things Kokoro cannot do at all. Picking on the user's behalf
+        // would mean either surprising them with a minute of compute or silently
+        // dropping the feature they came for.
+        val provider = state.selectedVoice?.provider ?: ai.ondevice.speech.SynthProvider.SYSTEM
+        val engines = ai.ondevice.speech.SynthProvider.entries
+        SectionKicker("Engine", Modifier.padding(bottom = 8.dp))
+        NSeg(
+            options = engines.map { it.label },
+            selectedIndex = engines.indexOf(provider).coerceAtLeast(0),
+            onSelect = { viewModel.selectProvider(engines[it]) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        // Which *model* provides the engine, as distinct from which engine. Only
+        // the models this engine can load, and only when the engine loads one at
+        // all: Android's synthesiser is part of the OS and has no file to
+        // choose, so a picker over it is a control with nothing behind it. The
+        // unfiltered list was worse than useless — the OmniVoice tab listed
+        // Kokoro and showed it as the selection, which is a promise the engine
+        // cannot keep.
+        val engineModels = state.ttsModels.filter { state.ttsModelProviders[it.id] == provider }
+        if (provider != ai.ondevice.speech.SynthProvider.SYSTEM && engineModels.isNotEmpty()) {
+            NDropdown(
+                options = engineModels.map { it.displayName },
+                selected = engineModels.firstOrNull { it.id == state.ttsModel?.id }?.displayName
+                    ?: engineModels.first().displayName,
+                onSelect = { name ->
+                    engineModels.firstOrNull { it.displayName == name }
+                        ?.let(viewModel::selectTtsModel)
+                },
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+
+        NHelp(
+            when (provider) {
+                ai.ondevice.speech.SynthProvider.KOKORO ->
+                    "The quick one — short lines come back near enough to straight away. " +
+                        "Fifty voices, six languages, no emotion tags."
+                // Both descriptions used to quote figures — "half a second of work per second
+                // of speech", "six to seven times slower", "around a minute for a short
+                // sentence". None was ever timed on a device. The ordering is real and worth
+                // saying; the numbers go back in when they have been measured.
+                ai.ondevice.speech.SynthProvider.OMNIVOICE ->
+                    "Reads any language with no phonemiser, takes [laughter] and [sigh], and can " +
+                        "voice several speakers. Much slower than Kokoro — it runs the whole " +
+                        "model twice per step and there are thirty-two of them, so expect to " +
+                        "wait even for a short sentence."
+                ai.ondevice.speech.SynthProvider.SYSTEM ->
+                    "Android's own synthesiser. A different voice with different prosody — the app " +
+                        "says so rather than passing it off as one of the neural engines."
+            },
+            Modifier.padding(top = 8.dp),
+        )
+
+        if (!state.omniVoiceAvailable && provider != ai.ondevice.speech.SynthProvider.OMNIVOICE) {
+            NHelp(
+                "OmniVoice is not installed — Add model lists it under Voice: " +
+                    (ai.ondevice.core.StarterModels.installHint(
+                        ai.ondevice.core.StarterModels.OMNIVOICE_REPO,
+                    ) ?: ai.ondevice.core.StarterModels.OMNIVOICE_REPO) + ".",
+                Modifier.padding(top = 4.dp),
+            )
+        }
+
+        // — the voice —
+        // Counted over this engine's voices, since those are the only ones
+        // listed. "51 available of 339" above a list of one engine's voices
+        // described the library, not the choice on offer.
+        val engineVoices = state.voices.filter { it.provider == state.selectedProvider }
+        SectionKicker(
+            "Voice · ${engineVoices.count { it.available }} available of ${engineVoices.size}",
+            Modifier.padding(top = 20.dp, bottom = 8.dp),
+        )
+        state.missingVoiceComponent?.let { missing ->
+            NCard(Modifier.padding(bottom = 8.dp)) {
+                Text(missing.what, style = NocturneType.CardTitleSm, color = NocturneColors.Accent200)
+                Text(
+                    "${missing.because}. ${missing.remedy}.",
+                    style = NocturneType.CardBody,
+                    color = NocturneColors.Text.copy(alpha = 0.8f),
+                )
+            }
+        }
+        NInput(
+            value = state.voiceQuery,
+            onValueChange = viewModel::setVoiceQuery,
+            placeholder = "Search by name or language",
+            minHeight = 40.dp,
+        )
+        Column(
+            Modifier.fillMaxWidth().padding(top = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            // Capped, with the count stated — a silent truncation would read as
+            // "these are all of them".
+            val shown = state.filteredVoices.take(VOICE_ROWS)
+            shown.forEach { voice ->
+                val selected = voice.id == state.voice
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(
+                            if (selected) NocturneColors.Accent900 else NocturneColors.Surface,
+                            Radius.Md,
+                        )
+                        .ring(if (selected) NocturneColors.Accent else NocturneColors.Divider, Radius.Md)
+                        .alpha(if (voice.available) 1f else 0.45f)
+                        .nClickableFlat { viewModel.selectVoice(voice.id) }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            voice.displayName,
+                            style = NocturneType.Row,
+                            color = if (selected) NocturneColors.Accent200 else NocturneColors.Text,
+                        )
+                        Text(voice.localeLabel, style = NocturneType.MonoXs, color = NocturneColors.TextMuted)
+                    }
+                    if (!voice.available) {
+                        NTag("not installed", style = NTagStyle.Outline)
+                    } else {
+                        NTag(voice.provider.label, style = NTagStyle.Neutral)
+                    }
+                }
+            }
+            if (state.filteredVoices.size > shown.size) {
+                NHelp("${state.filteredVoices.size - shown.size} more — narrow the search to see them.")
+            }
+        }
+
+        // — expression —
+        //
+        // Which dials exist depends on the engine, because the two engines
+        // genuinely differ. Kokoro's graph takes token ids, a style vector and a
+        // speed — there is no pitch input at all. Showing a Pitch slider for it
+        // would leave the user adjusting something inert, so it is absent rather
+        // than ignored.
+        val kokoroSelected = state.selectedVoice?.provider == ai.ondevice.speech.SynthProvider.KOKORO
+        SectionKicker("Expression", Modifier.padding(top = 20.dp, bottom = 8.dp))
+        NCard(gap = 4.dp) {
+            SpeakSlider("Speed", String.format("%.2f×", state.speed), state.speed, 0.5f..2f, viewModel::setSpeed)
+            if (!kokoroSelected) {
+                SpeakSlider("Pitch", String.format("%.2f", state.pitch), state.pitch, 0.5f..2f, viewModel::setPitch)
+            }
+            SpeakSlider("Volume", Fmt.percent(state.volume), state.volume, 0f..1f, viewModel::setVolume)
+            Text(
+                if (kokoroSelected) {
+                    "Speed is applied during synthesis, not by resampling, so the voice does not " +
+                        "turn chipmunk when you raise it. Kokoro has no pitch input, so there is " +
+                        "no pitch dial here — the system engine does, and shows one."
+                } else {
+                    "Speed and pitch are applied by the engine, not by resampling, so the voice " +
+                        "does not turn chipmunk when you raise it."
+                },
+                style = NocturneType.CardBody,
+                color = NocturneColors.Text.copy(alpha = 0.8f),
+            )
+        }
+
+        // — blend, Kokoro only —
+        //
+        // Gated on Kokoro being *selected*, not merely installed. Blending mixes
+        // two Kokoro style vectors, which is a thing only Kokoro's graph takes;
+        // keyed on availability it sat under OmniVoice offering af_heart and
+        // bm_george to an engine with no style input at all.
+        if (kokoroSelected) {
+            SectionKicker("Blend", Modifier.padding(top = 20.dp, bottom = 8.dp))
+            NCard(gap = 6.dp) {
+                Text("Mix a second voice", style = NocturneType.CardTitleSm)
+                NEnumRow(
+                    options = state.voices
+                        .filter { it.provider == ai.ondevice.speech.SynthProvider.KOKORO }
+                        .take(12).map { it.id },
+                    selected = state.blendVoice,
+                    onSelect = { viewModel.setBlendVoice(if (it == state.blendVoice) null else it) },
+                )
+                if (state.blendVoice != null) {
+                    SpeakSlider(
+                        "Mix",
+                        "${Fmt.percent(1f - state.blendRatio)} / ${Fmt.percent(state.blendRatio)}",
+                        state.blendRatio,
+                        0f..1f,
+                        viewModel::setBlendRatio,
+                    )
+                }
+            }
+        }
+
+        // Each engine's own parameter set. Kokoro and OmniVoice are both
+        // text-to-speech but share almost no controls, which is why the label
+        // names what is behind the button rather than saying "Advanced".
+        NButton(
+            when (provider) {
+                ai.ondevice.speech.SynthProvider.OMNIVOICE -> "Advanced · voice design, language, steps"
+                ai.ondevice.speech.SynthProvider.KOKORO -> "Advanced · language, chunking, trim, gain"
+                else -> "Advanced · system engine"
+            },
+            onClick = {
+                onOpenAdvanced(
+                    when (provider) {
+                        ai.ondevice.speech.SynthProvider.OMNIVOICE ->
+                            ai.ondevice.engine.RuntimeRegistry.OMNIVOICE
+                        else -> ai.ondevice.engine.RuntimeRegistry.KOKORO
+                    },
+                )
+            },
+            style = NButtonStyle.Secondary,
+            block = true,
+            modifier = Modifier.padding(top = 16.dp),
+        )
+    }
+}
+
+/** Transcribe has one engine and one choice to make: which whisper. */
+@Composable
+private fun TranscribeSettings(
+    state: ai.ondevice.ui.vm.VoiceState,
+    viewModel: VoiceViewModel,
+) {
+    SectionKicker("Speech model", Modifier.padding(bottom = 8.dp))
+    if (state.sttModels.isEmpty()) {
+        NHelp(
+            "Nothing to transcribe with yet. Add model lists whisper under Speech — base or " +
+                "small suits a phone.",
+        )
+        return
+    }
+    // Labelled by quant, since a whisper library is normally several sizes of
+    // the same repo — "tiny-q5_1" and "small" distinguish them, the repo name
+    // does not.
+    val labels = state.sttModels.map { it.quant ?: it.displayName }
+    NDropdown(
+        options = labels,
+        selected = state.sttModel?.let { it.quant ?: it.displayName },
+        onSelect = { label ->
+            state.sttModels.firstOrNull { (it.quant ?: it.displayName) == label }
+                ?.let(viewModel::selectSttModel)
+        },
+    )
+    NHelp(
+        "VAD ${if (state.vadEnabled) "on" else "off"} · step ${Fmt.grouped(state.stepMs)} ms",
+        Modifier.padding(top = 8.dp),
+    )
 }
 
 /** `MM:SS.d` — the canvas' segment clock. */

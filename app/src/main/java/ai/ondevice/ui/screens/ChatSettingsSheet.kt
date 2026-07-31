@@ -32,6 +32,7 @@ import ai.ondevice.core.Fmt
 import ai.ondevice.core.Tier
 import ai.ondevice.data.db.ModelEntity
 import ai.ondevice.data.db.PersonaEntity
+import ai.ondevice.ui.components.NBottomSheet
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NDot
@@ -73,40 +74,10 @@ fun ChatSettingsSheet(
     onExportAll: () -> Unit,
     onImport: () -> Unit,
 ) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(NocturneColors.Neutral900.copy(alpha = 0.55f))
-                .nClickableFlat(onClick = onDismiss),
-            contentAlignment = Alignment.BottomCenter,
-        ) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(top = 82.dp)
-                    .background(NocturneColors.Surface, RoundedCornerShape(20.dp, 20.dp, 0.dp, 0.dp))
-                    .nClickableFlat { /* swallow */ },
-            ) {
-                NSheetHandle()
-
-                Row(
-                    Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 6.dp, bottom = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(9.dp),
-                    verticalAlignment = Alignment.Bottom,
-                ) {
-                    Text("This conversation", style = NocturneType.SheetTitle, modifier = Modifier.weight(1f))
-                    Text("reload not required", style = NocturneType.Meta, color = NocturneColors.TextMuted)
-                }
-
-                Column(
-                    Modifier
-                        .verticalScroll(rememberScrollState())
-                        .padding(start = 18.dp, end = 18.dp, bottom = 20.dp),
-                ) {
+    // The same chrome Image and Voice use. It was written inline here first,
+    // which is how all three ended up drawing their last row underneath the
+    // navigation bar — one of them fixed is one of them fixed.
+    NBottomSheet("This conversation", onDismiss, note = "reload not required") {
                     // — model —
                     SectionKicker("Model", Modifier.padding(bottom = 8.dp))
                     var modelsExpanded by remember { mutableStateOf(false) }
@@ -392,9 +363,6 @@ fun ChatSettingsSheet(
                         style = NButtonStyle.Primary,
                         block = true,
                     )
-                }
-            }
-        }
     }
 }
 

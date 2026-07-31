@@ -23,6 +23,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,6 +43,7 @@ import coil3.compose.AsyncImage
 import ai.ondevice.core.Fmt
 import ai.ondevice.ui.BottomDestinations
 import ai.ondevice.ui.components.NBottomBar
+import ai.ondevice.ui.components.NBottomSheet
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NCard
@@ -56,6 +60,7 @@ import ai.ondevice.ui.components.NTextArea
 import ai.ondevice.ui.components.PhoneScaffold
 import ai.ondevice.ui.components.RootToolbar
 import ai.ondevice.ui.components.SectionKicker
+import ai.ondevice.ui.components.ToolbarAction
 import ai.ondevice.ui.components.nClickableFlat
 import ai.ondevice.ui.theme.NIcons
 import ai.ondevice.ui.theme.NocturneColors
@@ -84,7 +89,6 @@ fun ImageScreen(
     currentRoute: String?,
     onNavigate: (String) -> Unit,
     onOpenMask: () -> Unit,
-    onOpenGallery: () -> Unit,
     onOpenRuntimes: () -> Unit,
     onAddModel: () -> Unit,
     onOpenAdvanced: () -> Unit,
@@ -98,15 +102,16 @@ fun ImageScreen(
     // anything it changed on the way back rather than showing a stale form.
     LaunchedEffect(Unit) { viewModel.refreshFromOverrides() }
 
+    var settingsOpen by rememberSaveable { mutableStateOf(false) }
+
     PhoneScaffold(
         toolbar = {
+            // The same pair Chat and Voice carry. Gallery moved to the Library
+            // tab, where the images sit alongside the conversations and the
+            // rendered audio instead of being reachable from one screen only.
             RootToolbar("Image") {
-                Icon(
-                    NIcons.Image,
-                    contentDescription = "Gallery",
-                    tint = NocturneColors.Text,
-                    modifier = Modifier.size(20.dp).nClickableFlat(onClick = onOpenGallery),
-                )
+                ToolbarAction(NIcons.Plus, "New image", viewModel::reset)
+                ToolbarAction(NIcons.Settings, "Image settings", { settingsOpen = true })
             }
         },
         bottomBar = { NBottomBar(BottomDestinations, currentRoute) { onNavigate(it.route) } },
@@ -120,28 +125,6 @@ fun ImageScreen(
         )
 
         Column(Modifier.verticalScroll(rememberScrollState())) {
-
-            // Which model runs is the user's choice. Picking whichever the
-            // database returned first is how a broken model gets loaded forever
-            // while a working one sits beside it, unreachable.
-            //
-            // One base model, so one dropdown — a row of chips read as a set
-            // you combine, which is exactly what the add-ons below *are*, and
-            // put the checkpoint and the things hanging off it on the same
-            // footing. The list holds base models only; see baseModelsOnly.
-            if (state.availableModels.isNotEmpty()) {
-                NHelp("Model", Modifier.padding(bottom = 4.dp))
-                NDropdown(
-                    options = state.availableModels.map { it.displayName },
-                    selected = state.model?.displayName,
-                    onSelect = { name ->
-                        state.availableModels.firstOrNull { it.displayName == name }
-                            ?.let(viewModel::selectModel)
-                    },
-                    placeholder = "Choose a model…",
-                    modifier = Modifier.padding(bottom = 10.dp),
-                )
-            }
 
             TaesdPreview(state)
 
@@ -293,54 +276,9 @@ fun ImageScreen(
                 }
             }
 
-            Row(
-                Modifier.fillMaxWidth().padding(top = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                LabeledSlider(
-                    label = "Steps",
-                    value = state.steps.toFloat(),
-                    display = state.steps.toString(),
-                    range = 1f..60f,
-                    onChange = { viewModel.setSteps(it.toInt()) },
-                    modifier = Modifier.weight(1f),
-                )
-                LabeledSlider(
-                    label = "CFG",
-                    value = state.cfgScale,
-                    display = String.format("%.1f", state.cfgScale),
-                    range = 1f..20f,
-                    onChange = viewModel::setCfg,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-
-            Row(
-                Modifier.fillMaxWidth().padding(top = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Column(Modifier.weight(1f)) {
-                    NHelp("Size", Modifier.padding(bottom = 4.dp))
-                    val sizes = listOf(512, 768, 1024)
-                    NSeg(
-                        options = sizes.map { it.toString() },
-                        selectedIndex = sizes.indexOf(state.width).coerceAtLeast(0),
-                        onSelect = { viewModel.setSize(sizes[it]) },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                Column(Modifier.width(118.dp)) {
-                    NHelp("Seed", Modifier.padding(bottom = 4.dp))
-                    NInput(
-                        value = state.seed.toString(),
-                        onValueChange = { it.toLongOrNull()?.let(viewModel::setSeed) },
-                        textStyle = NocturneType.MonoValue,
-                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
-                    )
-                }
-            }
-
-            // §5.4 — memory guardrail with the fix inline, not a toast.
+            // §5.4 — memory guardrail with the fix inline, not a toast. This one
+            // stays on the generation screen even though size lives in the
+            // sheet: it is a refusal about the run you are about to start.
             if (state.exceedsEnvelope) {
                 NCard(Modifier.padding(top = 14.dp), ring = NocturneColors.Neutral700) {
                     Row(
@@ -401,19 +339,6 @@ fun ImageScreen(
                 }
             }
 
-            AttachmentsSection(state, viewModel)
-
-            // The same manifest renderer S8 uses, pointed at the sd.cpp block —
-            // schedule and clip_skip are Advanced there, SLG is Expert, and all
-            // 41 of them come from the manifest rather than this file.
-            NButton(
-                "Advanced · schedule, clip_skip, SLG",
-                onClick = onOpenAdvanced,
-                style = NButtonStyle.Secondary,
-                block = true,
-                modifier = Modifier.padding(top = 14.dp),
-            )
-
             state.usedSeed?.let { seed ->
                 NHelp(
                     "Last run used seed $seed. Every generation writes its full parameter set into the " +
@@ -422,6 +347,120 @@ fun ImageScreen(
                 )
             }
         }
+    }
+
+    // Note what is *not* here: closing the sheet on the way to Advanced. The
+    // whole screen leaves composition when the parameters screen is pushed, so
+    // the dialog goes with it — and `rememberSaveable` brings the sheet back on
+    // the way in, which is where the user was. Dismissing it explicitly meant
+    // Back from Parameters landed on a bare Image screen.
+    if (settingsOpen) {
+        ImageSettingsSheet(
+            state = state,
+            viewModel = viewModel,
+            onDismiss = { settingsOpen = false },
+            onOpenAdvanced = onOpenAdvanced,
+        )
+    }
+}
+
+/**
+ * Everything that decides *how* the next image is made.
+ *
+ * Model, size, seed, the two sliders, and the add-ons. None of it is about the
+ * picture in front of you, which is why it no longer sits in the same scroll as
+ * the prompt and the result — that scroll grew a row every time a runtime gained
+ * a dial, and pushed the Generate button further from the thing it acts on.
+ */
+@Composable
+private fun ImageSettingsSheet(
+    state: ImageState,
+    viewModel: ImageViewModel,
+    onDismiss: () -> Unit,
+    onOpenAdvanced: () -> Unit,
+) {
+    NBottomSheet("Image settings", onDismiss, note = "applies to the next run") {
+        // Which model runs is the user's choice. Picking whichever the database
+        // returned first is how a broken model gets loaded forever while a
+        // working one sits beside it, unreachable.
+        //
+        // One base model, so one dropdown — a row of chips read as a set you
+        // combine, which is exactly what the add-ons below *are*. The list holds
+        // base models only; see baseModelsOnly.
+        if (state.availableModels.isNotEmpty()) {
+            SectionKicker("Model", Modifier.padding(bottom = 8.dp))
+            NDropdown(
+                options = state.availableModels.map { it.displayName },
+                selected = state.model?.displayName,
+                onSelect = { name ->
+                    state.availableModels.firstOrNull { it.displayName == name }
+                        ?.let(viewModel::selectModel)
+                },
+                placeholder = "Choose a model…",
+                modifier = Modifier.padding(bottom = 14.dp),
+            )
+        }
+
+        SectionKicker("Output", Modifier.padding(bottom = 8.dp))
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(Modifier.weight(1f)) {
+                NHelp("Size", Modifier.padding(bottom = 4.dp))
+                val sizes = listOf(512, 768, 1024)
+                NSeg(
+                    options = sizes.map { it.toString() },
+                    selectedIndex = sizes.indexOf(state.width).coerceAtLeast(0),
+                    onSelect = { viewModel.setSize(sizes[it]) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Column(Modifier.width(118.dp)) {
+                NHelp("Seed", Modifier.padding(bottom = 4.dp))
+                NInput(
+                    value = state.seed.toString(),
+                    onValueChange = { it.toLongOrNull()?.let(viewModel::setSeed) },
+                    textStyle = NocturneType.MonoValue,
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
+                )
+            }
+        }
+
+        Row(
+            Modifier.fillMaxWidth().padding(top = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            LabeledSlider(
+                label = "Steps",
+                value = state.steps.toFloat(),
+                display = state.steps.toString(),
+                range = 1f..60f,
+                onChange = { viewModel.setSteps(it.toInt()) },
+                modifier = Modifier.weight(1f),
+            )
+            LabeledSlider(
+                label = "CFG",
+                value = state.cfgScale,
+                display = String.format("%.1f", state.cfgScale),
+                range = 1f..20f,
+                onChange = viewModel::setCfg,
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        AttachmentsSection(state, viewModel)
+
+        // The same manifest renderer S8 uses, pointed at the sd.cpp block —
+        // schedule and clip_skip are Advanced there, SLG is Expert, and all
+        // 41 of them come from the manifest rather than this file.
+        NButton(
+            "Advanced · schedule, clip_skip, SLG",
+            onClick = onOpenAdvanced,
+            style = NButtonStyle.Secondary,
+            block = true,
+            modifier = Modifier.padding(top = 14.dp),
+        )
     }
 }
 

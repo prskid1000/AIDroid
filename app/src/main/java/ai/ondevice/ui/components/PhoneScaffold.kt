@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
@@ -22,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
@@ -113,13 +115,18 @@ fun PushToolbar(
 }
 
 /**
- * A root destination's header: a 21px title flush left, actions on the right.
- * No back chevron — these are the five bottom-bar destinations.
+ * A root destination's header: a title flush left, actions on the right.
+ * No back chevron — these are the bottom-bar destinations.
+ *
+ * [subtitle] is for a screen whose title alone does not say what is loaded —
+ * Chat, where the model and the live backend readout belong under the name
+ * rather than in a toolbar of its own.
  */
 @Composable
 fun RootToolbar(
     title: String,
     modifier: Modifier = Modifier,
+    subtitle: (@Composable () -> Unit)? = null,
     trailing: (@Composable RowScope.() -> Unit)? = null,
 ) {
     Row(
@@ -129,9 +136,41 @@ fun RootToolbar(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title, style = NocturneType.RootTitle, modifier = Modifier.weight(1f))
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = if (subtitle == null) NocturneType.RootTitle else NocturneType.CardTitle,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (subtitle != null) subtitle()
+        }
         if (trailing != null) trailing()
     }
+}
+
+/**
+ * One toolbar action, so the icon size and hit target are decided once.
+ *
+ * Every root screen was drawing its own [Icon] with its own `size(...)`, which
+ * is how Chat ended up with a 20dp plus next to a 19dp sliders — and how it
+ * grew a hamburger that opened the same sheet as the sliders beside it. An
+ * action a screen cannot spell differently is one that cannot drift.
+ */
+@Composable
+fun ToolbarAction(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    tint: Color = NocturneColors.Text,
+) {
+    Icon(
+        icon,
+        contentDescription = contentDescription,
+        tint = tint,
+        modifier = modifier.size(20.dp).nClickableFlat(onClick = onClick),
+    )
 }
 
 /** One destination in the bottom bar. */
@@ -207,6 +246,91 @@ fun NSheetHandle(modifier: Modifier = Modifier) {
                 .size(width = 34.dp, height = 4.dp)
                 .background(NocturneColors.Neutral700, ai.ondevice.ui.theme.Radius.Sm),
         )
+    }
+}
+
+/** How much of the screen a quick-settings sheet covers, whatever it holds. */
+private const val SHEET_HEIGHT_FRACTION = 0.8f
+
+/**
+ * The sheet every quick-settings panel opens in.
+ *
+ * Chat had this shape written inline and Image and Voice had no sheet at all —
+ * their parameters sat in the same scroll as the prompt and the result, so the
+ * screen you generate on and the screen you configure on were one screen, and
+ * it grew every time a runtime gained a dial. One implementation means the three
+ * cannot drift apart, and [title]/[note] keep the header honest per screen.
+ */
+@Composable
+fun NBottomSheet(
+    title: String,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+    note: String? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(NocturneColors.Neutral900.copy(alpha = 0.55f))
+                .nClickableFlat(onClick = onDismiss),
+            contentAlignment = Alignment.BottomCenter,
+        ) {
+            Column(
+                modifier
+                    .fillMaxWidth()
+                    // A fixed 80% of the screen, not "as tall as the content".
+                    // Wrapping meant the sheet's height was whatever it happened
+                    // to hold: Voice's Transcribe settings are a dropdown and one
+                    // line, so the panel collapsed to a strip at the bottom edge,
+                    // while Speak's overflowed. A sheet that changes size when you
+                    // switch tabs inside it reads as a different sheet.
+                    .fillMaxHeight(SHEET_HEIGHT_FRACTION)
+                    .background(
+                        NocturneColors.Surface,
+                        androidx.compose.foundation.shape.RoundedCornerShape(20.dp, 20.dp, 0.dp, 0.dp),
+                    )
+                    // Swallowed so a tap inside the sheet does not reach the
+                    // scrim behind it and close the thing being tapped.
+                    .nClickableFlat { },
+            ) {
+                NSheetHandle()
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 6.dp, bottom = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(9.dp),
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    Text(title, style = NocturneType.SheetTitle, modifier = Modifier.weight(1f))
+                    if (note != null) {
+                        Text(note, style = NocturneType.Meta, color = NocturneColors.TextMuted)
+                    }
+                }
+                Column(
+                    Modifier
+                        // Weighted so the scroll region is what is left after the
+                        // handle and the header, rather than whatever the content
+                        // happens to measure — without it a tall sheet lays out
+                        // past the bottom of the window and the last control is
+                        // simply not there.
+                        .weight(1f)
+                        .verticalScroll(androidx.compose.foundation.rememberScrollState())
+                        .padding(start = 18.dp, end = 18.dp)
+                        // The navigation bar sits over the sheet, not beside it.
+                        // Without its inset the final row — every one of these
+                        // sheets ends in an Advanced button — is drawn underneath
+                        // it, which reads as the button not existing.
+                        .padding(
+                            bottom = 20.dp +
+                                WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+                        ),
+                    content = content,
+                )
+            }
+        }
     }
 }
 

@@ -50,6 +50,8 @@ import ai.ondevice.ui.components.NCircleButton
 import ai.ondevice.ui.components.NDot
 import ai.ondevice.ui.components.NHelp
 import ai.ondevice.ui.components.PhoneScaffold
+import ai.ondevice.ui.components.RootToolbar
+import ai.ondevice.ui.components.ToolbarAction
 import ai.ondevice.ui.components.nClickableFlat
 import ai.ondevice.ui.theme.NIcons
 import ai.ondevice.ui.theme.NocturneColors
@@ -122,7 +124,6 @@ fun ChatScreen(
             toolbar = {
                 ChatToolbar(
                     state,
-                    onOpenMenu = { sheetOpen = true },
                     onOpenSettings = { sheetOpen = true },
                     onNewConversation = viewModel::startNewConversation,
                 )
@@ -234,10 +235,10 @@ fun ChatScreen(
                 onSelectPersona = viewModel::setPersona,
                 onSystemPromptChange = viewModel::setSystemPrompt,
                 onLiveParam = viewModel::setLiveParam,
-                onOpenParametersAtTier = { tier ->
-                    sheetOpen = false
-                    onOpenParameters(tier)
-                },
+                // Not dismissed on the way out: the screen leaves composition
+                // when Parameters is pushed, and `rememberSaveable` puts the
+                // sheet back when Back returns here.
+                onOpenParametersAtTier = onOpenParameters,
                 onExport = { format ->
                     viewModel.export(format) { file -> shareFile(context, file, format.mime) }
                 },
@@ -250,35 +251,25 @@ fun ChatScreen(
     }
 }
 
-/** Model name, preset, and the live backend/context readout. */
+/**
+ * Model name, preset, and the live backend/context readout.
+ *
+ * Two actions, the same two every generating screen has: start a new one, and
+ * open the settings for this one. There used to be a third — a hamburger
+ * labelled "Conversations" that opened the very same sheet as the sliders beside
+ * it. Past threads now have somewhere real to live, so the affordance that
+ * promised them and delivered a duplicate is gone.
+ */
 @Composable
 private fun ChatToolbar(
     state: ChatState,
-    onOpenMenu: () -> Unit,
     onOpenSettings: () -> Unit,
     onNewConversation: () -> Unit,
 ) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            NIcons.Menu,
-            contentDescription = "Conversations",
-            tint = NocturneColors.Text,
-            modifier = Modifier.size(20.dp).nClickableFlat(onClick = onOpenMenu),
-        )
-        Column(Modifier.weight(1f)) {
-            Text(
-                listOfNotNull(state.model?.displayName, state.presetName).joinToString(" · ")
-                    .ifBlank { "No model" },
-                style = NocturneType.CardTitle,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+    RootToolbar(
+        title = listOfNotNull(state.model?.displayName, state.presetName).joinToString(" · ")
+            .ifBlank { "No model" },
+        subtitle = {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -305,21 +296,12 @@ private fun ChatToolbar(
                     style = NocturneType.NavLabel,
                 )
             }
-        }
+        },
+    ) {
         // A new conversation, not a wiped one — the old thread stays whole in
         // the library, which is why this is a plus rather than a bin.
-        Icon(
-            NIcons.Plus,
-            contentDescription = "New conversation",
-            tint = NocturneColors.Text,
-            modifier = Modifier.size(20.dp).nClickableFlat(onClick = onNewConversation),
-        )
-        Icon(
-            NIcons.Settings,
-            contentDescription = "Chat settings",
-            tint = NocturneColors.Text,
-            modifier = Modifier.size(19.dp).nClickableFlat(onClick = onOpenSettings),
-        )
+        ToolbarAction(NIcons.Plus, "New conversation", onNewConversation)
+        ToolbarAction(NIcons.Settings, "Chat settings", onOpenSettings)
     }
 }
 
@@ -431,8 +413,9 @@ private fun MessageBubble(
 /**
  * What the model asked for, before anything ran it.
  *
- * The arguments are shown in full rather than summarised. A tool call is the
- * point where a local-first app can start talking to something that isn't
+ * Collapsed to one line, because a call the user expected is noise; but the
+ * arguments are one tap away and never summarised away, because a tool call is
+ * the point where a local-first app can start talking to something that isn't
  * local, and "searched the web" without the query is not enough to tell whether
  * that was the right thing to send.
  */
@@ -442,42 +425,85 @@ private fun ToolCallList(toolCallsJson: String?) {
     if (calls.isEmpty()) return
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        calls.forEach { call ->
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .background(NocturneColors.Neutral900, Radius.Md)
-                    .ring(NocturneColors.Divider, Radius.Md)
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        NIcons.Activity,
-                        contentDescription = null,
-                        tint = NocturneColors.Accent,
-                        modifier = Modifier.size(13.dp),
-                    )
-                    Text(
-                        "Called ${call.name}",
-                        style = NocturneType.Meta.copy(fontSize = NocturneType.Row.fontSize),
-                        color = NocturneColors.Accent300,
-                    )
-                }
-                if (call.arguments.isNotBlank() && call.arguments != "{}") {
-                    Text(
-                        call.arguments,
-                        style = NocturneType.MonoCode,
-                        color = NocturneColors.Text.copy(alpha = 0.72f),
-                    )
-                }
+        calls.forEach { call -> ToolCallCard(call) }
+    }
+}
+
+@Composable
+private fun ToolCallCard(call: RenderedToolCall) {
+    val hasArguments = call.arguments.isNotBlank() && call.arguments != "{}"
+    var expanded by rememberSaveable(call.id, call.name) { mutableStateOf(false) }
+    val preview = remember(call.arguments) { previewArguments(call.arguments) }
+    val pretty = remember(call.arguments) { prettyArguments(call.arguments) }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(NocturneColors.Neutral900, Radius.Md)
+            .ring(NocturneColors.Divider, Radius.Md),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .then(if (hasArguments) Modifier.nClickableFlat(onClick = { expanded = !expanded }) else Modifier)
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                NIcons.Activity,
+                contentDescription = null,
+                tint = NocturneColors.Accent,
+                modifier = Modifier.size(13.dp),
+            )
+            Text(
+                call.name,
+                style = NocturneType.MonoCode,
+                color = NocturneColors.Accent300,
+            )
+            if (hasArguments) {
+                Text(
+                    preview,
+                    style = NocturneType.MonoCode,
+                    color = NocturneColors.TextMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    if (expanded) "⌃" else "⌄",
+                    style = NocturneType.Row,
+                    color = NocturneColors.Accent300,
+                )
             }
+        }
+        if (expanded && hasArguments) {
+            Text(
+                pretty,
+                style = NocturneType.MonoCode,
+                color = NocturneColors.Text.copy(alpha = 0.72f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 11.dp)
+                    .padding(bottom = 9.dp),
+            )
         }
     }
 }
+
+/** `timezone: Asia/Tokyo` — enough of the arguments to read at a glance. */
+private fun previewArguments(raw: String): String = runCatching {
+    kotlinx.serialization.json.Json.parseToJsonElement(raw).jsonObject.entries
+        .joinToString(" · ") { (key, value) ->
+            "$key: ${(value as? kotlinx.serialization.json.JsonPrimitive)?.content ?: value}"
+        }
+}.getOrDefault(raw).ifBlank { raw }
+
+/** One argument per line. Models write these on one line; people don't read that way. */
+private fun prettyArguments(raw: String): String = runCatching {
+    kotlinx.serialization.json.Json.parseToJsonElement(raw).jsonObject.entries
+        .joinToString("\n") { (key, value) -> "$key = $value" }
+}.getOrDefault(raw).ifBlank { raw }
 
 /** The result that came back, collapsed — they are routinely long. */
 @Composable
@@ -510,10 +536,16 @@ private fun ToolResultBlock(
                 tint = if (isError) NocturneColors.Neutral300 else NocturneColors.Accent,
                 modifier = Modifier.size(13.dp),
             )
+            // The first line rather than a character count: collapsed is the
+            // state this spends most of its life in, and "returned 47 chars"
+            // answers a question nobody asked.
             Text(
-                if (isError) "$name failed" else "$name returned ${message.content.length} chars",
-                style = NocturneType.Meta.copy(fontSize = NocturneType.Row.fontSize),
+                if (isError) "$name failed" else message.content.lineSequence().firstOrNull()
+                    ?.takeIf { it.isNotBlank() } ?: "$name returned nothing",
+                style = NocturneType.MonoCode,
                 color = if (isError) NocturneColors.Neutral300 else NocturneColors.Accent300,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
             Text(if (expanded) "⌃" else "⌄", style = NocturneType.Row, color = NocturneColors.Accent300)
@@ -540,7 +572,7 @@ private fun ToolResultBlock(
  * to reach it. §13's point is that the conversation exists outside this app
  * whether or not anyone taps share.
  */
-private fun shareFile(context: android.content.Context, file: java.io.File, mime: String) {
+internal fun shareFile(context: android.content.Context, file: java.io.File, mime: String) {
     val uri = androidx.core.content.FileProvider.getUriForFile(
         context,
         "${context.packageName}.fileprovider",
@@ -555,7 +587,7 @@ private fun shareFile(context: android.content.Context, file: java.io.File, mime
     context.startActivity(android.content.Intent.createChooser(intent, "Send conversation"))
 }
 
-private data class RenderedToolCall(val name: String, val arguments: String)
+private data class RenderedToolCall(val name: String, val arguments: String, val id: String)
 
 private fun parseToolCalls(raw: String?): List<RenderedToolCall> {
     if (raw.isNullOrBlank()) return emptyList()
@@ -567,6 +599,7 @@ private fun parseToolCalls(raw: String?): List<RenderedToolCall> {
                 RenderedToolCall(
                     name = obj["name"]?.jsonPrimitive?.content.orEmpty(),
                     arguments = obj["arguments"]?.jsonPrimitive?.content.orEmpty(),
+                    id = obj["id"]?.jsonPrimitive?.content.orEmpty(),
                 )
             }
     }.getOrDefault(emptyList())
