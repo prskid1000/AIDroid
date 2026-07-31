@@ -54,6 +54,7 @@ fun NAudioPlayer(
     file: File,
     modifier: Modifier = Modifier,
     autoPlay: Boolean = false,
+    onAutoPlayed: () -> Unit = {},
     label: String? = null,
 ) {
     if (!file.isFile) return
@@ -77,10 +78,14 @@ fun NAudioPlayer(
         onDispose { runCatching { player?.release() } }
     }
 
+    // A one-shot, acknowledged back to the caller. Without that, every
+    // recomposition would restart the clip from the top — and a Speak result
+    // recomposes as soon as you touch the scrubber.
     LaunchedEffect(file.path, autoPlay) {
         if (autoPlay && player != null) {
             runCatching { player.start() }
             playing = player.isPlaying
+            onAutoPlayed()
         }
     }
 

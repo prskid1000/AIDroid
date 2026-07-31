@@ -787,9 +787,11 @@ private fun SpeakPanel(
 
     // — act —
     NButton(
-        if (state.speaking) "Stop" else "Read aloud",
-        onClick = { if (state.speaking) viewModel.stopSpeaking() else viewModel.speak() },
-        style = if (state.speaking) NButtonStyle.Secondary else NButtonStyle.Primary,
+        // One button, because there is one act: rendering *is* speaking now,
+        // and the take that comes out is stored like an image or a transcript.
+        if (state.rendering) "Stop" else "Speak",
+        onClick = { if (state.rendering) viewModel.stopSpeaking() else viewModel.speak() },
+        style = if (state.rendering) NButtonStyle.Secondary else NButtonStyle.Primary,
         block = true,
         modifier = Modifier.padding(top = 16.dp),
     )
@@ -797,14 +799,6 @@ private fun SpeakPanel(
     // the two buttons that used to sit here are gone. "Save as WAV" wrote into
     // app-private storage and called that a save; Library does it properly, to
     // a folder you picked, and does it the same way for every artifact.
-    NButton(
-        if (state.rendering) "Rendering…" else "Render to a file",
-        onClick = { viewModel.exportAudio { } },
-        style = NButtonStyle.Secondary,
-        block = true,
-        minHeight = 44.dp,
-        modifier = Modifier.padding(top = 7.dp),
-    )
     // The take itself, playable. Before this the only way to hear a render was
     // to render it again, which for OmniVoice is minutes of compute to replay
     // four seconds of audio.
@@ -812,6 +806,8 @@ private fun SpeakPanel(
         NAudioPlayer(
             file = java.io.File(path),
             label = path.substringAfterLast('/'),
+            autoPlay = state.autoPlay,
+            onAutoPlayed = viewModel::autoPlayHandled,
             modifier = Modifier.padding(top = 8.dp),
         )
         NHelp(

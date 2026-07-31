@@ -1022,110 +1022,34 @@ class VoiceViewModel @Inject constructor(
         _state.value = _state.value.copy(voice = id, speakError = null)
     }
 
-    fun speak() {
-        val text = _state.value.script.trim()
-        if (text.isEmpty()) {
-            _state.value = _state.value.copy(speakError = "There is no script to read.")
-            return
-        }
-        speakJob?.cancel()
-        _state.value = _state.value.copy(speaking = true, speakError = null, spokenRange = null)
-        speakJob = viewModelScope.launch {
-            // Live only, and no row. Speaking streams straight to the speaker
-            // and files nothing, so there is no artifact for a run to belong to
-            // — a record keyed to nothing could never be found again. Rendering
-            // the same script to a WAV does produce one, and is recorded.
-            val recording = recorder.start(viewModelScope)
-            val liveJob = launch {
-                recording.live.collect { trace ->
-                    _state.value = _state.value.copy(liveTrace = trace)
-                }
-            }
-            try {
-                synthesizer.speak(currentRequest(text)).collect { event ->
-                    when (event) {
-                        is ai.ondevice.speech.SpeechEvent.Started ->
-                            _state.value = _state.value.copy(speaking = true)
-                        is ai.ondevice.speech.SpeechEvent.Range ->
-                            _state.value = _state.value.copy(spokenRange = event.start to event.end)
-                        is ai.ondevice.speech.SpeechEvent.Done ->
-                            _state.value = _state.value.copy(speaking = false, spokenRange = null)
-                        is ai.ondevice.speech.SpeechEvent.Failed ->
-                            _state.value = _state.value.copy(speaking = false, speakError = event.message)
-                    }
-                }
-            } finally {
-                // The flow *ending* is the terminal signal, not the Done event.
-                // Clearing `speaking` only on Done meant any engine that
-                // finished without emitting one left the button reading "Stop"
-                // for good — audio played, the run was over, and the only way
-                // out was to press Stop on something already stopped.
-                //
-                // Assignment to a StateFlow does not suspend, so unlike the
-                // teardown in ChatViewModel this needs no NonCancellable; a
-                // cancelled coroutine can still run it. speakError survives the
-                // copy, so a failure keeps its message.
-                liveJob.cancel()
-                _state.value = _state.value.copy(
-                    speaking = false,
-                    spokenRange = null,
-                    liveTrace = null,
-                    lastTrace = recording.stop(),
-                )
-            }
-        }
-    }
-
-    fun stopSpeaking() {
-        speakJob?.cancel()
-        speakJob = null
-        synthesizer.stop()
-        _state.value = _state.value.copy(speaking = false, spokenRange = null)
-    }
-
     /**
-     * Clear the work in progress, keep the setup.
+     * Read the script aloud — by rendering it, storing it, and playing the file.
      *
-     * The script, the reference clip and the last transcript go; the engine, the
-     * voice and the dials stay, for the same reason the Image screen's reset
-     * leaves the model alone — they are how this device is configured, not what
-     * this take is. Anything already rendered is in the library.
+     * It used to stream straight to the speaker and file nothing, which made
+     * Speak the only part of this app that produced no artifact: an image is
+     * always written, a transcript is always written, and a take you had just
+     * waited minutes for existed until the audio stopped. That asymmetry is why
+     * this screen carried two buttons where Image and Transcribe carry one.
+     *
+     * Nothing is given up by rendering first. Both neural engines synthesise
+     * the entire passage before a sample is played, so there was never any
+     * streaming to lose — only the system engine differs, and what it loses is
+     * word-level highlighting, which no neural voice ever reported anyway.
      */
-    fun reset() {
-        stopSpeaking()
-        if (_state.value.recording) stopRecording()
-        _state.value = _state.value.copy(
-            script = "",
-            scriptSource = null,
-            speakError = null,
-            lastAudioPath = null,
-            spokenRange = null,
-            referenceSamples = null,
-            referenceTranscript = "",
-            referenceSeconds = 0f,
-            referenceName = "",
-            transcribingReference = false,
-            segments = emptyList(),
-            partial = emptyList(),
-            title = "",
-            error = null,
-            errorHint = null,
-            elapsedMillis = 0,
-        )
+    fun speak() {
+        speakJob?.cancel()
+        speakJob = viewModelScope.launch { render(autoPlay = true) }
     }
 
-    /**
-     * Render to a WAV the user can keep or send. §7 asks for export, and a
-     * passage you can only hear once is not an artifact.
-     */
-    fun exportAudio(onReady: (java.io.File) -> Unit) {
+    /** Render, store, and record the run. The only path that makes audio. */
+    private suspend fun render(autoPlay: Boolean) {
         val text = _state.value.script.trim()
         if (text.isEmpty()) {
             _state.value = _state.value.copy(speakError = "There is no script to render.")
             return
         }
         _state.value = _state.value.copy(rendering = true, speakError = null)
-        viewModelScope.launch {
+        kotlinx.coroutines.coroutineScope {
             val stem = (_state.value.scriptSource ?: "read-aloud")
                 .substringBeforeLast('.')
                 .lowercase()
@@ -1197,11 +1121,64 @@ class VoiceViewModel @Inject constructor(
                 rendering = false,
                 speakError = result.exceptionOrNull()?.message,
                 lastAudioPath = result.getOrNull()?.absolutePath,
+                // Only a Speak plays itself. A render triggered any other way
+                // leaves the player parked, because audio starting on its own
+                // is startling when you did not ask to hear anything.
+                autoPlay = autoPlay && result.isSuccess,
                 liveTrace = null,
                 lastTrace = trace,
             )
-            result.getOrNull()?.let(onReady)
         }
+    }
+
+    /**
+     * Stop, whichever half is running.
+     *
+     * Cancelling the job is what actually stops a render — the synthesiser is
+     * inside a suspending call — and the playback is the player's own, so this
+     * only has to tell the engine to be quiet.
+     */
+    fun stopSpeaking() {
+        speakJob?.cancel()
+        speakJob = null
+        synthesizer.stop()
+        _state.value = _state.value.copy(rendering = false, speaking = false, autoPlay = false)
+    }
+
+    /** The player consumed the one-shot; do not start again on the next recomposition. */
+    fun autoPlayHandled() {
+        if (_state.value.autoPlay) _state.value = _state.value.copy(autoPlay = false)
+    }
+
+    /**
+     * Clear the work in progress, keep the setup.
+     *
+     * The script, the reference clip and the last transcript go; the engine, the
+     * voice and the dials stay, for the same reason the Image screen's reset
+     * leaves the model alone — they are how this device is configured, not what
+     * this take is. Anything already rendered is in the library.
+     */
+    fun reset() {
+        stopSpeaking()
+        if (_state.value.recording) stopRecording()
+        _state.value = _state.value.copy(
+            script = "",
+            scriptSource = null,
+            speakError = null,
+            lastAudioPath = null,
+            spokenRange = null,
+            referenceSamples = null,
+            referenceTranscript = "",
+            referenceSeconds = 0f,
+            referenceName = "",
+            transcribingReference = false,
+            segments = emptyList(),
+            partial = emptyList(),
+            title = "",
+            error = null,
+            errorHint = null,
+            elapsedMillis = 0,
+        )
     }
 
     /**
@@ -1805,6 +1782,8 @@ data class VoiceState(
     /** Word being spoken right now, as character offsets into the script. */
     val spokenRange: Pair<Int, Int>? = null,
     val lastAudioPath: String? = null,
+    /** True for exactly one recomposition after a Speak, so the player starts itself. */
+    val autoPlay: Boolean = false,
     val speakError: String? = null,
     val kokoroAvailable: Boolean = false,
     val omniVoiceAvailable: Boolean = false,
