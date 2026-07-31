@@ -178,18 +178,18 @@ internal object Arithmetic {
         }
 
         private fun term(): Double {
-            var value = power()
+            var value = unary()
             while (true) {
                 skipSpace()
                 when {
-                    consume('*') -> value *= power()
+                    consume('*') -> value *= unary()
                     consume('/') -> {
-                        val divisor = power()
+                        val divisor = unary()
                         require(divisor != 0.0) { "division by zero" }
                         value /= divisor
                     }
                     consume('%') -> {
-                        val divisor = power()
+                        val divisor = unary()
                         require(divisor != 0.0) { "modulo by zero" }
                         value %= divisor
                     }
@@ -198,18 +198,28 @@ internal object Arithmetic {
             }
         }
 
-        private fun power(): Double {
-            val base = unary()
-            skipSpace()
-            // Right-associative, as everyone writing 2^3^2 expects.
-            return if (consume('^')) Math.pow(base, power()) else base
-        }
-
+        /**
+         * Sign binds *looser* than the exponent, so `-2^2` is −4.
+         *
+         * This used to sit below [power], which made the minus part of the base
+         * and answered 4. Every calculator and every language with an exponent
+         * operator disagrees, and a wrong answer from a tool is worse than no
+         * tool — it arrives with an authority the model's own arithmetic does
+         * not have.
+         */
         private fun unary(): Double {
             skipSpace()
             if (consume('-')) return -unary()
             if (consume('+')) return unary()
-            return atom()
+            return power()
+        }
+
+        private fun power(): Double {
+            val base = atom()
+            skipSpace()
+            // Right-associative, as everyone writing 2^3^2 expects. The right
+            // operand is a unary so `2^-3` reads the way it looks.
+            return if (consume('^')) Math.pow(base, unary()) else base
         }
 
         private fun atom(): Double {
