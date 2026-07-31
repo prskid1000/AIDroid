@@ -27,6 +27,76 @@ set(VENDOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../native")
 add_compile_definitions(GGML_MAX_NAME=160)
 
 # ---------------------------------------------------------------------------
+# OpenCL — the GPU ggml can actually reach on this class of device.
+#
+# arm64 only, and not because of taste: the x86_64 target is the emulator,
+# whose GPU is the host's through a translation layer with no OpenCL at all.
+#
+# Two things are needed and neither comes from the NDK. The headers are
+# vendored (native/VERSIONS). The *library* is the interesting part: Android
+# ships no OpenCL, but a device that has one exposes its own libOpenCL.so as a
+# vendor public library — on this phone that file is itself a Khronos ICD
+# loader, and it is the only thing that knows where Adreno's driver lives. So
+# the Khronos loader is built here purely so the linker has symbols to bind
+# against, and deliberately *not* packaged: an APK-local libOpenCL.so would
+# shadow the platform's with a loader that can find no driver at all. See the
+# jniLibs exclusion in app/build.gradle.kts, which is the half of this that
+# actually keeps it out.
+# ---------------------------------------------------------------------------
+
+set(ONDEVICE_OPENCL OFF)
+if (ANDROID_ABI STREQUAL "arm64-v8a")
+    set(ONDEVICE_OPENCL ON)
+endif()
+
+if (ONDEVICE_OPENCL)
+    set(ONDEVICE_OPENCL_HEADERS "${VENDOR_DIR}/OpenCL-Headers")
+
+    # Shared for this subdirectory only. The loader's own CMake picks STATIC or
+    # SHARED off BUILD_SHARED_LIBS, and a static one would be *linked into* our
+    # .so — which is the one outcome to avoid, since then the driverless loader
+    # is what runs instead of the phone's. Restored immediately: llama.cpp and
+    # everything after it are still built static.
+    set(BUILD_SHARED_LIBS ON)
+    set(OPENCL_ICD_LOADER_HEADERS_DIR "${ONDEVICE_OPENCL_HEADERS}" CACHE PATH "" FORCE)
+    set(OPENCL_ICD_LOADER_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(OPENCL_ICD_LOADER_PIC ON CACHE BOOL "" FORCE)
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    add_subdirectory("${VENDOR_DIR}/OpenCL-ICD-Loader"
+                     "${CMAKE_CURRENT_BINARY_DIR}/opencl-icd" EXCLUDE_FROM_ALL)
+    set(BUILD_SHARED_LIBS OFF)
+
+    # Out of the directory Gradle collects .so files from. Belt; the exclusion
+    # in build.gradle.kts is braces.
+    set_target_properties(OpenCL PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/link-only")
+
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+    # ggml's OpenCL backend runs a Python script at build time to turn each .cl
+    # kernel into a header. The interpreter it needs is the *build host's*, and
+    # the NDK toolchain points every find_package at the Android sysroot, where
+    # there is obviously no python — so the search is widened for programs only
+    # and resolved once here. Resolving it here rather than inside ggml also
+    # means the failure, if python really is missing, names python.
+    set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+    find_package(Python3 COMPONENTS Interpreter)
+    if (NOT Python3_FOUND)
+        message(FATAL_ERROR
+            "OpenCL needs a host python3 to embed ggml's kernels. Install one, "
+            "or build without it — the CPU backend does not need python.")
+    endif()
+    message(STATUS "ondevice: OpenCL kernels will be embedded using ${Python3_EXECUTABLE}")
+
+    set(GGML_OPENCL                    ON  CACHE BOOL "" FORCE)
+    # Embedded, not shipped beside the library: a .cl file the app has to find
+    # at runtime is one more thing that can go missing from an APK.
+    set(GGML_OPENCL_EMBED_KERNELS      ON  CACHE BOOL "" FORCE)
+    set(GGML_OPENCL_USE_ADRENO_KERNELS ON  CACHE BOOL "" FORCE)
+    set(GGML_OPENCL_TARGET_VERSION     "300" CACHE STRING "" FORCE)
+endif()
+
+# ---------------------------------------------------------------------------
 # llama.cpp
 #
 # SPEC §17.5 pins the runtime to an upstream tag rather than tracking a branch,

@@ -44,6 +44,17 @@ enum class BackendId {
             HEXAGON -> "Hexagon HTP"
             CPU -> "CPU"
         }
+
+    /**
+     * Whether a name ggml registered means this backend.
+     *
+     * ggml names its registries for people — "OpenCL", "CPU" — and this enum
+     * names them for a database column, so the two only coincide by luck.
+     * Matching on both spellings, case-insensitively, means a rename upstream
+     * degrades to "unrecognised backend" rather than to a wrong one.
+     */
+    fun matches(registered: String): Boolean =
+        registered.equals(name, ignoreCase = true) || registered.equals(label, ignoreCase = true)
 }
 
 /**

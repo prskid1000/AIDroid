@@ -83,20 +83,68 @@ class RuntimeRegistry(private val context: Context) {
         descriptors.any { it.installed && format in it.formats }
 
     /**
-     * Whether the installed text runtime actually has a GPU backend compiled
-     * in. The quant list quotes a fast path off the back of this, so it has to
-     * describe the binary rather than the hardware the binary is running on.
+     * Whether the text runtime has a GPU it can actually reach.
+     *
+     * The quant list quotes a fast path off the back of this. It used to have
+     * to describe the *binary*, because no build had a GPU backend and the only
+     * honest question was what was compiled; now that one is compiled into
+     * every arm64 build, the binary is no longer the interesting half — a
+     * compiled backend on a phone with no driver behind libOpenCL.so is not a
+     * fast path. [backendsFor] asks the device.
      */
     val hasOpenClBackend: Boolean
-        get() = descriptor(LLAMA)?.let { it.installed && BackendId.OPENCL in it.backends } == true
+        get() = BackendId.OPENCL in backendsFor(LLAMA)
 
     /**
      * The backends [runtimeId] actually registered, which is not the same
      * question as which one the user would like. Empty means the runtime is not
      * installed; callers treat CPU as the floor rather than inventing a device.
+     *
+     * Asked of the loaded binary first, and only then of the manifest. The two
+     * answer different questions: runtimes.json says what this *build compiles*,
+     * which is a property of the APK, while ggml's registry says what it found
+     * *on this phone* — and those diverge exactly where it matters. The OpenCL
+     * backend is compiled into every arm64 build; whether a device has a driver
+     * behind libOpenCL.so is not something the APK can know, and a manifest that
+     * claimed OPENCL on a phone without one would send work at a device that
+     * does not exist.
      */
-    fun backendsFor(runtimeId: String): List<BackendId> =
-        descriptor(runtimeId)?.takeIf { it.installed }?.backends ?: emptyList()
+    fun backendsFor(runtimeId: String): List<BackendId> {
+        val declared = descriptor(runtimeId)?.takeIf { it.installed }?.backends ?: return emptyList()
+        return registered(runtimeId).ifEmpty { declared }
+    }
+
+    /**
+     * What ggml registered in this process, per runtime, asked once.
+     *
+     * Per runtime rather than once for all three, because they are three shared
+     * objects with a static ggml each: they are built from one CMake invocation
+     * and so far always agree, but "so far always agree" is not a thing to hard
+     * code — whisper's answer comes from whisper's binary.
+     *
+     * A runtime with no way to answer, or one whose library is not loadable at
+     * all, returns empty and the caller falls back to the manifest. That is the
+     * honest shape: an unanswered question is not the answer "CPU".
+     */
+    private fun registered(runtimeId: String): List<BackendId> = reported.getOrPut(runtimeId) {
+        val info = runCatching {
+            when (runtimeId) {
+                LLAMA -> if (LlamaBridge.available) LlamaBridge.nativeSystemInfo() else null
+                STABLE_DIFFUSION -> if (SdBridge.available) SdBridge.nativeSystemInfo() else null
+                else -> null
+            }
+        }.getOrNull() ?: return@getOrPut emptyList()
+
+        runCatching {
+            val names = json.decodeFromString(ReportedInfo.serializer(), info).backends
+            android.util.Log.i("RuntimeRegistry", "$runtimeId registered ${names.joinToString()}")
+            names
+                .mapNotNull { name -> BackendId.entries.firstOrNull { it.matches(name) } }
+                .distinct()
+        }.getOrElse { emptyList() }
+    }
+
+    private val reported = mutableMapOf<String, List<BackendId>>()
 
     val llamaBuildTag: String get() = buildTag(LLAMA)
 
@@ -139,6 +187,18 @@ data class RuntimeDescriptor(
     val backends: List<BackendId>,
     val installed: Boolean,
     val sizeBytes: Long,
+)
+
+/**
+ * The slice of a bridge's `nativeSystemInfo()` this file reads.
+ *
+ * Deliberately not the whole document: it also carries build numbers and a
+ * device list, and parsing fields nobody reads is how a JSON contract acquires
+ * requirements it never meant to have.
+ */
+@Serializable
+private data class ReportedInfo(
+    val backends: List<String> = emptyList(),
 )
 
 @Serializable

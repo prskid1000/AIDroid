@@ -1,6 +1,28 @@
 import java.io.FileInputStream
 import java.util.Properties
 
+/**
+ * The host python, as python itself reports it.
+ *
+ * `sys.executable` rather than `where python`: the thing on PATH is often a
+ * launcher, and the launcher is not what CMake can run from a build rule.
+ * Returns null when there is no python, which is not an error here — only the
+ * OpenCL backend needs one, and CMake refuses with its own message.
+ */
+fun hostPython(): String? = listOf("python", "python3").firstNotNullOfOrNull { name ->
+    runCatching {
+        val process = ProcessBuilder(
+            if (System.getProperty("os.name").startsWith("Windows")) {
+                listOf("cmd", "/c", name, "-c", "import sys; print(sys.executable)")
+            } else {
+                listOf(name, "-c", "import sys; print(sys.executable)")
+            },
+        ).redirectErrorStream(true).start()
+        val path = process.inputStream.bufferedReader().readText().trim()
+        if (process.waitFor() == 0 && File(path).isFile) path.replace('\\', '/') else null
+    }.getOrNull()
+}
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -64,6 +86,19 @@ android {
                 cFlags += listOf("-O3", "-DNDEBUG")
 
                 arguments += listOf("-DANDROID_STL=c++_shared")
+
+                // ggml's OpenCL backend embeds its kernels by running a python
+                // script, and CMake has to be told which interpreter — its own
+                // search looks for `python3.exe` and finds nothing behind a
+                // pyenv shim, a Windows Store alias or a venv launcher, all of
+                // which are `python` on PATH and work perfectly well.
+                //
+                // So PATH is asked the question directly, in the shell that
+                // understands those, and the answer is the real executable.
+                // When there is no python at all this passes nothing and CMake
+                // says so itself — with a message naming python, which is the
+                // part that was worth the glue.
+                hostPython()?.let { arguments += "-DPython3_EXECUTABLE=$it" }
             }
         }
     }
@@ -168,6 +203,16 @@ android {
             "/META-INF/{AL2.0,LGPL2.1}",
             "META-INF/DEPENDENCY",
         )
+        // The Khronos ICD loader is built as a link target and must not ship.
+        //
+        // Every device that has OpenCL exposes its own libOpenCL.so as a vendor
+        // public library, and that one knows where its driver is; ours knows
+        // nothing — it exists so the NDK linker has symbols to resolve. An
+        // APK-local copy would win the soname and hand ggml a loader with no
+        // driver behind it, which fails at context creation rather than at
+        // load, i.e. as far from the cause as it is possible to get. See the
+        // OpenCL block in src/main/cpp/CMakeLists.txt.
+        jniLibs.excludes += "**/libOpenCL.so"
     }
 }
 

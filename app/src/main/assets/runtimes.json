@@ -31,7 +31,8 @@
         "EMBEDDING"
       ],
       "backends": [
-        "CPU"
+        "CPU",
+        "OPENCL"
       ],
       "architectures": [
         "afmoe",
@@ -188,7 +189,8 @@
         "TRANSCRIBE"
       ],
       "backends": [
-        "CPU"
+        "CPU",
+        "OPENCL"
       ],
       "architectures": [
         "whisper"
@@ -254,7 +256,8 @@
         "DIFFUSION"
       ],
       "backends": [
-        "CPU"
+        "CPU",
+        "OPENCL"
       ],
       "architectures": [
         "sd1",

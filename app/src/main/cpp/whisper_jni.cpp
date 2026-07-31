@@ -253,7 +253,13 @@ Java_ai_ondevice_engine_WhisperBridge_nativeLoad(JNIEnv * env, jobject, jstring 
     const auto path = jni_to_string(env, jpath);
 
     whisper_context_params cparams = whisper_context_default_params();
-    cparams.use_gpu = false; // no GPU backend is compiled in; see runtimes.json
+    // Asked for, not asserted. whisper enumerates ggml's devices and takes a
+    // GPU only if one registered — on a build or a phone without OpenCL that
+    // loop finds nothing and it runs on the CPU, which is why this can be a
+    // constant. It read `false` for as long as no GPU backend was compiled in;
+    // now one is, and leaving it would have been the same kind of stale claim
+    // in the other direction.
+    cparams.use_gpu = true;
 
     auto * engine = new od_whisper();
     engine->ctx = whisper_init_from_file_with_params(path.c_str(), cparams);

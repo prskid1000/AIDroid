@@ -95,6 +95,10 @@ def sd_architectures(repo: pathlib.Path) -> list[str]:
     return sorted({n.lower() for n in names if n not in ("COUNT", "Count")})
 
 
+# The runtimes that share one ggml, and so share its backend set.
+GGML_RUNTIMES = {"llama.cpp", "whisper.cpp", "stable-diffusion.cpp"}
+
+
 def main() -> int:
     existing = json.loads(ASSET.read_text(encoding="utf-8"))
     by_id = {r["id"]: r for r in existing["runtimes"]}
@@ -127,11 +131,19 @@ def main() -> int:
         entry["upstreamCommit"] = commit
         entry["architectures"] = architectures
         entry["installed"] = True
-        # The declared backends must match what CMakeLists actually compiles.
-        # Claiming OpenCL because the hardware might have it is the kind of
-        # unmeasured assertion SPEC 8.2 exists to forbid — the app reads the
-        # real list back from ggml at init and shows that on the Runtimes screen.
-        entry["backends"] = ["CPU"]
+        # What CMakeLists compiles, which is a property of the APK and not of
+        # any phone. arm64 additionally builds ggml's OpenCL backend; x86_64 is
+        # the emulator, whose GPU is the host's through a translation layer with
+        # no OpenCL behind it.
+        #
+        # Compiled is not the same as present: whether a device has a driver
+        # behind libOpenCL.so is unknowable from here, so this list is only the
+        # fallback. RuntimeRegistry.backendsFor asks the loaded binary first and
+        # reports what ggml registered on the phone in front of it — SPEC 8.2,
+        # do not assert what can be measured.
+        # Kokoro is the exception: it is ONNX Runtime, not ggml, and its
+        # accelerators are execution providers asked of ORT at load time.
+        entry["backends"] = ["CPU", "OPENCL"] if runtime_id in GGML_RUNTIMES else ["CPU"]
         print(f"  {runtime_id}: {tag} ({commit}) — {len(architectures)} architectures")
 
     ASSET.write_text(json.dumps(existing, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

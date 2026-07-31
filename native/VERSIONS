@@ -19,6 +19,18 @@ whisper.cpp           https://github.com/ggml-org/whisper.cpp            v1.9.1 
 stable-diffusion.cpp  https://github.com/leejet/stable-diffusion.cpp     master  22516991cbdf725e69b0b4a87e52ca16cce07c2d
 espeak-ng             https://github.com/espeak-ng/espeak-ng             1.52.0  4870adfa25b1a32b4361592f1be8a40337c58d6c
 
+# OpenCL, for ggml's GPU backend on Adreno. Two repositories because the API
+# and the loader that finds a driver for it are separately versioned; they are
+# pinned to the same Khronos release so they cannot disagree.
+#
+# The loader is built but *not shipped*. Android exposes the phone's own
+# libOpenCL.so as a vendor public library, and that one already knows where its
+# driver is; ours exists so the NDK linker has the symbols to resolve against.
+# Packaging it would shadow the real one with a loader that can find nothing —
+# see the note in app/src/main/cpp/CMakeLists.txt.
+OpenCL-Headers        https://github.com/KhronosGroup/OpenCL-Headers     v2025.07.22 8a97ebc88daa3495d6f57ec10bb515224400186f
+OpenCL-ICD-Loader     https://github.com/KhronosGroup/OpenCL-ICD-Loader  v2025.07.22 ad770a1b64c6b8d5f2ed4e153f22e4f45939f27f
+
 # espeak-ng is Kokoro's front end, and it needs *compiled* data tables that its
 # own build produces by running the espeak-ng binary — impossible when
 # cross-compiling to Android. The tables are staged into assets instead, by

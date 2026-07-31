@@ -17,6 +17,8 @@ native/llama.cpp/
 native/whisper.cpp/
 native/stable-diffusion.cpp/
 native/espeak-ng/
+native/OpenCL-Headers/
+native/OpenCL-ICD-Loader/
 
 # The staged espeak-ng data tables under app/src/main/assets/ are NOT ignored:
 # they are compiled artifacts that need the espeak-ng binary to produce, which a
