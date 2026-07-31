@@ -10,7 +10,21 @@
 
 # JNI entry points for the native runtimes (SPEC 16.7 — the boundary is a
 # string-keyed map, so only the bridge classes need keeping).
--keep class ai.ondevice.engine.jni.** { *; }
+#
+# This used to read `ai.ondevice.engine.jni.**`, a package that has never
+# existed: the bridges are in `ai.ondevice.engine` and `ai.ondevice.speech`, so
+# the rule kept nothing. Nothing broke, because proguard-android-optimize.txt
+# carries `-keepclasseswithmembernames class * { native <methods>; }` and every
+# one of these is a class of native methods — verified against mapping.txt,
+# where all four appear unrenamed. Naming them anyway: a rule whose protection
+# is entirely accidental is one nobody can reason about, and the symbol the
+# linker looks for is spelled out of the class's fully-qualified name.
+-keepclasseswithmembernames,includedescriptorclasses class ai.ondevice.engine.LlamaBridge,
+    ai.ondevice.engine.WhisperBridge,
+    ai.ondevice.engine.SdBridge,
+    ai.ondevice.speech.PhonemizerBridge {
+    native <methods>;
+}
 
 # Tink, which androidx.security.crypto pulls in for the encrypted preferences,
 # is annotated with Error Prone's compile-time annotations. Those are

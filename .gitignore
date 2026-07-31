@@ -24,3 +24,11 @@ native/espeak-ng/
 
 # Kotlin compiler session state — transient build output, never source.
 .kotlin/
+
+# The release signing key and its passwords. A committed keystore is a
+# published one: anyone with it can ship an update that Android accepts as
+# this app. build.gradle.kts falls back to an unsigned release when neither
+# the file nor the environment supplies a key, so a fresh clone still builds.
+keystore.properties
+*.jks
+*.keystore

@@ -1,3 +1,6 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -20,8 +23,14 @@ android {
 
         // SPEC 2.2 — arm64 is the only shipping ABI; armeabi-v7a would double
         // the APK for devices that could never load these models anyway.
-        // x86_64 is here for the emulator, and is excluded from release below.
-        ndk { abiFilters += setOf("arm64-v8a", "x86_64") }
+        //
+        // x86_64 is added by the debug build type rather than listed here.
+        // Build-type `abiFilters` are *merged* with defaultConfig's, not
+        // substituted for them, so the release block's `abiFilters.clear()`
+        // cleared its own empty set and shipped x86_64 anyway — 63 MB of
+        // emulator-only native code in every release APK, silently, for as long
+        // as the comment claiming otherwise had been there.
+        ndk { abiFilters += "arm64-v8a" }
 
         externalNativeBuild {
             cmake {
@@ -79,16 +88,52 @@ android {
         }
     }
 
+    // The release key is never in the repository. It is read from
+    // `keystore.properties` beside this file, or from the environment for a
+    // build machine that has no checkout-local file. If neither is present the
+    // release build still runs and simply produces an unsigned APK, so a fresh
+    // clone can verify that R8 and the shrinker are happy without holding a
+    // signing key — which is the only part of the release build most changes
+    // can actually break.
+    val keystoreProperties = Properties()
+    rootProject.file("keystore.properties").takeIf { it.exists() }?.let { file ->
+        FileInputStream(file).use { keystoreProperties.load(it) }
+    }
+
+    fun secret(key: String, env: String): String? =
+        keystoreProperties.getProperty(key) ?: System.getenv(env)
+
+    // Resolved against the repo root, not this module. `file(...)` inside an
+    // `android {}` block is relative to app/, so a `storeFile=release.jks`
+    // sitting beside keystore.properties silently did not exist and the release
+    // came out unsigned — with no error, because an unsigned release is a valid
+    // thing to produce.
+    val releaseStore = secret("storeFile", "ANDROID_KEYSTORE")
+        ?.let { rootProject.file(it) }
+        ?.takeIf { it.exists() }
+
+    signingConfigs {
+        if (releaseStore != null) {
+            create("release") {
+                storeFile = releaseStore
+                storePassword = secret("storePassword", "ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = secret("keyAlias", "ANDROID_KEY_ALIAS")
+                keyPassword = secret("keyPassword", "ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
+            // The emulator, and only here. No emulator ships to users.
+            ndk { abiFilters += "x86_64" }
         }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // No emulator ships to users.
-            ndk { abiFilters.clear(); abiFilters += "arm64-v8a" }
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 
