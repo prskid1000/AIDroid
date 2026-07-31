@@ -128,6 +128,17 @@ android {
             isMinifyEnabled = false
             // The emulator, and only here. No emulator ships to users.
             ndk { abiFilters += "x86_64" }
+            // Signed with the release key when there is one, so debug and
+            // release are mutually installable. Android refuses to update a
+            // package with a differently-signed APK, so with the default debug
+            // key the only way to move between the two on a phone is to
+            // uninstall — which takes the model files and the whole database
+            // with it. That is a real cost (gigabytes of downloads and every
+            // conversation) paid to keep a key distinction that buys nothing:
+            // both builds carry the same applicationId and neither is
+            // distributed. Falls back to the debug key when no keystore is
+            // configured, so a fresh clone still builds.
+            signingConfigs.findByName("release")?.let { signingConfig = it }
         }
         release {
             isMinifyEnabled = true
