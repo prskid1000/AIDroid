@@ -50,6 +50,7 @@ import ai.ondevice.ui.components.NCardMeta
 import ai.ondevice.ui.components.NDropdown
 import ai.ondevice.ui.components.NEnumRow
 import ai.ondevice.ui.components.NHelp
+import ai.ondevice.ui.components.NIconButton
 import ai.ondevice.ui.components.NInput
 import ai.ondevice.ui.components.NMetaText
 import ai.ondevice.ui.components.NPills
@@ -350,43 +351,82 @@ fun VoiceScreen(
                         Modifier.padding(top = 8.dp),
                     )
 
-                    NButton(
-                        when {
-                            state.loading -> "Loading model…"
-                            state.recording -> "Stop and keep"
-                            else -> "Start recording"
-                        },
-                        onClick = {
+                    // Record, hold, stop — the three states a recorder has.
+                    // Pause keeps the microphone, so resuming does not risk
+                    // losing the device to another app in the handover.
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        NButton(
                             when {
-                                state.recording -> viewModel.stopRecording()
-                                // The permission is asked for at the moment it
-                                // is needed, with the reason on screen — not at
-                                // launch, before the user has any context.
-                                !hasMicPermission -> micPermission.launch(Manifest.permission.RECORD_AUDIO)
-                                else -> viewModel.startRecording()
-                            }
-                        },
-                        style = NButtonStyle.Primary,
-                        block = true,
-                        minHeight = 48.dp,
-                        modifier = Modifier.padding(top = 12.dp),
-                    )
+                                state.loading -> "Loading model…"
+                                state.recording -> "Stop"
+                                else -> "Record"
+                            },
+                            onClick = {
+                                when {
+                                    state.recording -> viewModel.stopRecording()
+                                    // The permission is asked for at the moment
+                                    // it is needed, with the reason on screen —
+                                    // not at launch, before the user has any
+                                    // context for the request.
+                                    !hasMicPermission ->
+                                        micPermission.launch(Manifest.permission.RECORD_AUDIO)
+                                    else -> viewModel.startRecording()
+                                }
+                            },
+                            style = NButtonStyle.Primary,
+                            modifier = Modifier.weight(1f),
+                            minHeight = 48.dp,
+                        )
+                        if (state.recording) {
+                            NIconButton(
+                                if (state.paused) NIcons.Play else NIcons.Pause,
+                                if (state.paused) "Resume recording" else "Pause recording",
+                                onClick = {
+                                    if (state.paused) viewModel.resumeRecording()
+                                    else viewModel.pauseRecording()
+                                },
+                                size = 48.dp,
+                            )
+                        }
+                        NIconButton(
+                            NIcons.File,
+                            "Choose a recording",
+                            onClick = {
+                                viewModel.setSource(TranscribeSource.FILE)
+                                pickAudio()
+                            },
+                            size = 48.dp,
+                        )
+                    }
 
-                    // The other way in, as an action rather than a tab. Both
-                    // routes end in the same decoder and the same transcript
-                    // panel, so making them modes meant choosing before you
-                    // could see what either produced.
-                    NButton(
-                        "Choose a recording",
-                        onClick = {
-                            viewModel.setSource(TranscribeSource.FILE)
-                            pickAudio()
-                        },
-                        style = NButtonStyle.Secondary,
-                        block = true,
-                        minHeight = 44.dp,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
+                    // The take, once it exists: hear it before deciding to
+                    // spend the decode on it, and decode the whole file rather
+                    // than the sliding window the live pass could see.
+                    state.recordedPath?.let { path ->
+                        NAudioPlayer(
+                            file = java.io.File(path),
+                            label = path.substringAfterLast('/'),
+                            modifier = Modifier.padding(top = 10.dp),
+                        )
+                        NButton(
+                            if (state.loading) "Processing…" else "Process",
+                            onClick = viewModel::processRecording,
+                            style = NButtonStyle.Primary,
+                            block = true,
+                            enabled = !state.loading,
+                            minHeight = 46.dp,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                        NHelp(
+                            "The live text above came from a sliding window. Processing decodes " +
+                                "the whole recording, which is what produces timed segments.",
+                            Modifier.padding(top = 6.dp),
+                        )
+                    }
                 }
 
                 state.mode == VoiceMode.TRANSCRIBE -> {
@@ -730,14 +770,31 @@ private fun SpeakPanel(
     // text area, because a file you cannot fix a typo in before it is read
     // aloud is a worse file. So the tab was a wall between a text box and the
     // button that fills it. Loading a file now just types into it.
-    NButton(
-        if (state.scriptSource != null) "Replace with a file" else "Load from file",
-        onClick = onPickScript,
-        style = NButtonStyle.Secondary,
-        block = true,
-        minHeight = 42.dp,
-        modifier = Modifier.padding(bottom = 8.dp),
-    )
+    // Two verbs on one row of icons rather than two full-width buttons. They
+    // are things you do *to* the script, so they sit with it rather than
+    // competing with Speak for the width of the screen.
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        NMetaText(
+            state.scriptSource?.substringAfterLast('/')
+                ?: "${state.script.length} characters",
+        )
+        Box(Modifier.weight(1f))
+        NIconButton(
+            NIcons.File,
+            if (state.scriptSource != null) "Replace with a file" else "Load from file",
+            onClick = onPickScript,
+        )
+        NIconButton(
+            NIcons.Trash,
+            "Clear the script",
+            onClick = { viewModel.setScript("") },
+            enabled = state.script.isNotEmpty(),
+        )
+    }
     run {
         NTextArea(
             value = state.script,
@@ -745,13 +802,6 @@ private fun SpeakPanel(
             placeholder = "Type or paste what should be read aloud.",
             minHeight = 130.dp,
             textStyle = NocturneType.Row,
-        )
-        NButton(
-            "Clear",
-            onClick = { viewModel.setScript("") },
-            block = true,
-            minHeight = 44.dp,
-            modifier = Modifier.padding(top = 8.dp),
         )
     }
     NHelp(

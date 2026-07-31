@@ -732,6 +732,9 @@ class VoiceViewModel @Inject constructor(
     private var captureLiveJob: Job? = null
     private var captureStartedAt: Long = 0
 
+    /** Where the take in progress is being written; null when not recording. */
+    private var captureFile: java.io.File? = null
+
     init {
         viewModelScope.launch {
             _state.value = _state.value.copy(transcripts = db.transcripts().observeAll().first())
@@ -1339,12 +1342,22 @@ class VoiceViewModel @Inject constructor(
         }
         _state.value = _state.value.copy(
             recording = true,
+            paused = false,
+            recordedPath = null,
             elapsedMillis = 0,
             partial = emptyList(),
             error = null,
             errorHint = null,
         )
 
+        // Every take is kept. The decoder only ever sees a ten-second window,
+        // so without this the audio is gone the moment it has been read — and
+        // a recording you cannot play back or re-run is a transcript with no
+        // source.
+        captureFile = java.io.File(
+            storage.speechDir(),
+            "recording-${System.currentTimeMillis()}.wav",
+        )
         captureStartedAt = System.currentTimeMillis()
         captureRecording = recorder.start(viewModelScope)
         captureLiveJob = viewModelScope.launch {
@@ -1377,7 +1390,7 @@ class VoiceViewModel @Inject constructor(
                 stepMs = stepMs,
                 vadEnabled = overrides.bool("vad") ?: _state.value.vadEnabled,
             )
-            transcriber.listen(stepMillis = stepMs).collect { event ->
+            transcriber.listen(stepMillis = stepMs, captureTo = captureFile).collect { event ->
                 when (event) {
                     is CaptureEvent.Level -> {
                         levels.addLast(event.peak)
@@ -1401,6 +1414,23 @@ class VoiceViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Hold the take without ending it.
+     *
+     * The microphone stays open — see [ai.ondevice.engine.Transcriber.pause] —
+     * and the samples read while paused are dropped, so the file has a gap
+     * rather than a stretch of silence as long as the pause.
+     */
+    fun pauseRecording() {
+        transcriber.pause()
+        _state.value = _state.value.copy(paused = true)
+    }
+
+    fun resumeRecording() {
+        transcriber.resume()
+        _state.value = _state.value.copy(paused = false)
+    }
+
     fun stopRecording() {
         recordingJob?.cancel()
         recordingJob = null
@@ -1416,7 +1446,7 @@ class VoiceViewModel @Inject constructor(
                 db.transcripts().upsert(
                     TranscriptEntity(
                         id = transcriptId,
-                        sourcePath = null,
+                        sourcePath = captureFile?.takeIf { it.isFile }?.absolutePath,
                         title = "Live capture",
                         // A sliding window has no segment boundaries to report,
                         // so the timings are genuinely zero here rather than
@@ -1457,11 +1487,30 @@ class VoiceViewModel @Inject constructor(
             }
             _state.value = _state.value.copy(
                 recording = false,
+                paused = false,
+                // Kept so the take can be played back and run again properly:
+                // the live pass only ever saw a sliding window, and a decode of
+                // the whole file gets real segment boundaries the window could
+                // never produce.
+                recordedPath = captureFile?.takeIf { it.isFile && it.length() > 44 }?.absolutePath,
                 liveTrace = null,
                 lastTrace = trace ?: _state.value.lastTrace,
                 transcripts = db.transcripts().observeAll().first(),
             )
         }
+    }
+
+    /**
+     * Decode the recording properly, now that it is a file.
+     *
+     * The live pass reads a ten-second window every few seconds, so its output
+     * has no segment boundaries and re-decodes words as the window slides. This
+     * runs the whole take once, which is what produces timed segments — the
+     * same path a picked file takes, because by now it *is* one.
+     */
+    fun processRecording() {
+        val path = _state.value.recordedPath ?: return
+        transcribeFile(android.net.Uri.fromFile(java.io.File(path)))
     }
 
     /** SPEC §6.3 — transcribe a file the user picked. */
@@ -1782,6 +1831,9 @@ data class VoiceState(
     /** Word being spoken right now, as character offsets into the script. */
     val spokenRange: Pair<Int, Int>? = null,
     val lastAudioPath: String? = null,
+    /** The WAV of the take just recorded, once it has been stopped. */
+    val recordedPath: String? = null,
+    val paused: Boolean = false,
     /** True for exactly one recomposition after a Speak, so the player starts itself. */
     val autoPlay: Boolean = false,
     val speakError: String? = null,
