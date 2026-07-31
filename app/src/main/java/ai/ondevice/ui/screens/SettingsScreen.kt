@@ -26,7 +26,7 @@ import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NCard
 import ai.ondevice.ui.components.NHelp
 import ai.ondevice.ui.components.NInput
-import ai.ondevice.ui.components.NRadio
+import ai.ondevice.ui.components.NSeg
 import ai.ondevice.ui.components.NSwitch
 import ai.ondevice.ui.components.NTag
 import ai.ondevice.ui.components.NTagStyle
@@ -80,29 +80,44 @@ fun SettingsScreen(
             // And auto was never a choice: it meant "the first backend
             // registered", an ordering dressed up as a decision.
             //
-            // All three are always listed, including ones this build cannot
+            // All three are always shown, including ones this phone cannot
             // reach, because "the NPU is not an option here" is information and
-            // a missing row is not. An unreachable one says why and cannot be
-            // selected (§1.2 — a refusal names what went wrong).
+            // a missing segment is not. An unreachable one is dimmed, unselectable,
+            // and named underneath (§1.2 — a refusal names what went wrong).
             SectionKicker("Compute device", Modifier.padding(top = 20.dp, bottom = 8.dp))
+            val devices = listOf(BackendId.HEXAGON, BackendId.OPENCL, BackendId.CPU)
+            val available = state.availableBackends
             NCard(gap = 7.dp) {
-                val available = state.availableBackends
-                listOf(BackendId.HEXAGON, BackendId.OPENCL, BackendId.CPU).forEach { device ->
-                    val usable = device in available
-                    NRadio(
-                        label = device.label + if (usable) "" else " — not available on this device",
-                        selected = state.backendMode == device.name,
-                        enabled = usable,
-                        onSelect = { viewModel.setBackendMode(device.name) },
-                    )
-                }
+                // One row rather than three stacked radios: three one-word
+                // labels naming three pieces of the same chip are a single
+                // choice, and reading them as a column made them look like
+                // three separate settings.
+                NSeg(
+                    options = devices.map { it.label },
+                    selectedIndex = devices.indexOfFirst { it.name == state.backendMode }
+                        .takeIf { it >= 0 } ?: devices.indexOf(BackendId.CPU),
+                    onSelect = { viewModel.setBackendMode(devices[it].name) },
+                    enabled = { devices[it] in available },
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
+            // A dimmed segment says "not here" but not why, and the row has no
+            // space for the reason — so the reason goes underneath, naming the
+            // devices rather than leaving the user to work out which one is grey.
+            val missing = devices.filterNot { it in available }
             NHelp(
                 "What ggml registered on this phone, not what the build contains: a backend " +
                     "compiled in still needs the silicon and the driver behind it. The GPU runs " +
                     "through OpenCL, the NPU through Hexagon — and the NPU only has kernels for " +
                     "Q4_0, Q4_1, Q8_0, IQ4_NL and MXFP4 weights, so a K-quant model selects it " +
-                    "and then does its arithmetic on the CPU regardless.",
+                    "and then does its arithmetic on the CPU regardless." +
+                    if (missing.isEmpty()) {
+                        ""
+                    } else {
+                        " " + missing.joinToString(" and ") { it.label } +
+                            " did not register here, so ${if (missing.size > 1) "they are" else "it is"} " +
+                            "shown but cannot be chosen."
+                    },
                 Modifier.padding(top = 8.dp),
             )
 

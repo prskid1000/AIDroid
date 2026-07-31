@@ -183,6 +183,12 @@ fun NSeg(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
     textStyle: TextStyle = NocturneType.Input.copy(fontSize = 13.sp),
+    /**
+     * Per-option, because "this one exists but not here" is information and a
+     * missing segment is not — the compute-device row lists a GPU and an NPU
+     * whether or not this phone answered for them.
+     */
+    enabled: (Int) -> Boolean = { true },
 ) {
     Row(
         modifier = modifier
@@ -191,6 +197,7 @@ fun NSeg(
     ) {
         options.forEachIndexed { i, label ->
             val selected = i == selectedIndex
+            val usable = enabled(i)
             // The selected ring has to follow the container's own corners at
             // the two ends. Drawing it square meant the outer clip sliced its
             // corners off, which reads as a chipped border rather than a
@@ -209,14 +216,18 @@ fun NSeg(
                         if (i > 0) Modifier.drawLeftDivider() else Modifier,
                     )
                     .then(if (selected) Modifier.ring(NocturneColors.Accent, segmentShape) else Modifier)
-                    .selectable(selected = selected, onClick = { onSelect(i) })
+                    .selectable(selected = selected, enabled = usable, onClick = { onSelect(i) })
                     .padding(horizontal = 12.dp, vertical = 7.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     label,
                     style = textStyle,
-                    color = if (selected) NocturneColors.Accent else NocturneColors.Text,
+                    color = when {
+                        !usable -> NocturneColors.TextMuted
+                        selected -> NocturneColors.Accent
+                        else -> NocturneColors.Text
+                    },
                     maxLines = 1,
                 )
             }
