@@ -484,6 +484,20 @@ Java_ai_ondevice_engine_LlamaBridge_nativeInit(JNIEnv *, jobject) {
             if (level >= GGML_LOG_LEVEL_WARN) {
                 __android_log_write(level >= GGML_LOG_LEVEL_ERROR ? ANDROID_LOG_ERROR : ANDROID_LOG_WARN,
                                     "ondevice.llama", text);
+                return;
+            }
+            // Two INFO lines are worth the exception, because they answer a
+            // question nothing else can: where the weights actually went.
+            //
+            // "backend=HEXAGON" only says which device was *asked* for. A model
+            // whose layers do not fit, or whose quant the device has no kernels
+            // for, loads on that backend and computes on the CPU — and the only
+            // difference visible anywhere is these lines. There are roughly ten
+            // per load and none per token.
+            if (std::strstr(trimmed, "offloade") != nullptr ||
+                std::strstr(trimmed, "buffer size") != nullptr ||
+                std::strncmp(trimmed, "ggml-hex", 8) == 0) {
+                __android_log_write(ANDROID_LOG_INFO, "ondevice.llama", trimmed);
             }
         }, nullptr);
         common_log_pause(common_log_main());
