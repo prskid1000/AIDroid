@@ -56,7 +56,7 @@ class Converters {
         ParamManifestEntity::class,
         McpServerEntity::class,
     ],
-    version = 1,
+    version = DATABASE_VERSION,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -75,24 +75,43 @@ abstract class OnDeviceDatabase : RoomDatabase() {
     abstract fun mcpServers(): McpServerDao
 
     /**
-     * One version, no migrations.
+     * One version, no migrations — and a guard so that stays deliberate.
      *
      * The schema had reached v4 through three migrations, each written to carry
      * an installed base that does not exist: this app has never shipped, and the
      * only databases in the world are on development devices that are wiped
      * whenever the model set changes anyway. Three migration scripts, three
      * exported schema files and a backfill whose correctness nobody could check
-     * against real data — all of it maintenance for a population of zero.
+     * against real data — all of it maintenance for a population of zero. So the
+     * schema is stated once, at v1.
      *
-     * So the schema is stated once, at v1, and the builder falls back to
-     * recreating the database when it finds an older one. When the app does
-     * ship, this becomes v1 for real and the next change is v2 with a migration
-     * that has someone's data to protect. Until then a migration would be
-     * ceremony, and the ceremony was starting to hide things — `completedAt`'s
-     * backfill deliberately reproduced the bug it was replacing, which is right
-     * for a real upgrade and pointless when there is nothing to upgrade.
+     * The danger was never v1. It was v2: a destructive fallback that is correct
+     * today reads exactly the same on the day someone's conversations are in
+     * here, and nothing would have failed to warn about it. The fallback is now
+     * debug-only, so a version bump without a matching entry in [MIGRATIONS]
+     * throws on a release build instead of quietly emptying the database.
+     * `OnDeviceDatabaseMigrationTest` fails sooner still, at compile-and-test
+     * time, which is where this should be caught.
      */
     companion object {
         const val NAME = "ondevice.db"
+
+        /**
+         * One [Migration] per version step, in order, from 1 to
+         * [DATABASE_VERSION]. Empty while the schema has never changed.
+         *
+         * Adding a migration is not optional once the app has shipped: Room only
+         * consults this list, and anything it cannot find a path for is a
+         * refusal on release builds.
+         */
+        val MIGRATIONS: Array<androidx.room.migration.Migration> = emptyArray()
     }
 }
+
+/**
+ * Named rather than written into the annotation so a test can compare it with
+ * [OnDeviceDatabase.MIGRATIONS] — an annotation argument is not readable at
+ * runtime, and the pair only means anything when they are checked against each
+ * other.
+ */
+internal const val DATABASE_VERSION = 1

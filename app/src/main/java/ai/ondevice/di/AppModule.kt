@@ -2,6 +2,7 @@ package ai.ondevice.di
 
 import android.content.Context
 import androidx.room.Room
+import ai.ondevice.BuildConfig
 import ai.ondevice.data.ModelStorage
 import ai.ondevice.data.db.OnDeviceDatabase
 import ai.ondevice.data.download.Downloader
@@ -56,18 +57,24 @@ object AppModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): OnDeviceDatabase =
         Room.databaseBuilder(context, OnDeviceDatabase::class.java, OnDeviceDatabase.NAME)
-            // The schema is a single version while the app is pre-release, so
-            // the only databases this can meet are development ones from a
-            // shape that no longer exists. Recreating them is the honest
-            // answer; pretending to migrate them would be writing scripts
-            // against data nobody has.
-            //
-            // This must change before the first release. Once a stranger's
-            // conversations and per-model overrides are in here, dropping the
-            // database to add a column is not a trade the app gets to make on
-            // their behalf, and every schema change from that point needs a
-            // numbered migration and an exported schema to diff against.
-            .fallbackToDestructiveMigration()
+            .addMigrations(*OnDeviceDatabase.MIGRATIONS)
+            .apply {
+                // Recreating a database is the right answer on a development
+                // device, where the only ones that exist came from a schema
+                // shape that no longer does and get wiped whenever the model
+                // set changes anyway.
+                //
+                // It is never the right answer for someone's conversations and
+                // per-model overrides. Dropping their data to add a column is
+                // not a trade this app gets to make on their behalf, and the
+                // failure mode of leaving the fallback in is silent — the app
+                // starts, the database is empty, and nothing reports why. So
+                // the fallback is scoped to debug builds: a release build with
+                // a version bump and no migration refuses to open the database
+                // and says so, which is a bug caught in testing rather than a
+                // support ticket from someone who lost their chat history.
+                if (BuildConfig.DEBUG) fallbackToDestructiveMigration()
+            }
             .build()
 
     @Provides @Singleton fun provideModelDao(db: OnDeviceDatabase) = db.models()
