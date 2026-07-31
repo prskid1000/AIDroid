@@ -1966,7 +1966,20 @@
           "step": 1,
           "tier": "ADVANCED",
           "label": "Unmasking steps",
-          "help": "OmniVoice is a diffusion language model: it starts from a fully masked grid of audio tokens and commits the most confident ones over this many passes. Fewer is faster and rougher. This is the quality dial the architecture has — there is no temperature or top-p on a masked decoder.",
+          "help": "OmniVoice is a diffusion language model: it starts from a fully masked grid of audio tokens and commits the most confident ones over this many passes. Fewer is faster and rougher. Each step is two forward passes when guidance is on, so this is the setting that decides how long synthesis takes.",
+          "requiresReload": false
+        },
+        {
+          "key": "guidance_scale",
+          "group": "generation",
+          "type": "float",
+          "default": 2.0,
+          "min": 0.0,
+          "max": 10.0,
+          "step": 0.1,
+          "tier": "ADVANCED",
+          "label": "Guidance",
+          "help": "Every step also runs the grid with no text at all, and this decides how hard the result is pushed away from what the model would say unprompted. It is most of what makes the voice follow the text. Setting it to 0 skips that second pass and halves synthesis time, which is the only large speed dial this model has — and costs most of the quality.",
           "requiresReload": false
         },
         {
@@ -1980,6 +1993,71 @@
           "tier": "EXPERT",
           "label": "Length override",
           "help": "Grid length in 40 ms frames; 0 estimates it from the text. Nothing in the model predicts duration, so the estimate runs long on purpose — an over-long grid ends in silence that gets trimmed, while a short one truncates mid-word and cannot be repaired.",
+          "requiresReload": false
+        },
+        {
+          "key": "t_shift",
+          "group": "generation",
+          "type": "float",
+          "default": 0.1,
+          "min": 0.01,
+          "max": 1.0,
+          "step": 0.01,
+          "tier": "EXPERT",
+          "label": "Schedule shape",
+          "help": "How the commits are spread across the steps. 1.0 spreads them evenly; the default of 0.1 is heavily back-loaded, so the opening steps commit a handful of tokens and the last commits about a fifth of the grid. The early decisions are the ones everything else is built on, so making few of them on the least evidence is deliberate.",
+          "requiresReload": false
+        },
+        {
+          "key": "layer_penalty",
+          "group": "generation",
+          "type": "float",
+          "default": 5.0,
+          "min": 0.0,
+          "max": 20.0,
+          "step": 0.5,
+          "tier": "EXPERT",
+          "label": "Codebook ordering",
+          "help": "Each audio frame is eight stacked codebooks, the first carrying most of the sound and the rest refining it. This holds the later ones back until the earlier ones are decided, subtracting this much per codebook from the confidence score. At 0 all eight compete on equal terms and the refinements can be committed before what they refine.",
+          "requiresReload": false
+        },
+        {
+          "key": "position_temperature",
+          "group": "generation",
+          "type": "float",
+          "default": 5.0,
+          "min": 0.0,
+          "max": 20.0,
+          "step": 0.5,
+          "tier": "EXPERT",
+          "label": "Order randomness",
+          "help": "Randomises which token is committed next, not which value it gets. 0 always takes the most confident, which sounds flatter than it looks like it should — some disorder in the commit order is what keeps the result from collapsing towards one delivery.",
+          "requiresReload": false
+        },
+        {
+          "key": "class_temperature",
+          "group": "generation",
+          "type": "float",
+          "default": 0.0,
+          "min": 0.0,
+          "max": 5.0,
+          "step": 0.1,
+          "tier": "EXPERT",
+          "label": "Token randomness",
+          "help": "Randomises which value a token gets, sampled from the top tenth of the codebook rather than taking the most likely. 0 is upstream's default and takes the most likely every time. Raising it varies the delivery between runs at some risk to pronunciation.",
+          "requiresReload": false
+        },
+        {
+          "key": "seed",
+          "group": "generation",
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 2147483647,
+          "step": 1,
+          "tier": "EXPERT",
+          "label": "Seed",
+          "help": "0 picks a fresh one each run. Because the commit order is randomised, the same text spoken twice is otherwise two different takes — set this to get the same one back.",
           "requiresReload": false
         },
         {

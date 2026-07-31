@@ -16,8 +16,8 @@ package ai.ondevice.core
  * MB and then cannot speak wastes their storage as well.
  *
  * OmniVoice is listed now that there is an engine for it, with its cost stated
- * rather than buried: it is genuinely six to seven times slower than Kokoro, so
- * the summary says so before the download starts rather than after.
+ * rather than buried: it is more than an order of magnitude slower than Kokoro,
+ * so the summary says so before the download starts rather than after.
  */
 data class StarterModel(
     /** What goes in the paste field, verbatim. */

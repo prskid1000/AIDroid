@@ -387,6 +387,14 @@ class SpeechSynthesizer(
                 instruction = request.voiceDesign?.takeIf { it.isNotBlank() },
                 steps = request.steps ?: OmniVoiceEngine.DEFAULT_STEPS,
                 frames = request.frames?.takeIf { it > 0 },
+                guidance = request.guidance ?: OmniVoiceEngine.DEFAULT_GUIDANCE,
+                timestepShift = request.timestepShift ?: OmniVoiceEngine.DEFAULT_T_SHIFT,
+                layerPenalty = request.layerPenalty ?: OmniVoiceEngine.DEFAULT_LAYER_PENALTY,
+                positionTemperature = request.positionTemperature
+                    ?: OmniVoiceEngine.DEFAULT_POSITION_TEMPERATURE,
+                classTemperature = request.classTemperature
+                    ?: OmniVoiceEngine.DEFAULT_CLASS_TEMPERATURE,
+                seed = request.seed,
             ),
         ).map { audio ->
             // OmniVoice has no gain input either, so volume is applied here for
@@ -562,12 +570,25 @@ data class SpeechRequest(
      * OmniVoice only: how many iterative unmasking passes to run.
      *
      * It is a diffusion language model over a masked grid of audio tokens, so
-     * this is the quality-for-time dial the architecture actually exposes —
-     * there is no temperature or top-p here. Null takes the engine's default.
+     * this is the main quality-for-time dial. Null takes the engine's default.
      */
     val steps: Int? = null,
     /** OmniVoice only: grid length in 40 ms frames. Null estimates from the text. */
     val frames: Int? = null,
+    /**
+     * OmniVoice only: the rest of upstream's generation config.
+     *
+     * These arrived with the ported unmasking loop. The engine holds the
+     * defaults so there is one source for them; null here means "whatever the
+     * engine says", rather than a second copy that can drift.
+     */
+    val guidance: Float? = null,
+    val timestepShift: Float? = null,
+    val layerPenalty: Float? = null,
+    val positionTemperature: Float? = null,
+    val classTemperature: Float? = null,
+    /** 0 picks a fresh seed per run; anything else makes the run repeatable. */
+    val seed: Long = 0L,
 ) {
     val isKokoro: Boolean get() = provider == SynthProvider.KOKORO
 }
@@ -588,9 +609,9 @@ enum class SynthProvider(val label: String) {
     KOKORO("Kokoro"),
 
     /**
-     * Slower than Kokoro by six or seven times, and worth it only for what
-     * Kokoro cannot do at all — emotion tags, cloning, and languages this build
-     * has no phonemiser for. Never selected automatically.
+     * Slower than Kokoro by more than an order of magnitude, and worth it only
+     * for what Kokoro cannot do at all — emotion tags, cloning, and languages
+     * this build has no phonemiser for. Never selected automatically.
      */
     OMNIVOICE("OmniVoice"),
     SYSTEM("System engine"),

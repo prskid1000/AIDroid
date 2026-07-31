@@ -21,9 +21,12 @@ import java.nio.LongBuffer
  *
  * It is not a replacement for Kokoro and is not offered as one. Measured on one
  * desktop at four threads, Kokoro synthesises at 0.46 s of compute per second of
- * speech and OmniVoice at 2.7–3.5 s — six or seven times slower, and a phone
- * multiplies that again. Kokoro remains the default because most of the time you
- * want a sentence read aloud, not composed.
+ * speech and OmniVoice at 2.7–3.5 s. Classifier-free guidance has since doubled
+ * the forward passes — 64 rather than 32 for a default run — so the honest
+ * figure is around 5.5–7 s, and that part is derived from the pass count rather
+ * than re-measured. Either way a phone multiplies it again, and Kokoro remains
+ * the default because most of the time you want a sentence read aloud, not
+ * composed.
  *
  * What it buys, and Kokoro genuinely cannot do:
  *
@@ -38,9 +41,9 @@ import java.nio.LongBuffer
  * ### How it generates, and why that shapes the API
  *
  * This is **not** an autoregressive model. It fills a fixed-length grid of audio
- * frames by iterative unmasking: every position starts as MASK, and across 32
- * steps the most confident positions are committed until none are left. Two
- * consequences run all the way to the UI:
+ * tokens by iterative unmasking: every one of the `frames × 8` slots starts as
+ * MASK, and across 32 steps the most confident are committed until none are
+ * left. Two consequences run all the way to the UI:
  *
  *  1. **The duration is chosen before the first forward pass.** Nothing predicts
  *     it. Ask for too few frames and the sentence is cut off mid-word; too many
@@ -270,7 +273,7 @@ class OmniVoiceEngine {
                         "would work; nothing is wrong with your download or this device."
                 }
 
-                val codes = mutex.withLock { unmask(textTokens, frames, request.steps) }
+                val codes = mutex.withLock { unmask(textTokens, frames, request) }
                 val samples = mutex.withLock { decodeToWaveform(codes, frames) }
 
                 KokoroAudio(
@@ -327,101 +330,261 @@ class OmniVoiceEngine {
         return tok.encodeWithMarkup(style) + tok.encodeWithMarkup("<|text_start|>$text<|text_end|>")
     }
 
-    // — the 32-step loop —
+    // — the unmasking loop —
 
     /**
-     * Confidence-ordered iterative unmasking.
+     * Confidence-ordered iterative unmasking, as the model's own `generate()`
+     * does it.
      *
-     * Each step scores every still-masked frame by how sure the model is of its
-     * best code, weighted across the eight codebooks — the earlier codebooks
-     * carry most of the signal, hence the 8,8,6,6,4,4,2,2 weighting — and
-     * commits the most confident ones.
+     * The version this replaces was translated from the ONNX repo's
+     * `inference.py`, and that script is a cruder algorithm than the model
+     * expects — it would degrade the audio even on a correct graph. Four things
+     * differ, and each is upstream's, not invented here:
      *
-     * The number committed per step is ceil(remaining / stepsLeft) rather than a
-     * fixed fraction. That matters: with a fixed fraction a handful of frames can
-     * still be masked when the steps run out, and MASK (1024) is outside the
-     * codec's 0..1023 range, so the vocoder does not degrade gracefully — it
-     * fails. Dividing by the steps remaining guarantees the grid is full.
+     *  1. **The unit is a slot, not a frame.** The grid has `frames × 8`
+     *     independently maskable (codebook, frame) cells, and a step commits the
+     *     most confident *cells*. Committing all eight codebooks of a frame
+     *     together throws away most of the ordering the model is scored on.
+     *  2. **The schedule is a shifted diffusion curve**, not `remaining /
+     *     stepsLeft`. With `t_shift` 0.1 it is convex: the opening steps commit a
+     *     handful of slots and the last commits a fifth of the grid, so the
+     *     cheap early decisions are made on the least evidence and the rest
+     *     follow from them.
+     *  3. **The codebook bias is subtractive** — `score − codebook × 5.0` — so
+     *     codebook 0 is committed well before codebook 7. The 8,8,6,6,4,4,2,2
+     *     multiplicative weighting that used to be here appears nowhere upstream;
+     *     it was guessed.
+     *  4. **Classifier-free guidance.** Every step runs the grid a second time
+     *     with no text at all and pushes the prediction away from what the model
+     *     would say unprompted. This is what doubles the cost, and it is also
+     *     what the corrected export bought: an unconditional branch is only
+     *     meaningful if attention can see the whole grid.
+     *
+     * Measured against the PyTorch reference on the same sentence: 54.4 dB
+     * dynamic range against 54.7, spectral centroid 1390 Hz against 1431.
+     *
+     * The schedule sums to exactly `frames × 8`, so the grid is always full at
+     * the end. That matters because MASK (1024) is outside the codec's 0..1023
+     * range and the vocoder does not degrade gracefully when it sees one — it
+     * fails. No safety net is needed for it; arithmetic covers it.
      */
-    private suspend fun unmask(textTokens: IntArray, frames: Int, steps: Int): Array<LongArray> {
+    private suspend fun unmask(
+        textTokens: IntArray,
+        frames: Int,
+        request: OmniVoiceRequest,
+    ): Array<LongArray> {
+        val steps = request.steps.coerceIn(1, MAX_STEPS)
         val textLength = textTokens.size
-        val sequence = textLength + frames
+        val condSequence = textLength + frames
+        val slots = CODEBOOKS * frames
 
-        // (codebooks, sequence), flattened per codebook for cheap column reads.
-        val ids = Array(CODEBOOKS) { LongArray(sequence) }
+        // The grid being filled, [codebook][frame]. Everything starts masked.
+        val tokens = Array(CODEBOOKS) { LongArray(frames) { MASK_ID.toLong() } }
+        val schedule = buildSchedule(frames, steps, request.timestepShift)
+        // A fixed seed makes a run reproducible, which matters because the
+        // position temperature genuinely randomises which slots go first: the
+        // same text twice is otherwise two different takes.
+        val random = java.util.Random(
+            if (request.seed != 0L) request.seed else System.nanoTime(),
+        )
+
+        // The conditional branch: text, then the grid. Only the grid half is
+        // rewritten between steps, so the text is laid in once.
+        val condIds = Array(CODEBOOKS) { LongArray(condSequence) }
         for (cb in 0 until CODEBOOKS) {
-            for (i in 0 until textLength) ids[cb][i] = textTokens[i].toLong()
-            for (i in textLength until sequence) ids[cb][i] = MASK_ID.toLong()
+            for (i in 0 until textLength) condIds[cb][i] = textTokens[i].toLong()
         }
+        val condAudio = BooleanArray(condSequence) { it >= textLength }
+        val condAttention = LongArray(condSequence) { 1L }
+        // The unconditional branch is the grid alone — not the same sequence
+        // with the text masked out, but a shorter one with no text in it.
+        val uncondAudio = BooleanArray(frames) { true }
+        val uncondAttention = LongArray(frames) { 1L }
 
-        val audioMask = BooleanArray(sequence) { it >= textLength }
-        val attention = LongArray(sequence) { 1L }
-        var remaining = frames
+        val scores = FloatArray(slots)
+        val predicted = IntArray(slots)
+        val probabilities = FloatArray(AUDIO_VOCAB)
+        val unguided = FloatArray(AUDIO_VOCAB)
+        val ranked = FloatArray(AUDIO_VOCAB)
 
         for (step in 0 until steps) {
-            if (remaining == 0) break
+            val take = schedule[step]
+            if (take <= 0) continue
             currentCoroutineContext().ensureActive()
 
-            val logits = forward(ids, audioMask, attention, sequence)
+            for (cb in 0 until CODEBOOKS) tokens[cb].copyInto(condIds[cb], textLength)
+            val conditional = forward(condIds, condAudio, condAttention, condSequence)
+            val unconditional = if (request.guidance != 0f) {
+                forward(tokens, uncondAudio, uncondAttention, frames)
+            } else {
+                null
+            }
 
-            // Confidence per generation-region frame.
-            val confidence = FloatArray(frames)
-            val best = Array(CODEBOOKS) { IntArray(frames) }
             for (cb in 0 until CODEBOOKS) {
-                val weight = CODEBOOK_WEIGHTS[cb] / WEIGHT_SUM
+                val penalty = cb * request.layerPenalty
                 for (f in 0 until frames) {
-                    val base = ((cb.toLong() * sequence + (textLength + f)) * AUDIO_VOCAB).toInt()
-                    var maxLogit = Float.NEGATIVE_INFINITY
-                    var argmax = 0
-                    // Real codes only — MASK at 1024 must never be selected.
-                    for (v in 0 until CODEBOOK_SIZE) {
-                        val value = logits[base + v]
-                        if (value > maxLogit) {
-                            maxLogit = value
-                            argmax = v
-                        }
+                    val slot = cb * frames + f
+                    if (tokens[cb][f] != MASK_ID.toLong()) {
+                        // Already committed, and a slot is only decided once.
+                        scores[slot] = Float.NEGATIVE_INFINITY
+                        continue
                     }
-                    var sum = 0f
-                    for (v in 0 until CODEBOOK_SIZE) sum += kotlin.math.exp(logits[base + v] - maxLogit)
-                    best[cb][f] = argmax
-                    confidence[f] += weight / sum // exp(max - max) == 1, so p_max = 1/sum
+                    predicted[slot] = scoreSlot(
+                        conditional = conditional,
+                        condBase = ((cb.toLong() * condSequence + (textLength + f)) * AUDIO_VOCAB).toInt(),
+                        unconditional = unconditional,
+                        uncondBase = ((cb.toLong() * frames + f) * AUDIO_VOCAB).toInt(),
+                        guidance = request.guidance,
+                        classTemperature = request.classTemperature,
+                        probabilities = probabilities,
+                        unguided = unguided,
+                        ranked = ranked,
+                        random = random,
+                    )
+                    var best = Float.NEGATIVE_INFINITY
+                    for (v in 0 until AUDIO_VOCAB) {
+                        if (probabilities[v] > best) best = probabilities[v]
+                    }
+                    scores[slot] = perturb(best - penalty, request.positionTemperature, random)
                 }
             }
 
-            val masked = (0 until frames).filter { ids[0][textLength + it] == MASK_ID.toLong() }
-            if (masked.isEmpty()) break
-
-            val stepsLeft = (steps - step).coerceAtLeast(1)
-            val take = ((masked.size + stepsLeft - 1) / stepsLeft).coerceAtLeast(1)
-            val order = masked.sortedByDescending { confidence[it] }.take(take)
-            order.forEach { f ->
-                for (cb in 0 until CODEBOOKS) ids[cb][textLength + f] = best[cb][f].toLong()
+            // The `take` most confident still-masked slots, across the whole
+            // grid rather than per frame.
+            val order = (0 until slots)
+                .filter { scores[it] > Float.NEGATIVE_INFINITY }
+                .sortedByDescending { scores[it] }
+                .take(take)
+            order.forEach { slot ->
+                tokens[slot / frames][slot % frames] = predicted[slot].toLong()
             }
-            remaining -= order.size
         }
 
-        // Safety net: anything still masked is filled greedily from one more
-        // pass, because a MASK reaching the vocoder is a hard failure.
-        val leftover = (0 until frames).filter { ids[0][textLength + it] == MASK_ID.toLong() }
-        if (leftover.isNotEmpty()) {
-            val logits = forward(ids, audioMask, attention, sequence)
-            leftover.forEach { f ->
-                for (cb in 0 until CODEBOOKS) {
-                    val base = ((cb.toLong() * sequence + (textLength + f)) * AUDIO_VOCAB).toInt()
-                    var maxLogit = Float.NEGATIVE_INFINITY
-                    var argmax = 0
-                    for (v in 0 until CODEBOOK_SIZE) {
-                        if (logits[base + v] > maxLogit) {
-                            maxLogit = logits[base + v]
-                            argmax = v
-                        }
-                    }
-                    ids[cb][textLength + f] = argmax.toLong()
+        return tokens
+    }
+
+    /**
+     * How many slots to commit at each step.
+     *
+     * `t' = shift·t / (1 + (shift−1)·t)` over `linspace(0, 1, steps+1)`, and the
+     * step's share is the gap between consecutive points. At the upstream
+     * default of 0.1 the curve is convex, so the first step of thirty-two takes
+     * around 0.5% of the grid and the last takes a fifth. Rounding up every
+     * step and giving the remainder to the last guarantees the total is exact.
+     */
+    internal fun buildSchedule(frames: Int, steps: Int, shift: Float): IntArray {
+        val safeShift = shift.coerceIn(MIN_T_SHIFT, 1f)
+        val curve = FloatArray(steps + 1) {
+            val t = it.toFloat() / steps
+            safeShift * t / (1f + (safeShift - 1f) * t)
+        }
+        val total = frames * CODEBOOKS
+        var remaining = total
+        return IntArray(steps) { step ->
+            val take = if (step == steps - 1) {
+                remaining
+            } else {
+                minOf(kotlin.math.ceil(total * (curve[step + 1] - curve[step])).toInt(), remaining)
+            }
+            remaining -= take
+            take
+        }
+    }
+
+    /**
+     * Guided log-probabilities for one slot, left in [probabilities]; returns
+     * the code to commit there.
+     *
+     * The caller reads the confidence back off [probabilities] rather than
+     * getting it returned, because with a class temperature the sampled code
+     * and the most probable one are different codes — and it is the *most
+     * probable* one whose probability orders the commits.
+     */
+    private fun scoreSlot(
+        conditional: FloatArray,
+        condBase: Int,
+        unconditional: FloatArray?,
+        uncondBase: Int,
+        guidance: Float,
+        classTemperature: Float,
+        probabilities: FloatArray,
+        unguided: FloatArray,
+        ranked: FloatArray,
+        random: java.util.Random,
+    ): Int {
+        logSoftmax(conditional, condBase, probabilities)
+        if (unconditional != null) {
+            logSoftmax(unconditional, uncondBase, unguided)
+            // c + g·(c − u), then renormalised. Pushing away from what the model
+            // says with no text is what sharpens it towards this text.
+            for (v in 0 until AUDIO_VOCAB) {
+                probabilities[v] += guidance * (probabilities[v] - unguided[v])
+            }
+            logSoftmax(probabilities, 0, probabilities)
+        }
+        // MASK is in the vocabulary and in the softmax denominator, but it can
+        // never be committed — a MASK reaching the vocoder is a hard failure.
+        probabilities[MASK_ID] = Float.NEGATIVE_INFINITY
+
+        if (classTemperature <= 0f) {
+            var argmax = 0
+            var best = Float.NEGATIVE_INFINITY
+            for (v in 0 until AUDIO_VOCAB) {
+                if (probabilities[v] > best) {
+                    best = probabilities[v]
+                    argmax = v
                 }
             }
+            return argmax
         }
 
-        return Array(CODEBOOKS) { cb -> ids[cb].copyOfRange(textLength, sequence) }
+        // Sample instead of taking the best, from the top tenth of the
+        // vocabulary. Off by default; upstream's own default is 0.
+        //
+        // Sorted through a scratch array rather than `sortedDescending()`, which
+        // returns a boxed List<Float> — a thousand allocations per slot, and
+        // there are frames × 8 slots on every one of the steps.
+        val keep = kotlin.math.ceil(TOP_K_RATIO * AUDIO_VOCAB).toInt()
+        probabilities.copyInto(ranked)
+        java.util.Arrays.sort(ranked)
+        val threshold = ranked[AUDIO_VOCAB - keep]
+        var argmax = 0
+        var best = Float.NEGATIVE_INFINITY
+        for (v in 0 until AUDIO_VOCAB) {
+            if (probabilities[v] < threshold) continue
+            val sampled = perturb(probabilities[v], classTemperature, random)
+            if (sampled > best) {
+                best = sampled
+                argmax = v
+            }
+        }
+        return argmax
+    }
+
+    /**
+     * `omnivoice._gumbel_sample`: divide by the temperature, then add Gumbel
+     * noise. Dividing rather than multiplying is the direction that makes a
+     * *higher* temperature mean *more* randomness, since it shrinks the real
+     * differences the fixed-scale noise then swamps.
+     */
+    private fun perturb(value: Float, temperature: Float, random: java.util.Random): Float {
+        if (temperature <= 0f) return value
+        val uniform = random.nextFloat()
+        val gumbel = -kotlin.math.ln(-kotlin.math.ln(uniform + 1e-10f) + 1e-10f)
+        return value / temperature + gumbel
+    }
+
+    /** Log-softmax of `source[base until base + AUDIO_VOCAB]` into [destination]. */
+    private fun logSoftmax(source: FloatArray, base: Int, destination: FloatArray) {
+        var max = Float.NEGATIVE_INFINITY
+        for (v in 0 until AUDIO_VOCAB) {
+            val value = source[base + v]
+            if (value > max) max = value
+        }
+        var sum = 0f
+        for (v in 0 until AUDIO_VOCAB) sum += kotlin.math.exp(source[base + v] - max)
+        val normaliser = max + kotlin.math.ln(sum)
+        for (v in 0 until AUDIO_VOCAB) destination[v] = source[base + v] - normaliser
     }
 
     /** One pass: embeddings → 28-layer backbone → per-codebook logits, flattened. */
@@ -723,8 +886,12 @@ class OmniVoiceEngine {
          * same one.
          */
         val PARAM_KEYS = setOf(
-            "voice_design", "lang_code", "speed", "steps", "frames",
+            "voice_design", "lang_code", "speed", "steps", "guidance_scale", "frames",
             "trim_silence", "volume",
+            // The rest of upstream's generation config. They were absent while
+            // the loop was a translation of `inference.py`, which has no
+            // equivalent of any of them; the ported loop reads all five.
+            "t_shift", "layer_penalty", "position_temperature", "class_temperature", "seed",
         )
 
         const val SAMPLE_RATE = 24_000
@@ -745,15 +912,31 @@ class OmniVoiceEngine {
         const val CODEBOOK_SIZE = 1024
         const val MASK_ID = 1024
         const val AUDIO_VOCAB = CODEBOOK_SIZE + 1
+
+        /**
+         * Upstream's `OmniVoiceGenerationConfig` defaults, verbatim.
+         *
+         * Named here rather than written into the manifest so the engine is the
+         * one source: a screen that wants to show a default asks for it, the
+         * same way the native runtimes report theirs.
+         */
         const val DEFAULT_STEPS = 32
+        const val DEFAULT_GUIDANCE = 2.0f
+        const val DEFAULT_T_SHIFT = 0.1f
+        const val DEFAULT_LAYER_PENALTY = 5.0f
+        const val DEFAULT_POSITION_TEMPERATURE = 5.0f
+        const val DEFAULT_CLASS_TEMPERATURE = 0.0f
+
+        private const val MAX_STEPS = 256
+        /** Below this the schedule's denominator collapses towards zero. */
+        private const val MIN_T_SHIFT = 0.01f
+        /** `_filter_top_k`'s ratio: the top tenth of the vocabulary. */
+        private const val TOP_K_RATIO = 0.1f
 
         private const val KV_HEADS = 8L
         private const val HEAD_DIM = 128L
         private const val SILENCE_FRACTION = 0.02f
         private const val TWO_POW_NEG_24 = 5.9604645e-8f
-
-        private val CODEBOOK_WEIGHTS = floatArrayOf(8f, 8f, 6f, 6f, 4f, 4f, 2f, 2f)
-        private val WEIGHT_SUM = CODEBOOK_WEIGHTS.sum()
 
         private const val EMBEDDINGS = "audio_embeddings_encoder.onnx"
         private const val DECODER = "llm_decoder.onnx"
@@ -799,4 +982,22 @@ data class OmniVoiceRequest(
     val language: String? = null,
     /** Voice design: a written description of how it should sound. */
     val instruction: String? = null,
+    /**
+     * How hard to push away from what the model would say with no text.
+     *
+     * Zero switches the unconditional branch off entirely and halves the
+     * synthesis time, which is the only large speed dial this model has. It also
+     * costs most of the quality, so it is a trade rather than a free win.
+     */
+    val guidance: Float = OmniVoiceEngine.DEFAULT_GUIDANCE,
+    /** Shape of the commit schedule; 1.0 is linear, lower is back-loaded. */
+    val timestepShift: Float = OmniVoiceEngine.DEFAULT_T_SHIFT,
+    /** How strongly later codebooks are held back until earlier ones are set. */
+    val layerPenalty: Float = OmniVoiceEngine.DEFAULT_LAYER_PENALTY,
+    /** Randomness in *which slot* is committed next. */
+    val positionTemperature: Float = OmniVoiceEngine.DEFAULT_POSITION_TEMPERATURE,
+    /** Randomness in *which code* a slot gets. Zero takes the most likely. */
+    val classTemperature: Float = OmniVoiceEngine.DEFAULT_CLASS_TEMPERATURE,
+    /** Zero picks a fresh one per run; anything else makes the run repeatable. */
+    val seed: Long = 0L,
 )

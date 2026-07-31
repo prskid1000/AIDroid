@@ -866,6 +866,14 @@ class VoiceViewModel @Inject constructor(
                 voiceDesign = tts.string("voice_design") ?: _state.value.voiceDesign,
                 omniSteps = tts.int("steps") ?: _state.value.omniSteps,
                 omniFrames = tts.int("frames") ?: _state.value.omniFrames,
+                omniGuidance = tts.float("guidance_scale") ?: _state.value.omniGuidance,
+                omniTimestepShift = tts.float("t_shift") ?: _state.value.omniTimestepShift,
+                omniLayerPenalty = tts.float("layer_penalty") ?: _state.value.omniLayerPenalty,
+                omniPositionTemperature =
+                    tts.float("position_temperature") ?: _state.value.omniPositionTemperature,
+                omniClassTemperature =
+                    tts.float("class_temperature") ?: _state.value.omniClassTemperature,
+                omniSeed = tts.int("seed") ?: _state.value.omniSeed,
                 // The capture readout used to print these from hardcoded
                 // defaults, so setting them in Advanced changed neither the
                 // capture nor the line claiming to describe it.
@@ -1045,6 +1053,12 @@ class VoiceViewModel @Inject constructor(
             voiceDesign = _state.value.voiceDesign,
             steps = _state.value.omniSteps,
             frames = _state.value.omniFrames.takeIf { it > 0 },
+            guidance = _state.value.omniGuidance,
+            timestepShift = _state.value.omniTimestepShift,
+            layerPenalty = _state.value.omniLayerPenalty,
+            positionTemperature = _state.value.omniPositionTemperature,
+            classTemperature = _state.value.omniClassTemperature,
+            seed = _state.value.omniSeed.toLong(),
         )
     }
 
@@ -1323,6 +1337,22 @@ data class VoiceState(
     val omniSteps: Int = ai.ondevice.speech.OmniVoiceEngine.DEFAULT_STEPS,
     /** OmniVoice: grid length in 40 ms frames; 0 means estimate from the text. */
     val omniFrames: Int = 0,
+    /**
+     * The rest of OmniVoice's generation config, carried the same way as the two
+     * above: written by the Advanced screen into the model row, read back here,
+     * and handed to the engine. Nothing on the Speak screen shows them — they
+     * exist so the Advanced screen's writes are not inert, which is the same
+     * contract [VoiceViewModel.refreshFromOverrides] describes for Kokoro's.
+     */
+    val omniGuidance: Float = ai.ondevice.speech.OmniVoiceEngine.DEFAULT_GUIDANCE,
+    val omniTimestepShift: Float = ai.ondevice.speech.OmniVoiceEngine.DEFAULT_T_SHIFT,
+    val omniLayerPenalty: Float = ai.ondevice.speech.OmniVoiceEngine.DEFAULT_LAYER_PENALTY,
+    val omniPositionTemperature: Float =
+        ai.ondevice.speech.OmniVoiceEngine.DEFAULT_POSITION_TEMPERATURE,
+    val omniClassTemperature: Float =
+        ai.ondevice.speech.OmniVoiceEngine.DEFAULT_CLASS_TEMPERATURE,
+    /** 0 picks a fresh seed per run; anything else makes the run repeatable. */
+    val omniSeed: Int = 0,
     val ttsModels: List<ModelEntity> = emptyList(),
     /**
      * Which engine can run each voice model, keyed by model id.

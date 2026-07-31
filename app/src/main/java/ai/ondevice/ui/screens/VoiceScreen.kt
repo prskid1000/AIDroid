@@ -508,7 +508,7 @@ private fun SpeakPanel(
     // — which engine is actually speaking —
     //
     // A switch rather than an automatic choice. The two neural engines are not
-    // interchangeable: Kokoro is six or seven times faster, OmniVoice can do
+    // interchangeable: Kokoro is an order of magnitude faster, OmniVoice can do
     // things Kokoro cannot do at all. Picking on the user's behalf would mean
     // either surprising them with a minute of compute or silently dropping the
     // feature they came for.
@@ -586,8 +586,9 @@ private fun SpeakPanel(
                 // saying; the numbers go back in when they have been measured.
                 ai.ondevice.speech.SynthProvider.OMNIVOICE ->
                     "Reads any language with no phonemiser, takes [laughter] and [sigh], and can " +
-                        "voice several speakers. Much slower than Kokoro — it runs a diffusion " +
-                        "loop per frame, so expect to wait even for a short sentence."
+                        "voice several speakers. Much slower than Kokoro — it runs the whole " +
+                        "model twice per step and there are thirty-two of them, so expect to " +
+                        "wait even for a short sentence."
                 ai.ondevice.speech.SynthProvider.SYSTEM ->
                     "Android's own synthesiser. A different voice with different prosody — the app " +
                         "says so rather than passing it off as one of the neural engines."
