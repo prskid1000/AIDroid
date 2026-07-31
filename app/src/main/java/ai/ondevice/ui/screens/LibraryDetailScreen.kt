@@ -30,6 +30,7 @@ import ai.ondevice.core.TranscriptSegments
 import ai.ondevice.core.displayValue
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
+import ai.ondevice.ui.components.NDropdown
 import ai.ondevice.ui.components.NHelp
 import ai.ondevice.ui.components.NIconButton
 import ai.ondevice.ui.components.NTable
@@ -71,6 +72,7 @@ fun LibraryDetailScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val pickFolder = ai.ondevice.ui.rememberFolderPicker(viewModel::folderPicked)
 
     PhoneScaffold(
         toolbar = {
@@ -110,7 +112,6 @@ fun LibraryDetailScreen(
                         state.image?.let { imageViewModel.reuseParameters(it) }
                         onOpenImage()
                     },
-                    onShare = { state.image?.let { shareImage(context, it) } },
                 )
 
                 PredictionKind.SPEECH -> SynthesisDetail(
@@ -118,9 +119,6 @@ fun LibraryDetailScreen(
                     onOpen = {
                         state.synthesis?.let { voiceViewModel.loadSynthesis(it) }
                         onOpenVoice()
-                    },
-                    onShare = {
-                        state.synthesis?.let { shareFile(context, java.io.File(it.path), "audio/wav") }
                     },
                 )
 
@@ -130,6 +128,7 @@ fun LibraryDetailScreen(
                 })
             }
 
+            ExportSection(state, viewModel, pickFolder)
             ParameterTable(state)
             RunSection(state)
         }
@@ -177,7 +176,7 @@ private fun ConversationDetail(state: LibraryDetailState, onOpen: () -> Unit) {
 }
 
 @Composable
-private fun ImageDetail(state: LibraryDetailState, onOpen: () -> Unit, onShare: () -> Unit) {
+private fun ImageDetail(state: LibraryDetailState, onOpen: () -> Unit) {
     val image = state.image ?: return
     Box(
         Modifier
@@ -209,7 +208,6 @@ private fun ImageDetail(state: LibraryDetailState, onOpen: () -> Unit, onShare: 
             style = NButtonStyle.Primary,
             modifier = Modifier.weight(1f),
         )
-        NIconButton(NIcons.Share, "Share", onClick = onShare, size = 46.dp)
     }
 
     SectionKicker("Prompt", Modifier.padding(top = 18.dp, bottom = 8.dp))
@@ -225,7 +223,7 @@ private fun ImageDetail(state: LibraryDetailState, onOpen: () -> Unit, onShare: 
 }
 
 @Composable
-private fun SynthesisDetail(state: LibraryDetailState, onOpen: () -> Unit, onShare: () -> Unit) {
+private fun SynthesisDetail(state: LibraryDetailState, onOpen: () -> Unit) {
     val synthesis = state.synthesis ?: return
     Row(
         Modifier.fillMaxWidth(),
@@ -237,7 +235,6 @@ private fun SynthesisDetail(state: LibraryDetailState, onOpen: () -> Unit, onSha
             style = NButtonStyle.Primary,
             modifier = Modifier.weight(1f),
         )
-        NIconButton(NIcons.Share, "Share", onClick = onShare, size = 46.dp)
     }
 
     SectionKicker("Take", Modifier.padding(top = 18.dp, bottom = 8.dp))
@@ -416,4 +413,63 @@ internal fun shareImage(
         }
     }
     context.startActivity(android.content.Intent.createChooser(intent, "Share image"))
+}
+
+/**
+ * Save and Share, for every kind of artifact, in one place.
+ *
+ * This is the whole of what used to be scattered across four screens as eight
+ * buttons: Chat's two exports, Voice's "Save as WAV", "Send audio" and four
+ * transcript formats, and the image share. They all did the same two things and
+ * every one of them wrote into app-private storage, so "Save" produced a file
+ * in a directory a phone's file manager will not show you.
+ *
+ * Save and Share are both here because they are not the same act — one puts a
+ * file where you can find it, the other hands it to another app — and dropping
+ * either would have lost something the app could already do.
+ */
+@Composable
+private fun ExportSection(
+    state: LibraryDetailState,
+    viewModel: LibraryDetailViewModel,
+    onNeedFolder: () -> Unit,
+) {
+    val context = LocalContext.current
+
+    SectionKicker("Export", Modifier.padding(top = 18.dp, bottom = 8.dp))
+
+    // Only where there is a genuine choice. A picture is a PNG and a synthesis
+    // is a WAV; a dropdown with one entry is furniture.
+    if (viewModel.formats.size > 1) {
+        NDropdown(
+            options = viewModel.formats,
+            selected = state.format,
+            onSelect = viewModel::selectFormat,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+    }
+
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        NButton(
+            "Save",
+            onClick = { viewModel.save(onNeedFolder = onNeedFolder) },
+            style = NButtonStyle.Primary,
+            modifier = Modifier.weight(1f),
+        )
+        NButton(
+            "Share",
+            onClick = { viewModel.share { ai.ondevice.ui.shareExport(context, it) } },
+            style = NButtonStyle.Secondary,
+            modifier = Modifier.weight(1f),
+        )
+    }
+
+    // Where it went, named. A save that reports nothing but success is the
+    // failure this change exists to end.
+    state.exportMessage?.let { message ->
+        NHelp(message, Modifier.padding(top = 8.dp))
+    }
 }

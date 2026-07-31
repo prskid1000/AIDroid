@@ -183,6 +183,25 @@ object NIcons {
         icon(1.7f, stroked = listOf("M4 9v6h3l5 4V5L7 9zM16 8.5a5 5 0 0 1 0 7"))
     }
 
+    /**
+     * Transcribe, as the counterpart to [Speaker].
+     *
+     * The pair has to read as opposites at 20 dp — sound going out of the
+     * device against sound coming into it — which is why this is a microphone
+     * rather than the [Waveform] the nav bar uses. A waveform beside a speaker
+     * says "audio" twice and "which direction" not at all.
+     */
+    val Mic: ImageVector by lazy {
+        icon(
+            1.7f,
+            stroked = listOf(
+                "M12 3.5a2.5 2.5 0 0 1 2.5 2.5v5a2.5 2.5 0 0 1-5 0V6A2.5 2.5 0 0 1 12 3.5z",
+                "M5.5 11a6.5 6.5 0 0 0 13 0",
+                "M12 17.5V21M9 21h6",
+            ),
+        )
+    }
+
     val Play: ImageVector by lazy { icon(2f, stroked = listOf("M8 5l11 7-11 7z")) }
     val Pause: ImageVector by lazy { icon(1.8f, stroked = listOf("M9 6v12M15 6v12")) }
 

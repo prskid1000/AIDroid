@@ -34,6 +34,7 @@ class AppPrefs(private val context: Context) {
         val defaultTier = stringPreferencesKey("default_tier")
         val blockPickle = booleanPreferencesKey("block_pickle")
         val lastConversationId = stringPreferencesKey("last_conversation_id")
+        val exportFolder = stringPreferencesKey("export_folder")
         val toolsEnabled = booleanPreferencesKey("tools_enabled")
         val enabledToolProviders = androidx.datastore.preferences.core.stringSetPreferencesKey("enabled_tool_providers")
     }
@@ -68,6 +69,15 @@ class AppPrefs(private val context: Context) {
     val lastConversationId: Flow<String?> = context.dataStore.data.map { it[Keys.lastConversationId] }
 
     /**
+     * The SAF tree the user picked for exports, as a URI string.
+     *
+     * Stored rather than asked for every time, because a picker on every
+     * save is the reason people stop using export. [ai.ondevice.data.ExportStore]
+     * re-checks the grant before trusting this.
+     */
+    val exportFolder: Flow<String?> = context.dataStore.data.map { it[Keys.exportFolder] }
+
+    /**
      * Tool use is off until asked for. A model that is never told tools exist
      * cannot call one, and that is the safe default when some of them reach a
      * third-party server.
@@ -94,6 +104,9 @@ class AppPrefs(private val context: Context) {
     suspend fun setBlockPickle(v: Boolean) = edit { it[Keys.blockPickle] = v }
     suspend fun setToolsEnabled(v: Boolean) = edit { it[Keys.toolsEnabled] = v }
     suspend fun setEnabledToolProviders(v: Set<String>) = edit { it[Keys.enabledToolProviders] = v }
+    suspend fun setExportFolder(v: String?) =
+        edit { p -> if (v == null) p.remove(Keys.exportFolder) else p[Keys.exportFolder] = v }
+
     suspend fun setLastConversationId(v: String?) =
         edit { p -> if (v == null) p.remove(Keys.lastConversationId) else p[Keys.lastConversationId] = v }
 

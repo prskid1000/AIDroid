@@ -39,6 +39,7 @@ import ai.ondevice.ui.components.NIconButton
 import ai.ondevice.ui.components.NPills
 import ai.ondevice.ui.components.PhoneScaffold
 import ai.ondevice.ui.components.RootToolbar
+import ai.ondevice.ui.components.ToolbarToggle
 import ai.ondevice.ui.components.nClickableFlat
 import ai.ondevice.ui.theme.NIcons
 import ai.ondevice.ui.theme.NocturneColors
@@ -75,6 +76,22 @@ fun LibraryScreen(
     PhoneScaffold(
         toolbar = {
             RootToolbar("Library") {
+                // The three sections, as icons beside the count. They repeat the
+                // bottom bar's glyphs, which is a real risk — but they mean
+                // something different here (things you made, not places to go)
+                // and the selected plate says which one you are reading.
+                LibrarySection.entries.forEach { entry ->
+                    ToolbarToggle(
+                        when (entry) {
+                            LibrarySection.CHATS -> NIcons.Chat
+                            LibrarySection.IMAGES -> NIcons.Image
+                            LibrarySection.VOICE -> NIcons.Voice
+                        },
+                        entry.label,
+                        selected = section == entry,
+                        onClick = { viewModel.show(entry) },
+                    )
+                }
                 Text(
                     when (section) {
                         LibrarySection.CHATS -> "${conversations.size}"
@@ -89,13 +106,6 @@ fun LibraryScreen(
         bottomBar = { NBottomBar(BottomDestinations, currentRoute) { onNavigate(it.route) } },
         contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 18.dp),
     ) {
-        NPills(
-            options = LibrarySection.entries.map { it.label },
-            selectedIndex = LibrarySection.entries.indexOf(section),
-            onSelect = { viewModel.show(LibrarySection.entries[it]) },
-            modifier = Modifier.padding(bottom = 10.dp),
-        )
-
         // Every row opens the same detail screen. Deleting is still here, so a
         // clear-out does not cost one push per item — but *reading* one is now
         // a push rather than four different behaviours per section.

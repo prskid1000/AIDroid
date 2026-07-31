@@ -62,6 +62,7 @@ import ai.ondevice.ui.components.ResourceBlock
 import ai.ondevice.ui.components.RootToolbar
 import ai.ondevice.ui.components.SectionKicker
 import ai.ondevice.ui.components.ToolbarAction
+import ai.ondevice.ui.components.ToolbarToggle
 import ai.ondevice.ui.components.nClickableFlat
 import ai.ondevice.ui.theme.NIcons
 import ai.ondevice.ui.theme.NocturneColors
@@ -150,7 +151,25 @@ fun VoiceScreen(
             // tab, so a single toolbar badge was either wrong on one of them or
             // duplicating the card below it — and the sheet behind the sliders
             // names it in one place for both.
+            // The mode lives here rather than in the body. It is the one
+            // question this screen asks that changes everything below it — text
+            // out of audio, or audio out of text — and as a pill row it cost a
+            // full band of the screen to say something the toolbar can hold.
+            // Both icons carry a content description, because a microphone and
+            // a speaker are only obvious once you already know.
             RootToolbar("Voice") {
+                ToolbarToggle(
+                    NIcons.Mic,
+                    "Transcribe",
+                    selected = state.mode == VoiceMode.TRANSCRIBE,
+                    onClick = { viewModel.setMode(VoiceMode.TRANSCRIBE) },
+                )
+                ToolbarToggle(
+                    NIcons.Speaker,
+                    "Speak",
+                    selected = state.mode == VoiceMode.SPEAK,
+                    onClick = { viewModel.setMode(VoiceMode.SPEAK) },
+                )
                 ToolbarAction(NIcons.Plus, "Start over", viewModel::reset)
                 ToolbarAction(NIcons.Settings, "Voice settings", { settingsOpen = true })
             }
@@ -158,34 +177,12 @@ fun VoiceScreen(
         bottomBar = { NBottomBar(BottomDestinations, currentRoute) { onNavigate(it.route) } },
         contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 18.dp),
     ) {
-        NPills(
-            options = VoiceMode.entries.map { it.label },
-            selectedIndex = VoiceMode.entries.indexOf(state.mode),
-            onSelect = { viewModel.setMode(VoiceMode.entries[it]) },
-            modifier = Modifier.padding(bottom = 8.dp),
-        )
-
-        // The input source, one level down from the mode. Both tabs have the
-        // same two answers — live from the device, or from a file — so they
-        // read as the mirror image they are.
-        NSeg(
-            options = when (state.mode) {
-                VoiceMode.TRANSCRIBE -> TranscribeSource.entries.map { it.label }
-                VoiceMode.SPEAK -> SpeakSource.entries.map { it.label }
-            },
-            selectedIndex = when (state.mode) {
-                VoiceMode.TRANSCRIBE -> TranscribeSource.entries.indexOf(state.source)
-                VoiceMode.SPEAK -> SpeakSource.entries.indexOf(state.speakSource)
-            },
-            onSelect = { index ->
-                when (state.mode) {
-                    VoiceMode.TRANSCRIBE -> viewModel.setSource(TranscribeSource.entries[index])
-                    VoiceMode.SPEAK -> viewModel.setSpeakSource(SpeakSource.entries[index])
-                }
-            },
-            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-        )
-
+        // Where the input comes from is no longer a mode. "Type" and "File"
+        // never differed in anything but where the characters arrived from, so
+        // a tab for it was a wall between one text box and the button that
+        // fills it; "Microphone" and "File" both end in the same transcript, so
+        // the two ways in sit side by side above it. Each panel now offers both
+        // and the screen has one row of chrome where it had two.
         Column(Modifier.verticalScroll(rememberScrollState())) {
 
             // §1.2 — a refusal names what went wrong and what to do about it.
@@ -372,6 +369,22 @@ fun VoiceScreen(
                         minHeight = 48.dp,
                         modifier = Modifier.padding(top = 12.dp),
                     )
+
+                    // The other way in, as an action rather than a tab. Both
+                    // routes end in the same decoder and the same transcript
+                    // panel, so making them modes meant choosing before you
+                    // could see what either produced.
+                    NButton(
+                        "Choose a recording",
+                        onClick = {
+                            viewModel.setSource(TranscribeSource.FILE)
+                            pickAudio()
+                        },
+                        style = NButtonStyle.Secondary,
+                        block = true,
+                        minHeight = 44.dp,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
                 }
 
                 state.mode == VoiceMode.TRANSCRIBE -> {
@@ -412,6 +425,18 @@ fun VoiceScreen(
                         style = NButtonStyle.Primary,
                         block = true,
                         minHeight = 46.dp,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+
+                    // The way back to the microphone. Without it, picking a file
+                    // once would be a one-way door now that the source is no
+                    // longer a tab you can simply switch away from.
+                    NButton(
+                        "Record instead",
+                        onClick = { viewModel.setSource(TranscribeSource.MICROPHONE) },
+                        style = NButtonStyle.Secondary,
+                        block = true,
+                        minHeight = 44.dp,
                         modifier = Modifier.padding(bottom = 8.dp),
                     )
 
@@ -470,23 +495,16 @@ fun VoiceScreen(
                         )
                     }
 
-                    // Exports only once there is a transcript behind them.
-                    if (state.segments.isNotEmpty()) Row(
-                        Modifier.fillMaxWidth().padding(top = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        TranscriptFormat.entries.forEach { format ->
-                            NButton(
-                                format.label,
-                                onClick = {
-                                    viewModel.export(format) { file ->
-                                        shareTranscript(context, file, format)
-                                    }
-                                },
-                                modifier = Modifier.weight(1f),
-                                minHeight = 42.dp,
-                            )
-                        }
+                    // The four format buttons moved to Library, where every
+                    // artifact is saved and shared the same way and the file
+                    // lands in a folder you chose rather than in app-private
+                    // storage no file manager will show you.
+                    if (state.segments.isNotEmpty()) {
+                        NHelp(
+                            "Saved to the library. Open it there to export as TXT, SRT, VTT or " +
+                                "JSON into a folder of your choosing.",
+                            Modifier.padding(top = 12.dp),
+                        )
                     }
                 }
 
@@ -495,7 +513,6 @@ fun VoiceScreen(
                     viewModel = viewModel,
                     onPickScript = pickScript,
                     onPickReference = pickReference,
-                    onShareAudio = { file -> shareAudio(context, file) },
                 )
             }
 
@@ -545,7 +562,6 @@ private fun SpeakPanel(
     viewModel: VoiceViewModel,
     onPickScript: () -> Unit,
     onPickReference: () -> Unit,
-    onShareAudio: (java.io.File) -> Unit,
 ) {
     // Which engine will speak, stated but not chosen here — the picker moved to
     // the settings sheet with the voice list and the dials, so this panel is the
@@ -705,26 +721,22 @@ private fun SpeakPanel(
         }
     }
 
-    if (state.speakSource == ai.ondevice.ui.vm.SpeakSource.FILE) {
-        NButton(
-            if (state.scriptSource != null) "Replace script file" else "Choose a script file",
-            onClick = onPickScript,
-            style = NButtonStyle.Primary,
-            block = true,
-            minHeight = 46.dp,
-        )
-        // The loaded text is still shown and still editable. A file you cannot
-        // correct a typo in before it is read aloud is a worse file.
-        if (state.script.isNotEmpty()) {
-            NTextArea(
-                value = state.script,
-                onValueChange = viewModel::setScript,
-                minHeight = 130.dp,
-                textStyle = NocturneType.Row,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-        }
-    } else {
+    // One script box, and a button that fills it.
+    //
+    // These were two tabs, and the difference between them was where the
+    // characters came from — the "File" tab already showed the same editable
+    // text area, because a file you cannot fix a typo in before it is read
+    // aloud is a worse file. So the tab was a wall between a text box and the
+    // button that fills it. Loading a file now just types into it.
+    NButton(
+        if (state.scriptSource != null) "Replace with a file" else "Load from file",
+        onClick = onPickScript,
+        style = NButtonStyle.Secondary,
+        block = true,
+        minHeight = 42.dp,
+        modifier = Modifier.padding(bottom = 8.dp),
+    )
+    run {
         NTextArea(
             value = state.script,
             onValueChange = viewModel::setScript,
@@ -779,27 +791,22 @@ private fun SpeakPanel(
         block = true,
         modifier = Modifier.padding(top = 16.dp),
     )
-    Row(
-        Modifier.fillMaxWidth().padding(top = 7.dp),
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
-    ) {
-        NButton(
-            if (state.rendering) "Rendering…" else "Save as WAV",
-            onClick = { viewModel.exportAudio { } },
-            modifier = Modifier.weight(1f),
-            minHeight = 44.dp,
-        )
-        NButton(
-            "Send audio",
-            onClick = { viewModel.exportAudio(onShareAudio) },
-            modifier = Modifier.weight(1f),
-            minHeight = 44.dp,
-        )
-    }
+    // Rendering still writes the WAV — it has to, the library lists it — but
+    // the two buttons that used to sit here are gone. "Save as WAV" wrote into
+    // app-private storage and called that a save; Library does it properly, to
+    // a folder you picked, and does it the same way for every artifact.
+    NButton(
+        if (state.rendering) "Rendering…" else "Render to a file",
+        onClick = { viewModel.exportAudio { } },
+        style = NButtonStyle.Secondary,
+        block = true,
+        minHeight = 44.dp,
+        modifier = Modifier.padding(top = 7.dp),
+    )
     state.lastAudioPath?.let {
         NHelp(
-            "Saved as ${it.substringAfterLast('/')} in the speech folder — an ordinary file you " +
-                "can open in any player, and it is listed in the library.",
+            "Rendered ${it.substringAfterLast('/')} and listed it in the library — open it there " +
+                "to save or share it.",
             Modifier.padding(top = 6.dp),
         )
     }

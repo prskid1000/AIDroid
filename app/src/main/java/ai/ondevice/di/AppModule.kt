@@ -152,6 +152,11 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideExportStore(@ApplicationContext context: Context, prefs: AppPrefs) =
+        ai.ondevice.data.ExportStore(context, prefs)
+
+    @Provides
+    @Singleton
     fun provideAttachmentStore(@ApplicationContext context: Context, storage: ModelStorage) =
         ai.ondevice.data.AttachmentStore(context, storage)
 

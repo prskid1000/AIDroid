@@ -1,6 +1,7 @@
 package ai.ondevice.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -23,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -171,6 +174,48 @@ fun ToolbarAction(
         tint = tint,
         modifier = modifier.size(20.dp).nClickableFlat(onClick = onClick),
     )
+}
+
+/**
+ * A toolbar action that is also a state — one of a set, with one of them on.
+ *
+ * The tint alone is not enough. An icon in the accent colour beside icons in
+ * the text colour reads as "this one is special", not as "this one is
+ * selected", and at 20 dp there is no room for a label to settle the question.
+ * The filled, ringed plate is the same treatment `NPills` gives its selected
+ * option, so a control that moved from the body into the toolbar still looks
+ * like the same control.
+ */
+@Composable
+fun ToolbarToggle(
+    icon: ImageVector,
+    contentDescription: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier
+            .size(32.dp)
+            .clip(RoundedCornerShape(9.dp))
+            .background(if (selected) NocturneColors.Accent900 else Color.Transparent)
+            .then(
+                if (selected) {
+                    Modifier.border(1.dp, NocturneColors.Accent700, RoundedCornerShape(9.dp))
+                } else {
+                    Modifier
+                },
+            )
+            .nClickableFlat(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            icon,
+            contentDescription = contentDescription,
+            tint = if (selected) NocturneColors.Accent200 else NocturneColors.TextMuted,
+            modifier = Modifier.size(18.dp),
+        )
+    }
 }
 
 /** One destination in the bottom bar. */

@@ -62,6 +62,7 @@ import ai.ondevice.ui.components.ResourceBlock
 import ai.ondevice.ui.components.RootToolbar
 import ai.ondevice.ui.components.SectionKicker
 import ai.ondevice.ui.components.ToolbarAction
+import ai.ondevice.ui.components.ToolbarToggle
 import ai.ondevice.ui.components.nClickableFlat
 import ai.ondevice.ui.theme.NIcons
 import ai.ondevice.ui.theme.NocturneColors
@@ -111,6 +112,21 @@ fun ImageScreen(
             // tab, where the images sit alongside the conversations and the
             // rendered audio instead of being reachable from one screen only.
             RootToolbar("Image") {
+                // Two modes, in the toolbar for the same reason Voice's are:
+                // the row they used to sit in cost a full band of a screen
+                // whose whole point is showing a picture.
+                ToolbarToggle(
+                    NIcons.Image,
+                    "Generate",
+                    selected = state.mode == ImageMode.GENERATE,
+                    onClick = { viewModel.setMode(ImageMode.GENERATE) },
+                )
+                ToolbarToggle(
+                    NIcons.Brush,
+                    "Inpaint",
+                    selected = state.mode == ImageMode.INPAINT,
+                    onClick = { viewModel.setMode(ImageMode.INPAINT) },
+                )
                 ToolbarAction(NIcons.Plus, "New image", viewModel::reset)
                 ToolbarAction(NIcons.Settings, "Image settings", { settingsOpen = true })
             }
@@ -118,13 +134,6 @@ fun ImageScreen(
         bottomBar = { NBottomBar(BottomDestinations, currentRoute) { onNavigate(it.route) } },
         contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 18.dp),
     ) {
-        NPills(
-            options = ImageMode.entries.map { it.label },
-            selectedIndex = ImageMode.entries.indexOf(state.mode),
-            onSelect = { viewModel.setMode(ImageMode.entries[it]) },
-            modifier = Modifier.padding(bottom = 10.dp),
-        )
-
         Column(Modifier.verticalScroll(rememberScrollState())) {
 
             TaesdPreview(state)
