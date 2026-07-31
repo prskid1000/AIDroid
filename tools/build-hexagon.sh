@@ -85,9 +85,9 @@ docker run --rm --platform linux/amd64 \
       cmake --build /tmp/build --target ggml-hexagon htp-v73 htp-v75 htp-v79 htp-v81
 
       hex=/tmp/build/ggml/src/ggml-hexagon
-      mkdir -p /out/skel /out/generated /out/incs
+      mkdir -p /out/assets/hexagon /out/generated /out/incs
 
-      cp "$hex"/libggml-htp-v*.so /out/skel/
+      cp "$hex"/libggml-htp-v*.so /out/assets/hexagon/
       cp "$hex"/htp_iface_stub.c "$hex"/htp_iface.h /out/generated/
 
       # The SDK headers the host half includes (AEEStdErr.h, rpcmem.h,
@@ -101,4 +101,4 @@ docker run --rm --platform linux/amd64 \
 
 echo
 echo "Staged into $out:"
-ls -la "$out/skel"
+ls -la "$out/assets/hexagon"

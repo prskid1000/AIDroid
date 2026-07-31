@@ -9,6 +9,7 @@ import ai.ondevice.data.db.PersonaEntity
 import ai.ondevice.data.db.PresetEntity
 import ai.ondevice.data.db.RuntimeBundleEntity
 import ai.ondevice.di.ApplicationScope
+import ai.ondevice.engine.HexagonSkels
 import ai.ondevice.engine.RuntimeRegistry
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
@@ -33,6 +34,12 @@ class OnDeviceApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Before anything can touch ggml. Its backend registry builds itself
+        // once, on the first call from any of the three runtimes, and the NPU
+        // opens its DSP session while registering — so the search path for the
+        // DSP's own code has to already be set by then. Synchronous for the
+        // same reason: a coroutine would race the first Chat screen.
+        HexagonSkels.stage(this)
         scope.launch {
             seed()
             // A download interrupted by a crash, a force-stop or a reinstall

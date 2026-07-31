@@ -491,6 +491,31 @@ Java_ai_ondevice_engine_LlamaBridge_nativeInit(JNIEnv *, jobject) {
     });
 }
 
+/**
+ * Where the DSP loader should look for `libggml-htp-v<NN>.so`.
+ *
+ * The Hexagon backend asks fastRPC for `file:///libggml-htp-v81.so` and lets
+ * the DSP resolve the name, which it does against ADSP_LIBRARY_PATH — a
+ * variable, not an argument, because the search happens on the other processor.
+ * Nothing in ggml sets it; upstream's own scripts export it from the shell
+ * before running llama-cli, and an app has no shell.
+ *
+ * It has to be set before the first ggml call of any kind: the registry builds
+ * itself once, and the Hexagon registration opens its session then. That is why
+ * this is called from Application.onCreate rather than from an engine.
+ *
+ * setenv is process-wide, so one call covers whisper and diffusion too — they
+ * share this ggml.
+ */
+JNIEXPORT void JNICALL
+Java_ai_ondevice_engine_LlamaBridge_nativeSetDspSearchPath(JNIEnv * env, jobject, jstring path) {
+    const std::string value = jni_to_string(env, path);
+    if (value.empty()) {
+        return;
+    }
+    setenv("ADSP_LIBRARY_PATH", value.c_str(), 1);
+}
+
 JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_LlamaBridge_nativeSystemInfo(JNIEnv * env, jobject) {
     json info;

@@ -132,18 +132,21 @@ def main() -> int:
         entry["architectures"] = architectures
         entry["installed"] = True
         # What CMakeLists compiles, which is a property of the APK and not of
-        # any phone. arm64 additionally builds ggml's OpenCL backend; x86_64 is
-        # the emulator, whose GPU is the host's through a translation layer with
-        # no OpenCL behind it.
+        # any phone. arm64 additionally builds ggml's OpenCL and Hexagon
+        # backends; x86_64 is the emulator, which has neither an Adreno nor a
+        # DSP behind it.
         #
         # Compiled is not the same as present: whether a device has a driver
-        # behind libOpenCL.so is unknowable from here, so this list is only the
-        # fallback. RuntimeRegistry.backendsFor asks the loaded binary first and
-        # reports what ggml registered on the phone in front of it — SPEC 8.2,
-        # do not assert what can be measured.
+        # behind libOpenCL.so, or a DSP that admits an unsigned module, is
+        # unknowable from here, so this list is only the fallback.
+        # RuntimeRegistry.backendsFor asks the loaded binary first and reports
+        # what ggml registered on the phone in front of it — SPEC 8.2, do not
+        # assert what can be measured.
         # Kokoro is the exception: it is ONNX Runtime, not ggml, and its
         # accelerators are execution providers asked of ORT at load time.
-        entry["backends"] = ["CPU", "OPENCL"] if runtime_id in GGML_RUNTIMES else ["CPU"]
+        entry["backends"] = (
+            ["CPU", "OPENCL", "HEXAGON"] if runtime_id in GGML_RUNTIMES else ["CPU"]
+        )
         print(f"  {runtime_id}: {tag} ({commit}) — {len(architectures)} architectures")
 
     ASSET.write_text(json.dumps(existing, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

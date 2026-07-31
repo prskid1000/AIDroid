@@ -30,6 +30,14 @@ object LlamaBridge {
 
     external fun nativeInit()
 
+    /**
+     * Where the NPU's DSP loader should look for its skels (ADSP_LIBRARY_PATH).
+     *
+     * Must be called before anything else here, including [nativeSystemInfo] —
+     * see [HexagonSkels].
+     */
+    external fun nativeSetDspSearchPath(path: String)
+
     external fun nativeSystemInfo(): String
 
     /**

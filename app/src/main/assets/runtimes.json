@@ -32,7 +32,8 @@
       ],
       "backends": [
         "CPU",
-        "OPENCL"
+        "OPENCL",
+        "HEXAGON"
       ],
       "architectures": [
         "afmoe",
@@ -190,7 +191,8 @@
       ],
       "backends": [
         "CPU",
-        "OPENCL"
+        "OPENCL",
+        "HEXAGON"
       ],
       "architectures": [
         "whisper"
@@ -257,7 +259,8 @@
       ],
       "backends": [
         "CPU",
-        "OPENCL"
+        "OPENCL",
+        "HEXAGON"
       ],
       "architectures": [
         "sd1",

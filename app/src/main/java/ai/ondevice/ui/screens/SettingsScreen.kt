@@ -99,8 +99,10 @@ fun SettingsScreen(
             }
             NHelp(
                 "What ggml registered on this phone, not what the build contains: a backend " +
-                    "compiled in still needs a driver behind it. The GPU runs through OpenCL; " +
-                    "the NPU needs a Hexagon build this one does not have.",
+                    "compiled in still needs the silicon and the driver behind it. The GPU runs " +
+                    "through OpenCL, the NPU through Hexagon — and the NPU only has kernels for " +
+                    "Q4_0, Q4_1, Q8_0, IQ4_NL and MXFP4 weights, so a K-quant model selects it " +
+                    "and then does its arithmetic on the CPU regardless.",
                 Modifier.padding(top = 8.dp),
             )
 
