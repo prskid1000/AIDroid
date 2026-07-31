@@ -108,7 +108,17 @@ class Transcriber(
      *   words in a partial keep changing.
      */
     @SuppressLint("MissingPermission")
-    fun listen(stepMillis: Int = 3_000, windowMillis: Int = 10_000): Flow<CaptureEvent> = flow {
+    /**
+     * [captureTo] keeps the take. Without it the samples are read, decoded and
+     * dropped, so a recording could never be replayed, re-run at another
+     * setting, or exported — the transcript was the only thing that survived
+     * the words being said.
+     */
+    fun listen(
+        stepMillis: Int = 3_000,
+        windowMillis: Int = 10_000,
+        captureTo: java.io.File? = null,
+    ): Flow<CaptureEvent> = flow {
         if (handle == 0L) {
             emit(CaptureEvent.Failed("No speech model is loaded."))
             return@flow
@@ -145,12 +155,22 @@ class Transcriber(
         val buffer = ShortArray(minBuffer / 2)
         var sinceLastDecode = 0
         var totalSamples = 0L
+        val writer = captureTo?.let {
+            runCatching { ai.ondevice.speech.WavWriter(it, SAMPLE_RATE) }.getOrNull()
+        }
 
         try {
             while (true) {
                 currentCoroutineContext().ensureActive()
                 val read = record.read(buffer, 0, buffer.size)
                 if (read <= 0) continue
+
+                // Paused keeps the microphone open and the file honest: the
+                // samples read while paused are thrown away rather than
+                // written, so a pause is a gap in the take rather than a
+                // silence the length of the pause.
+                if (paused) continue
+                writer?.append(buffer, read)
 
                 var peak = 0f
                 for (i in 0 until read) {
@@ -184,11 +204,31 @@ class Transcriber(
             runCatching { record.stop() }
             runCatching { record.release() }
             activeRecord = null
+            // Closed here rather than by the caller: this is the only place
+            // that runs whether the capture ended, failed or was cancelled, and
+            // an unclosed writer leaves a header claiming zero samples.
+            runCatching { writer?.close() }
+            paused = false
         }
     }.flowOn(Dispatchers.IO).onCompletion {
         activeRecord?.let { runCatching { it.stop() }; runCatching { it.release() } }
         activeRecord = null
     }
+
+    /**
+     * Paused keeps the microphone open rather than releasing it.
+     *
+     * Stopping and restarting AudioRecord loses the device for as long as the
+     * handover takes, and on some phones another app takes it in the gap. A
+     * flag costs one branch per buffer.
+     */
+    @Volatile
+    var paused: Boolean = false
+        private set
+
+    fun pause() { paused = true }
+
+    fun resume() { paused = false }
 
     @Volatile
     private var activeRecord: AudioRecord? = null

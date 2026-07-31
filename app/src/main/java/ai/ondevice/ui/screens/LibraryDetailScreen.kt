@@ -28,6 +28,7 @@ import ai.ondevice.core.PredictionKind
 import ai.ondevice.core.SparseParams
 import ai.ondevice.core.TranscriptSegments
 import ai.ondevice.core.displayValue
+import ai.ondevice.ui.components.NAudioPlayer
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NDropdown
@@ -225,6 +226,15 @@ private fun ImageDetail(state: LibraryDetailState, onOpen: () -> Unit) {
 @Composable
 private fun SynthesisDetail(state: LibraryDetailState, onOpen: () -> Unit) {
     val synthesis = state.synthesis ?: return
+
+    // The point of opening a synthesis is to hear it. Until now this screen
+    // described a WAV in a table and offered no way to play it.
+    NAudioPlayer(
+        file = java.io.File(synthesis.path),
+        label = synthesis.path.substringAfterLast('/'),
+        modifier = Modifier.padding(bottom = 10.dp),
+    )
+
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -268,6 +278,21 @@ private fun TranscriptDetail(state: LibraryDetailState, onOpen: () -> Unit) {
             "SRT, VTT or JSON.",
         Modifier.padding(top = 6.dp),
     )
+
+    // Present for a file transcription, and for a recording made since the
+    // capture path started keeping its WAV. Older recordings have no audio at
+    // all — they were decoded and discarded — so this simply does not appear
+    // rather than offering a player for a file that was never written.
+    transcript.sourcePath?.let { path ->
+        val audio = java.io.File(path)
+        if (audio.isFile) {
+            NAudioPlayer(
+                file = audio,
+                label = path.substringAfterLast('/'),
+                modifier = Modifier.padding(top = 12.dp),
+            )
+        }
+    }
 
     SectionKicker("Recording", Modifier.padding(top = 18.dp, bottom = 8.dp))
     NTable {

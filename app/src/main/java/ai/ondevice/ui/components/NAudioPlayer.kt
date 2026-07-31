@@ -69,6 +69,10 @@ fun NAudioPlayer(
     }
     var playing by remember(file.path) { mutableStateOf(false) }
     var position by remember(file.path) { mutableIntStateOf(0) }
+    // Kept across files: someone who listens back at 1.5x wants the next take
+    // at 1.5x too, and re-picking it every time is the sort of small friction
+    // that makes a control feel like it does not work.
+    var speed by remember { mutableFloatStateOf(1f) }
     val duration = player?.duration ?: 0
 
     // Released on the way out, and on the way to a *different* file: a
@@ -143,6 +147,13 @@ fun NAudioPlayer(
                 )
             }
 
+            Skip(-SKIP_MILLIS, "Back 10 seconds") {
+                val active = player ?: return@Skip
+                val to = (position - SKIP_MILLIS).coerceIn(0, duration)
+                runCatching { active.seekTo(to) }
+                position = to
+            }
+
             Scrubber(
                 fraction = fraction,
                 onSeek = { target ->
@@ -154,13 +165,80 @@ fun NAudioPlayer(
                 modifier = Modifier.weight(1f),
             )
 
+            Skip(SKIP_MILLIS, "Forward 10 seconds") {
+                val active = player ?: return@Skip
+                val to = (position + SKIP_MILLIS).coerceIn(0, duration)
+                runCatching { active.seekTo(to) }
+                position = to
+            }
+        }
+
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
                 "${Fmt.duration(position.toLong())} / ${Fmt.duration(duration.toLong())}",
                 style = NocturneType.MonoXs,
                 color = NocturneColors.TextMuted,
+                modifier = Modifier.padding(end = 4.dp),
             )
+            SPEEDS.forEach { option ->
+                SpeedChip(
+                    speed = option,
+                    selected = option == speed,
+                    onClick = {
+                        speed = option
+                        val active = player ?: return@SpeedChip
+                        // Assigning playbackParams *starts* a paused player on
+                        // several Android versions, so the pause is reasserted
+                        // rather than assumed. Without it, picking a speed on a
+                        // stopped clip plays it.
+                        runCatching {
+                            active.playbackParams = active.playbackParams.setSpeed(option)
+                            if (!playing) active.pause()
+                        }
+                    },
+                )
+            }
         }
     }
+}
+
+/** ±10 s, the one seek worth a dedicated control on speech. */
+@Composable
+private fun Skip(millis: Int, description: String, onClick: () -> Unit) {
+    Box(
+        Modifier.size(30.dp).clip(CircleShape).nClickableFlat(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            if (millis < 0) NIcons.RotateBack else NIcons.Rotate,
+            contentDescription = description,
+            tint = NocturneColors.TextMuted,
+            modifier = Modifier.size(15.dp),
+        )
+    }
+}
+
+/**
+ * Playback rate. Speech is the case that needs it — a dictated note at 1.5x
+ * and a mumbled one at 0.75x — and MediaPlayer resamples without shifting
+ * pitch, so the voice stays the voice.
+ */
+@Composable
+private fun SpeedChip(speed: Float, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        if (speed == 1f) "1x" else "${speed}x".replace(".0x", "x"),
+        style = NocturneType.MonoXs,
+        color = if (selected) NocturneColors.Accent200 else NocturneColors.TextMuted,
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (selected) NocturneColors.Accent900 else NocturneColors.Neutral900)
+            .nClickableFlat(onClick = onClick)
+            .padding(horizontal = 7.dp, vertical = 3.dp),
+    )
 }
 
 /**
@@ -219,3 +297,5 @@ private fun Scrubber(
 }
 
 private const val POLL_MILLIS = 120L
+private const val SKIP_MILLIS = 10_000
+private val SPEEDS = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)

@@ -97,6 +97,10 @@ object WavFile {
             ((bytes[offset + 2].toInt() and 0xFF) shl 16) or
             ((bytes[offset + 3].toInt() and 0xFF) shl 24)
 
+    /** Exposed so [WavWriter] can lay down a placeholder and patch it later. */
+    internal fun writeHeaderFor(out: OutputStream, sampleCount: Int, sampleRate: Int) =
+        writeHeader(out, sampleCount, sampleRate)
+
     private fun writeHeader(out: OutputStream, sampleCount: Int, sampleRate: Int) {
         val dataBytes = sampleCount * 2
         val byteRate = sampleRate * 2
@@ -129,4 +133,73 @@ object WavFile {
         ascii("data")
         int32(dataBytes)
     }
+}
+
+/**
+ * A WAV written as the audio arrives, rather than from a finished array.
+ *
+ * A recording used to exist only as a ten-second rolling window inside the
+ * decoder — the samples were read, fed to whisper and dropped, so there was
+ * nothing to replay, re-run at a different setting, or export. Keeping them
+ * meant either holding the whole take in memory (a half-hour recording is
+ * upwards of a hundred megabytes of Float) or streaming it to disk. This
+ * streams.
+ *
+ * The header is written first with a zero length and patched on [close], which
+ * is the ordinary way to write a RIFF file whose length nobody knows yet. A
+ * take that is never closed — the process dies mid-recording — leaves a file
+ * whose header says zero samples, and every player will read that as an empty
+ * clip rather than as garbage.
+ */
+class WavWriter(
+    private val destination: java.io.File,
+    private val sampleRate: Int,
+) : java.io.Closeable {
+
+    private val out = java.io.BufferedOutputStream(java.io.FileOutputStream(destination))
+    private var samples = 0
+    private var closed = false
+
+    init {
+        destination.parentFile?.mkdirs()
+        WavFile.writeHeaderFor(out, sampleCount = 0, sampleRate = sampleRate)
+    }
+
+    /** Append [count] 16-bit samples, little-endian, as they came off the mic. */
+    fun append(buffer: ShortArray, count: Int) {
+        if (closed) return
+        val bytes = ByteArray(count * 2)
+        for (i in 0 until count) {
+            val value = buffer[i].toInt()
+            bytes[i * 2] = (value and 0xFF).toByte()
+            bytes[i * 2 + 1] = ((value shr 8) and 0xFF).toByte()
+        }
+        out.write(bytes)
+        samples += count
+    }
+
+    val sampleCount: Int get() = samples
+
+    override fun close() {
+        if (closed) return
+        closed = true
+        runCatching { out.flush(); out.close() }
+        // Patch the two lengths the header could not know when it was written.
+        runCatching {
+            java.io.RandomAccessFile(destination, "rw").use { file ->
+                val dataBytes = samples * 2
+                file.seek(4)
+                file.write(littleEndian(36 + dataBytes))
+                file.seek(40)
+                file.write(littleEndian(dataBytes))
+            }
+        }
+    }
+
+    private fun littleEndian(value: Int) = byteArrayOf(
+        (value and 0xFF).toByte(),
+        ((value shr 8) and 0xFF).toByte(),
+        ((value shr 16) and 0xFF).toByte(),
+        ((value shr 24) and 0xFF).toByte(),
+    )
 }
