@@ -209,6 +209,18 @@ object NIcons {
     val Stop: ImageVector by lazy { icon(2f, stroked = listOf(rrect(6f, 6f, 12f, 12f, 2f))) }
     val Send: ImageVector by lazy { icon(2f, stroked = listOf("M12 19V5M6 11l6-6 6 6")) }
 
+    /**
+     * Import: an arrow coming down onto a floor.
+     *
+     * Deliberately not [Send] reversed. A bare down arrow is "download", and
+     * this reads a file the user already has; the line underneath is what makes
+     * it land somewhere rather than merely descend. It was [Send] for one
+     * build, which pointed up — the exact opposite of what the button does.
+     */
+    val Import: ImageVector by lazy {
+        icon(1.8f, stroked = listOf("M12 4v9M8 9.5l4 4 4-4", "M5 19h14"))
+    }
+
     /** Thinking block: a lightbulb-as-brain. */
     val Think: ImageVector by lazy {
         icon(1.8f, stroked = listOf("M12 3a6 6 0 0 1 3 11v3H9v-3a6 6 0 0 1 3-11zM9.5 21h5"))

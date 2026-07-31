@@ -302,7 +302,7 @@ private fun ChatToolbar(
         // just from a file rather than from a model. Its counterpart moved to
         // Library, where every artifact is saved the same way — a conversation
         // saved there as .zip is the archive this reads back.
-        ToolbarAction(NIcons.Send, "Import a conversation", onImport)
+        ToolbarAction(NIcons.Import, "Import a conversation", onImport)
         ToolbarAction(NIcons.Plus, "New conversation", onNewConversation)
         ToolbarAction(NIcons.Settings, "Chat settings", onOpenSettings)
     }
