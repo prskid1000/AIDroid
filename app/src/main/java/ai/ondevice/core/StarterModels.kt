@@ -122,24 +122,24 @@ object StarterModels {
             modality = Modality.TEXT_TO_SPEECH,
             summary = "Any language, [laughter] and [sigh], a voice you describe in words. " +
                 "Much slower than Kokoro.",
-            // Both variants load as of ONNX Runtime 1.28, which this build now
-            // ships. They were refused by 1.22 for two unrelated schema reasons
-            // — int4's GatherBlockQuantized `bits` attribute, root's twelve
-            // inputs to GroupQueryAttention — and both were fixed by 1.23. The
-            // note that used to sit here said no released runtime would ever
-            // take them, which was me reading 1.22 and main and nothing in
-            // between.
+            // The int4 variant, as the resolver counted it on a device: the
+            // 284 MB backbone from `int4/`, 462 MB of shared graphs from
+            // `components/`, and the 11 MB tokenizer at the root — 746 MB.
+            // `fp32/` swaps the backbone for a 1.76 GB one and comes to 2.23 GB.
             //
-            // Both figures counted from the HF blob sizes against what the
-            // resolver actually bundles — the variant's own three graphs, plus
-            // the shared Higgs tokenizer, for which it picks the deepest
-            // directory (`audio_tokenizer/fp16`, 371 MB) over the fp32 one.
+            // Worth knowing before the download: 328 MB of those components are
+            // the acoustic, semantic and quantizer encoders, which only matter
+            // for cloning a voice from a reference clip. That is not implemented
+            // yet, so today they are 44% of the download doing nothing. They are
+            // bundled anyway because the resolver adds every component directory
+            // to whichever variant is chosen, and splitting them out would not
+            // change that — only removing them from the repo would, and then
+            // cloning would need a second download.
             //
-            // int4 swaps an 87 MB embeddings encoder for root's 327 MB and a
-            // 4 MB heads decoder for its 17 MB; the llm_decoder is the same
-            // 297 MB file in both. So: 388 + 371 + 11 MB of tokeniser = 770 MB
-            // against root's 641 + 371 + 11 = 1023 MB.
-            sizeHint = "~760 MB",
+            // ONNX Runtime 1.23 is the floor, for two unrelated schema reasons:
+            // int4's `bits` attribute on GatherBlockQuantized, and the twelve
+            // inputs to GroupQueryAttention. This build ships 1.28.
+            sizeHint = "~750 MB",
         ),
 
         // — images —
