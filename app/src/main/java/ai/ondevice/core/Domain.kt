@@ -122,6 +122,31 @@ enum class RuntimeState { NOT_INSTALLED, INSTALLED, UPDATE_AVAILABLE, ROLLED_BAC
 
 enum class MessageRole { USER, ASSISTANT, SYSTEM, TOOL_CALL, TOOL_RESULT }
 
+/**
+ * What a recorded run produced.
+ *
+ * Four kinds because there are four things this device makes and four places an
+ * artifact row is written. It is deliberately not [Modality]: a modality
+ * describes a *model*, and one model can be driven by two different runs —
+ * whisper transcribes both a file and a live recording, and the distinction that
+ * matters to a stored run is which artifact table its id points into.
+ */
+enum class PredictionKind {
+    CHAT,
+    IMAGE,
+    SPEECH,
+    TRANSCRIBE,
+    ;
+
+    val label: String
+        get() = when (this) {
+            CHAT -> "Chat"
+            IMAGE -> "Image"
+            SPEECH -> "Speech"
+            TRANSCRIBE -> "Transcript"
+        }
+}
+
 /** SPEC §3.2 — every refusal gets its own message and its own remedy. */
 enum class RefusalKind(val heading: String, val explanation: String) {
     WONT_FIT(

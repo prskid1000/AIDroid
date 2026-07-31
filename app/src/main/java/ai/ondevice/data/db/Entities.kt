@@ -9,6 +9,7 @@ import ai.ondevice.core.DownloadState
 import ai.ondevice.core.MessageRole
 import ai.ondevice.core.Modality
 import ai.ondevice.core.ModelFormat
+import ai.ondevice.core.PredictionKind
 import ai.ondevice.core.RuntimeState
 
 /**
@@ -199,6 +200,50 @@ data class SynthesisEntity(
     val durationMillis: Long,
     val sampleRate: Int,
     val createdAt: Long,
+)
+
+/**
+ * What one prediction cost the device.
+ *
+ * One table keyed by the artifact rather than a `traceJson` column on each of
+ * `messages`, `generated_images`, `syntheses` and `transcripts`. Four columns
+ * would have meant four migrations to keep in step and four places to remember,
+ * and — the part that decided it — the four kinds would no longer be
+ * comparable. A single table answers "what did anything on this device cost"
+ * with one query.
+ *
+ * [artifactId] is a plain column, not a foreign key: the four tables it can
+ * point into have no common parent, and a run is worth keeping even if it
+ * describes something that has since been deleted by hand. Deletes clean up
+ * after themselves in [ai.ondevice.ui.vm.LibraryViewModel] instead.
+ */
+@Entity(tableName = "prediction_runs", indices = [Index("artifactId"), Index("startedAt")])
+data class PredictionRunEntity(
+    @PrimaryKey val id: String,
+    val kind: PredictionKind,
+    /** The message, image, synthesis or transcript this run produced. */
+    val artifactId: String,
+    val modelId: String?,
+    val backend: BackendId?,
+    val startedAt: Long,
+    val elapsedMillis: Long,
+    /**
+     * Summary columns, duplicated out of [traceJson] on purpose. A list screen
+     * that wants "how hard did this work" must not parse and walk a 180-point
+     * array per row to find out.
+     */
+    val peakCpuPercent: Int,
+    val meanCpuPercent: Int,
+    val peakRssBytes: Long,
+    /** A serialised [ai.ondevice.engine.ResourceTrace]. */
+    val traceJson: String,
+    /**
+     * Whatever throughput figure this kind of run has, sparse — `tokens_per_second`
+     * for chat, `seconds_per_step` for image, `realtime_factor` for a transcript.
+     * Sparse rather than three nullable columns for the same reason every other
+     * parameter blob here is: a kind added later needs no migration.
+     */
+    val statsJson: String,
 )
 
 @Entity(tableName = "download_jobs", indices = [Index("state")])

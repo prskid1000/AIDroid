@@ -142,6 +142,11 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideResourceRecorder(capabilities: DeviceCapabilities) =
+        ai.ondevice.engine.ResourceRecorder(capabilities)
+
+    @Provides
+    @Singleton
     fun provideToolProviders(db: OnDeviceDatabase, capabilities: DeviceCapabilities) =
         ai.ondevice.tools.ToolProviderFactory(db, capabilities)
 

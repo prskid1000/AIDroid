@@ -20,6 +20,7 @@ import ai.ondevice.engine.GenerateRequest
 import ai.ondevice.engine.GenerationEvent
 import ai.ondevice.engine.InferenceService
 import ai.ondevice.engine.RenderedPrompt
+import ai.ondevice.engine.record
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
@@ -53,6 +54,7 @@ class ChatViewModel @Inject constructor(
     private val attachments: ai.ondevice.data.AttachmentStore,
     private val archive: ai.ondevice.data.ConversationArchive,
     private val storage: ai.ondevice.data.ModelStorage,
+    private val recorder: ai.ondevice.engine.ResourceRecorder,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ChatState())
@@ -498,6 +500,18 @@ class ChatViewModel @Inject constructor(
                 streaming = StreamingMessage(id = assistantId),
             )
 
+            // Per round, not per turn. A reply that calls a tool generates
+            // again after the result comes back, and those are separate pieces
+            // of work with separate costs — averaging them into one trace would
+            // hide the fact that the second round starts from a warm cache.
+            val recording = recorder.start(viewModelScope)
+            val liveJob = viewModelScope.launch {
+                recording.live.collect { trace ->
+                    _state.value = _state.value.copy(liveTrace = trace)
+                }
+            }
+            val startedAt = System.currentTimeMillis()
+
             try {
                 engine.generate(
                     GenerateRequest(
@@ -562,6 +576,13 @@ class ChatViewModel @Inject constructor(
                     }
                 }
             } finally {
+                // Both of these have to happen before the NonCancellable block,
+                // and neither may suspend: Stop cancels this coroutine, so a
+                // suspending stop here would never run and the sampler would
+                // outlive the run it was describing.
+                liveJob.cancel()
+                val trace = recording.stop()
+
                 // Persist whatever was generated, including on cancellation — a
                 // half-finished reply is still the user's, and it carries the
                 // parameters it was produced under. NonCancellable is what makes
@@ -570,6 +591,7 @@ class ChatViewModel @Inject constructor(
                 // suspending call on a cancelled job, so the partial reply was
                 // thrown away every single time.
                 withContext(NonCancellable) {
+                    _state.value = _state.value.copy(liveTrace = null)
                     if (content.isNotEmpty() || thinking.isNotEmpty() || toolCalls.isNotEmpty()) {
                         db.messages().upsert(
                             MessageEntity(
@@ -590,6 +612,18 @@ class ChatViewModel @Inject constructor(
                                 createdAt = System.currentTimeMillis(),
                                 parentMessageId = lastParent,
                             ),
+                        )
+                        // Keyed to the message, so a stopped generation keeps
+                        // its trace for the same reason it keeps its partial
+                        // reply: what it cost to get that far is still true.
+                        db.predictionRuns().record(
+                            kind = ai.ondevice.core.PredictionKind.CHAT,
+                            artifactId = assistantId,
+                            modelId = _state.value.model?.id,
+                            backend = backend,
+                            startedAt = startedAt,
+                            trace = trace,
+                            stats = SparseParams.of("tokens_per_second" to tps),
                         )
                         lastParent = assistantId
                     }
@@ -903,7 +937,19 @@ class ChatViewModel @Inject constructor(
 
     private suspend fun refreshMessages() {
         val conversation = _state.value.conversation ?: return
-        _state.value = _state.value.copy(messages = db.messages().getFor(conversation.id))
+        val messages = db.messages().getFor(conversation.id)
+        // Loaded alongside the messages rather than observed: runs only ever
+        // appear as a consequence of a message being written, and this function
+        // already runs on every one of those.
+        val traces = messages
+            .filter { it.role == MessageRole.ASSISTANT }
+            .mapNotNull { message ->
+                db.predictionRuns().getFor(message.id)
+                    .firstNotNullOfOrNull { ai.ondevice.engine.ResourceTrace.parse(it.traceJson) }
+                    ?.let { message.id to it }
+            }
+            .toMap()
+        _state.value = _state.value.copy(messages = messages, traces = traces)
     }
 
     private fun MessageEntity.toEngineMessage(): EngineMessage {
@@ -1001,6 +1047,10 @@ data class ChatState(
     val backendPreference: String = ai.ondevice.data.prefs.AppPrefs.BACKEND_AUTO,
     val error: String? = null,
     val errorSuggestion: String? = null,
+    /** Sampled while the current turn runs; null when nothing is generating. */
+    val liveTrace: ai.ondevice.engine.ResourceTrace? = null,
+    /** What each assistant message cost, by message id. */
+    val traces: Map<String, ai.ondevice.engine.ResourceTrace> = emptyMap(),
 ) {
     /**
      * The context the model is *loaded at*, which is the per-model `n_ctx`

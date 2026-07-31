@@ -109,9 +109,21 @@ class Phonemizer(private val context: Context) {
                         PhonemizerBridge.nativeInit(dataParent.absolutePath, voice)
                         currentVoice = voice
                     }
-                    PhonemizerBridge.nativePhonemize(text.trim())
+                    PhonemizerBridge.nativePhonemize(text.trim()).also { ipa ->
+                        // espeak returning nothing is not an error it reports —
+                        // it hands back an empty string, which tokenises to no
+                        // ids, which the model turns into silence. Saying so
+                        // here is the difference between a diagnosable failure
+                        // and a WAV that is all header.
+                        if (ipa.isBlank()) {
+                            android.util.Log.w(
+                                TAG,
+                                "espeak returned nothing for voice=$voice, ${text.length} chars",
+                            )
+                        }
+                    }
                 }
-            }
+            }.onFailure { android.util.Log.e(TAG, "phonemize failed", it) }
         }
 
     /** For the runtimes screen: what is actually installed. */
@@ -159,6 +171,7 @@ class Phonemizer(private val context: Context) {
     }
 
     private companion object {
+        const val TAG = "Phonemizer"
         const val ASSET_ROOT = "espeak-ng-data"
 
         /**

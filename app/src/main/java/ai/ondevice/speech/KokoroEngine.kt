@@ -3,6 +3,7 @@ package ai.ondevice.speech
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -138,8 +139,17 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
                 inputNames = names
                 loadedPath = model.absolutePath
                 vocabulary = readVocabulary(directory) ?: DEFAULT_VOCABULARY
+                Log.i(
+                    TAG,
+                    "loaded ${model.name} (${model.length() / 1024 / 1024} MB) " +
+                        "inputs=${created.inputNames.joinToString()} " +
+                        "vocab=${vocabulary.size}",
+                )
             }
-        }.onFailure { lastError = it.message }
+        }.onFailure {
+            lastError = it.message
+            Log.e(TAG, "load failed", it)
+        }
     }
 
     suspend fun unload() = mutex.withLock { unlockedUnload() }
@@ -182,22 +192,95 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
                         // chunks deliberately differ in length.
                         val style = styleFor(request, chunk.tokens.size)
                         val piece = runGraph(active, names, chunk.tokens, style, request.speed)
+                        checkFinite(piece)
                         // Trimmed per chunk rather than once at the end: the
                         // silence that matters is the padding *between* two
                         // separately-synthesised sentences, and trimming the
                         // join afterwards cannot reach it.
-                        pieces += if (request.trimSilence) trimSilence(piece) else piece
+                        val kept = if (request.trimSilence) trimSilence(piece) else piece
+                        // Every stage that can silently produce nothing, on one
+                        // line. Empty phonemes, empty tokens and a fully-trimmed
+                        // piece all end as a WAV header with no audio and no
+                        // exception anywhere — which is exactly the failure this
+                        // engine had, undiagnosable because nothing here spoke.
+                        Log.i(
+                            TAG,
+                            "chunk phonemes=${chunk.phonemes.length} tokens=${chunk.tokens.size} " +
+                                "raw=${piece.size} kept=${kept.size} ${piece.describe()}",
+                        )
+                        pieces += kept
                     }
                 }
 
+                val joined = amplify(join(pieces), request.volume)
+                Log.i(
+                    TAG,
+                    "synthesised chunks=${chunks.size} samples=${joined.size} " +
+                        "(${"%.2f".format(joined.size.toFloat() / SAMPLE_RATE)}s)",
+                )
                 KokoroAudio(
-                    samples = amplify(join(pieces), request.volume),
+                    samples = joined,
                     sampleRate = SAMPLE_RATE,
                     phonemes = phonemesUsed.toString(),
                     chunks = chunks.size,
                 )
-            }.onFailure { lastError = it.message }
+            }.onFailure {
+                lastError = it.message
+                Log.e(TAG, "synthesis failed", it)
+            }
         }
+
+    /**
+     * Refuse a waveform that is not a waveform.
+     *
+     * A graph that overflows returns NaN for every sample, and every stage after
+     * this one treats that as quiet: [trimSilence] sees a peak of zero — because
+     * `abs(NaN) > 0f` is false — and returns nothing, the pieces join to nothing,
+     * and `WavFile.write` produces a 44-byte header that the app then reports as
+     * "Saved … and it is listed in the library". Seventy seconds of computation
+     * and 1.9 GB of memory, described to the user as a success.
+     *
+     * The message names the graph, because which graph it is *is* the fix.
+     */
+    private fun checkFinite(samples: FloatArray) {
+        val nonFinite = samples.count { !it.isFinite() }
+        if (nonFinite == 0) return
+        val graph = loadedPath?.substringAfterLast('/') ?: "the loaded graph"
+        error(
+            "$graph produced $nonFinite non-finite samples out of ${samples.size}: it computed " +
+                "its way to NaN rather than to audio. Graphs whose activations are float16 " +
+                "overflow on arm64, where the CPU has real fp16 arithmetic and float16 stops at " +
+                "65504 — the same file works on an x86 emulator, which has no fp16 kernels and " +
+                "quietly computes in fp32. Install a variant without f16 in its name (q8, q4, " +
+                "quantized or the full-precision graph) and this voice will speak.",
+        )
+    }
+
+    /**
+     * A waveform's peak, and how it failed if it did.
+     *
+     * NaN and zero have to be told apart. `abs(NaN) > peak` is false, so a
+     * wholly non-finite waveform reports a peak of 0 exactly like a silent one —
+     * and they mean opposite things: silence is a graph that ran and said
+     * nothing, NaN is arithmetic that overflowed. Both end as a WAV with no
+     * audio, so the peak alone cannot say which happened.
+     */
+    private fun FloatArray.describe(): String {
+        var peak = 0f
+        var nonFinite = 0
+        var nonZero = 0
+        for (sample in this) {
+            if (!sample.isFinite()) {
+                nonFinite++
+                continue
+            }
+            if (sample != 0f) nonZero++
+            val magnitude = kotlin.math.abs(sample)
+            if (magnitude > peak) peak = magnitude
+        }
+        return "peak=$peak nonZero=$nonZero nonFinite=$nonFinite " +
+            "head=${take(4).joinToString()}"
+    }
 
     // — the graph —
 
@@ -466,12 +549,40 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
     fun voicePacks(directory: File): List<File> =
         directory.walkTopDown().filter { it.isFile && it.length() == PACK_BYTES }.toList()
 
+    /**
+     * The graph to load, preferring one this device can actually compute.
+     *
+     * Smallest-wins was the whole rule, and on the only ABI this app ships it
+     * chose a graph that returns NaN for every sample. Kokoro's repo carries
+     * several quantisations and the `…f16` ones — `model_fp16`, `model_q8f16`,
+     * `model_q4f16`, `model_uint8f16` — keep their *activations* in float16.
+     * ORT on x86-64 has no native fp16 kernels and quietly computes those in
+     * fp32, so they work on an emulator. arm64 from ARMv8.2 does have them, and
+     * float16 tops out at 65504: Kokoro's vocoder runs well past that, overflows
+     * to infinity, and every output sample comes back NaN. Silent, no exception,
+     * and indistinguishable from a model that simply had nothing to say.
+     *
+     * So size is the tie-breaker, not the rule: an fp32-activation graph is
+     * chosen first even when it is four times larger, because a graph that
+     * cannot produce a number is not a smaller option, it is not an option.
+     */
     private fun findModel(directory: File): File? =
         directory.walkTopDown()
             .filter { it.isFile && it.extension.equals("onnx", ignoreCase = true) }
-            // Prefer the smallest graph present: a repo often carries several
-            // quantisations and the small one is the one a phone should run.
-            .minByOrNull { it.length() }
+            .sortedWith(compareBy({ if (usesFloat16Activations(it)) 1 else 0 }, { it.length() }))
+            .firstOrNull()
+
+    /**
+     * Whether a graph's name marks it as float16-activation.
+     *
+     * By name because the alternative is parsing the ONNX protobuf to find the
+     * value_info element types, and upstream's naming for these is consistent
+     * and is what the model card documents. A graph that is fp16 and not named
+     * so still fails the same way — and now fails *loudly*, in [synthesize].
+     */
+    private fun usesFloat16Activations(file: File): Boolean =
+        Regex("(^|[_-])(fp16|f16)([_-]|\\.)", RegexOption.IGNORE_CASE)
+            .containsMatchIn(file.name)
 
     private fun join(pieces: List<FloatArray>): FloatArray {
         if (pieces.size == 1) return pieces.first()
@@ -505,6 +616,8 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
     }
 
     companion object {
+        private const val TAG = "KokoroEngine"
+
         /**
          * The parameter keys this engine reads, for [ai.ondevice.params.EngineParams].
          *

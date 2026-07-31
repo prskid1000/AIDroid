@@ -16,6 +16,7 @@ import ai.ondevice.data.db.PresetEntity
 import ai.ondevice.data.db.TranscriptEntity
 import ai.ondevice.data.hf.DeviceCapabilities
 import ai.ondevice.engine.CaptureEvent
+import ai.ondevice.engine.record
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -46,6 +47,7 @@ class ImageViewModel @Inject constructor(
     private val storage: ModelStorage,
     private val capabilities: DeviceCapabilities,
     private val diffusion: ai.ondevice.engine.DiffusionEngine,
+    private val recorder: ai.ondevice.engine.ResourceRecorder,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ImageState())
@@ -206,6 +208,16 @@ class ImageViewModel @Inject constructor(
 
         generationJob = viewModelScope.launch {
             val started = System.currentTimeMillis()
+            // Started before the load, not after it: on a cold model most of the
+            // memory a diffusion run ever holds is claimed while the checkpoint
+            // is being read, and a trace that begins at the first sampler step
+            // would miss the peak entirely.
+            val recording = recorder.start(viewModelScope)
+            val liveJob = viewModelScope.launch {
+                recording.live.collect { trace ->
+                    _state.value = _state.value.copy(liveTrace = trace)
+                }
+            }
             try {
                 if (diffusion.loadedModelId != model.id) {
                     _state.value = _state.value.copy(loadingModel = true)
@@ -282,10 +294,28 @@ class ImageViewModel @Inject constructor(
                                 createdAt = System.currentTimeMillis(),
                             )
                             db.images().upsert(image)
+                            val elapsed = System.currentTimeMillis() - started
+                            val trace = recording.stop()
+                            db.predictionRuns().record(
+                                kind = ai.ondevice.core.PredictionKind.IMAGE,
+                                artifactId = image.id,
+                                modelId = model.id,
+                                // sd.cpp has no backend selection of its own; the
+                                // runtime reports what it was built with, and
+                                // claiming one here would be a guess.
+                                backend = null,
+                                startedAt = started,
+                                trace = trace,
+                                stats = SparseParams.of(
+                                    "steps" to _state.value.steps,
+                                    "seconds_per_step" to _state.value.secondsPerStep,
+                                ),
+                            )
                             _state.value = _state.value.copy(
                                 lastImage = image,
                                 previewBitmap = event.image.toBitmap(),
-                                elapsedMillis = System.currentTimeMillis() - started,
+                                elapsedMillis = elapsed,
+                                lastTrace = trace,
                             )
                         }
                         is ai.ondevice.engine.DiffusionEvent.Failed -> {
@@ -300,7 +330,18 @@ class ImageViewModel @Inject constructor(
                 // Cancellation must reach the native loop, not merely stop the
                 // flow — otherwise sd.cpp keeps denoising and keeps its buffers.
                 diffusion.cancel()
-                _state.value = _state.value.copy(generating = false, step = 0, loadingModel = false)
+                liveJob.cancel()
+                // Idempotent: a completed run already stopped it, and a
+                // cancelled one never reached that point. Nothing is recorded
+                // here because a cancelled run produced no image, and a trace
+                // with no artifact has nothing to hang on.
+                recording.stop()
+                _state.value = _state.value.copy(
+                    generating = false,
+                    step = 0,
+                    loadingModel = false,
+                    liveTrace = null,
+                )
             }
         }
     }
@@ -594,6 +635,10 @@ data class ImageState(
     /** The decoded intermediate latent, or the finished image. */
     val previewBitmap: android.graphics.Bitmap? = null,
     val maskPath: String? = null,
+    /** Sampled while generating; null once the run ends. */
+    val liveTrace: ai.ondevice.engine.ResourceTrace? = null,
+    /** What the finished run cost, kept so the graph survives the generation. */
+    val lastTrace: ai.ondevice.engine.ResourceTrace? = null,
     val availableAttachments: List<ai.ondevice.core.ModelAttachment> = emptyList(),
     val availableModels: List<ModelEntity> = emptyList(),
 ) {
@@ -654,29 +699,11 @@ data class ImageState(
         }
 }
 
-@HiltViewModel
-class GalleryViewModel @Inject constructor(
-    private val db: OnDeviceDatabase,
-) : ViewModel() {
-
-    val images: StateFlow<List<GeneratedImageEntity>> = db.images().observeAll()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    private val _selected = MutableStateFlow<GeneratedImageEntity?>(null)
-    val selected: StateFlow<GeneratedImageEntity?> = _selected.asStateFlow()
-
-    fun select(image: GeneratedImageEntity) {
-        _selected.value = image
-    }
-
-    fun delete(image: GeneratedImageEntity) {
-        viewModelScope.launch {
-            runCatching { java.io.File(image.path).delete() }
-            db.images().deleteById(image.id)
-            if (_selected.value?.id == image.id) _selected.value = null
-        }
-    }
-}
+// GalleryViewModel lived here. It backed a screen that was a grid of images
+// plus a detail pane for whichever was selected — which is the library's images
+// section plus LibraryDetailScreen, written twice with two parameter tables to
+// keep in agreement. The library now pushes straight to the detail screen and
+// the gallery is gone.
 
 /** S14 — live and file transcription, plus the Kokoro read-aloud panel. */
 @HiltViewModel
@@ -686,6 +713,7 @@ class VoiceViewModel @Inject constructor(
     private val synthesizer: ai.ondevice.speech.SpeechSynthesizer,
     private val attachments: ai.ondevice.data.AttachmentStore,
     private val transcriber: ai.ondevice.engine.Transcriber,
+    private val recorder: ai.ondevice.engine.ResourceRecorder,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(VoiceState())
@@ -693,6 +721,16 @@ class VoiceViewModel @Inject constructor(
 
     private var recordingJob: Job? = null
     private var speakJob: Job? = null
+
+    /**
+     * A live capture's sampler, held here rather than in a local.
+     *
+     * Recording starts in one call and its transcript is written in another, so
+     * unlike every other run in the app there is no single scope that spans it.
+     */
+    private var captureRecording: ai.ondevice.engine.ResourceRecorder.Handle? = null
+    private var captureLiveJob: Job? = null
+    private var captureStartedAt: Long = 0
 
     init {
         viewModelScope.launch {
@@ -993,6 +1031,16 @@ class VoiceViewModel @Inject constructor(
         speakJob?.cancel()
         _state.value = _state.value.copy(speaking = true, speakError = null, spokenRange = null)
         speakJob = viewModelScope.launch {
+            // Live only, and no row. Speaking streams straight to the speaker
+            // and files nothing, so there is no artifact for a run to belong to
+            // — a record keyed to nothing could never be found again. Rendering
+            // the same script to a WAV does produce one, and is recorded.
+            val recording = recorder.start(viewModelScope)
+            val liveJob = launch {
+                recording.live.collect { trace ->
+                    _state.value = _state.value.copy(liveTrace = trace)
+                }
+            }
             try {
                 synthesizer.speak(currentRequest(text)).collect { event ->
                     when (event) {
@@ -1017,7 +1065,13 @@ class VoiceViewModel @Inject constructor(
                 // teardown in ChatViewModel this needs no NonCancellable; a
                 // cancelled coroutine can still run it. speakError survives the
                 // copy, so a failure keeps its message.
-                _state.value = _state.value.copy(speaking = false, spokenRange = null)
+                liveJob.cancel()
+                _state.value = _state.value.copy(
+                    speaking = false,
+                    spokenRange = null,
+                    liveTrace = null,
+                    lastTrace = recording.stop(),
+                )
             }
         }
     }
@@ -1087,12 +1141,22 @@ class VoiceViewModel @Inject constructor(
                 "$stem-${System.currentTimeMillis()}.wav",
             )
             val request = currentRequest(text)
+            val startedAt = System.currentTimeMillis()
+            val recording = recorder.start(viewModelScope)
+            val liveJob = launch {
+                recording.live.collect { trace ->
+                    _state.value = _state.value.copy(liveTrace = trace)
+                }
+            }
             val result = synthesizer.synthesizeToFile(request, destination)
+            liveJob.cancel()
+            val trace = recording.stop()
             result.getOrNull()?.let { file ->
                 val info = ai.ondevice.speech.WavFile.describe(file)
+                val synthesisId = java.util.UUID.randomUUID().toString()
                 db.syntheses().upsert(
                     ai.ondevice.data.db.SynthesisEntity(
-                        id = java.util.UUID.randomUUID().toString(),
+                        id = synthesisId,
                         path = file.absolutePath,
                         text = text,
                         engineId = request.provider.name.lowercase(),
@@ -1108,11 +1172,33 @@ class VoiceViewModel @Inject constructor(
                         createdAt = System.currentTimeMillis(),
                     ),
                 )
+                db.predictionRuns().record(
+                    kind = ai.ondevice.core.PredictionKind.SPEECH,
+                    artifactId = synthesisId,
+                    modelId = _state.value.ttsModel?.id,
+                    backend = null,
+                    startedAt = startedAt,
+                    trace = trace,
+                    stats = ai.ondevice.core.SparseParams.of(
+                        "audio_millis" to (info?.millis ?: 0L),
+                        // Audio seconds produced per wall second — the same
+                        // honest speed figure transcription reports, so the two
+                        // halves of the voice screen can be compared.
+                        "realtime_factor" to
+                            if (trace.elapsedMillis > 0) {
+                                (info?.millis ?: 0L).toFloat() / trace.elapsedMillis
+                            } else {
+                                0f
+                            },
+                    ),
+                )
             }
             _state.value = _state.value.copy(
                 rendering = false,
                 speakError = result.exceptionOrNull()?.message,
                 lastAudioPath = result.getOrNull()?.absolutePath,
+                liveTrace = null,
+                lastTrace = trace,
             )
             result.getOrNull()?.let(onReady)
         }
@@ -1282,6 +1368,14 @@ class VoiceViewModel @Inject constructor(
             errorHint = null,
         )
 
+        captureStartedAt = System.currentTimeMillis()
+        captureRecording = recorder.start(viewModelScope)
+        captureLiveJob = viewModelScope.launch {
+            captureRecording?.live?.collect { trace ->
+                _state.value = _state.value.copy(liveTrace = trace)
+            }
+        }
+
         recordingJob = viewModelScope.launch {
             if (transcriber.loadedModelId != model.id) {
                 _state.value = _state.value.copy(loading = true)
@@ -1333,15 +1427,33 @@ class VoiceViewModel @Inject constructor(
     fun stopRecording() {
         recordingJob?.cancel()
         recordingJob = null
+        captureLiveJob?.cancel()
+        captureLiveJob = null
+        val trace = captureRecording?.stop()
+        val startedAt = captureStartedAt
+        captureRecording = null
         val segments = _state.value.partial
         viewModelScope.launch {
             if (segments.isNotEmpty()) {
+                val transcriptId = UUID.randomUUID().toString()
                 db.transcripts().upsert(
                     TranscriptEntity(
-                        id = UUID.randomUUID().toString(),
+                        id = transcriptId,
                         sourcePath = null,
                         title = "Live capture",
-                        segmentsJson = SparseParams.of("segments" to segments.map { it.text }).toJsonString(),
+                        // A sliding window has no segment boundaries to report,
+                        // so the timings are genuinely zero here rather than
+                        // discarded. The confidence is real and is kept.
+                        segmentsJson = ai.ondevice.core.TranscriptSegments.encode(
+                            segments.map {
+                                TranscriptSegment(
+                                    startMillis = 0,
+                                    endMillis = 0,
+                                    text = it.text,
+                                    confidence = it.confidence,
+                                )
+                            },
+                        ),
                         modelId = _state.value.sttModel?.id,
                         paramsJson = SparseParams.of(
                             "vad" to _state.value.vadEnabled,
@@ -1351,9 +1463,25 @@ class VoiceViewModel @Inject constructor(
                         createdAt = System.currentTimeMillis(),
                     ),
                 )
+                trace?.let {
+                    db.predictionRuns().record(
+                        kind = ai.ondevice.core.PredictionKind.TRANSCRIBE,
+                        artifactId = transcriptId,
+                        modelId = _state.value.sttModel?.id,
+                        backend = null,
+                        startedAt = startedAt,
+                        trace = it,
+                        // A live capture transcribes as fast as it is spoken by
+                        // definition, so a realtime factor would say nothing.
+                        // What it cost to keep up is the interesting number.
+                        stats = SparseParams.of("audio_millis" to _state.value.elapsedMillis),
+                    )
+                }
             }
             _state.value = _state.value.copy(
                 recording = false,
+                liveTrace = null,
+                lastTrace = trace ?: _state.value.lastTrace,
                 transcripts = db.transcripts().observeAll().first(),
             )
         }
@@ -1387,21 +1515,44 @@ class VoiceViewModel @Inject constructor(
                 }
             }
             val started = System.currentTimeMillis()
+            val recording = recorder.start(viewModelScope)
+            val liveJob = launch {
+                recording.live.collect { trace ->
+                    _state.value = _state.value.copy(liveTrace = trace)
+                }
+            }
             val result = transcriber.transcribeFile(java.io.File(attachment.path))
+            liveJob.cancel()
+            val trace = recording.stop()
             val elapsed = System.currentTimeMillis() - started
             result.fold(
                 onSuccess = { segments ->
                     val duration = segments.maxOfOrNull { it.endMillis } ?: 0L
+                    val transcriptId = UUID.randomUUID().toString()
                     db.transcripts().upsert(
                         TranscriptEntity(
-                            id = UUID.randomUUID().toString(),
+                            id = transcriptId,
                             sourcePath = attachment.path,
                             title = attachment.displayName,
-                            segmentsJson = SparseParams.of("segments" to segments.map { it.text }).toJsonString(),
+                            segmentsJson = ai.ondevice.core.TranscriptSegments.encode(segments),
                             modelId = model.id,
                             paramsJson = model.paramOverridesJson,
                             durationMillis = duration,
                             createdAt = System.currentTimeMillis(),
+                        ),
+                    )
+                    // The honest speed figure: audio seconds per wall second.
+                    val realtimeFactor = if (elapsed > 0) duration.toFloat() / elapsed else 0f
+                    db.predictionRuns().record(
+                        kind = ai.ondevice.core.PredictionKind.TRANSCRIBE,
+                        artifactId = transcriptId,
+                        modelId = model.id,
+                        backend = null,
+                        startedAt = started,
+                        trace = trace,
+                        stats = SparseParams.of(
+                            "realtime_factor" to realtimeFactor,
+                            "audio_millis" to duration,
                         ),
                     )
                     _state.value = _state.value.copy(
@@ -1409,14 +1560,16 @@ class VoiceViewModel @Inject constructor(
                         segments = segments,
                         title = attachment.displayName,
                         fileProgress = 1f,
-                        // The honest speed figure: audio seconds per wall second.
-                        realtimeFactor = if (elapsed > 0) duration.toFloat() / elapsed else 0f,
+                        realtimeFactor = realtimeFactor,
+                        liveTrace = null,
+                        lastTrace = trace,
                         transcripts = db.transcripts().observeAll().first(),
                     )
                 },
                 onFailure = {
                     _state.value = _state.value.copy(
                         loading = false,
+                        liveTrace = null,
                         error = it.message ?: "Transcription failed.",
                     )
                 },
@@ -1430,6 +1583,48 @@ class VoiceViewModel @Inject constructor(
 
     fun setSpeed(speed: Float) {
         _state.value = _state.value.copy(speed = speed)
+    }
+
+    /**
+     * Reopen a stored synthesis as a working script.
+     *
+     * The Speak panel is repopulated with what produced it — the text, the
+     * voice, the speed — so "open in Voice" means the take can be changed and
+     * run again, not merely looked at. The engine is not switched: a synthesis
+     * records which provider made it, but the installed set may have changed
+     * since, and silently selecting a provider that is no longer there would
+     * fail at the moment the user pressed Speak.
+     */
+    fun loadSynthesis(synthesis: ai.ondevice.data.db.SynthesisEntity) {
+        stopSpeaking()
+        val params = SparseParams.parse(synthesis.paramsJson)
+        _state.value = _state.value.copy(
+            mode = VoiceMode.SPEAK,
+            speakSource = SpeakSource.TYPED,
+            script = synthesis.text,
+            scriptSource = null,
+            voice = synthesis.voice ?: _state.value.voice,
+            speed = params.float("speed") ?: _state.value.speed,
+            pitch = params.float("pitch") ?: _state.value.pitch,
+            volume = params.float("volume") ?: _state.value.volume,
+            lastAudioPath = synthesis.path,
+            speakError = null,
+        )
+    }
+
+    /** Reopen a stored transcript in the Transcribe panel, exports and all. */
+    fun loadTranscript(transcript: TranscriptEntity) {
+        if (_state.value.recording) stopRecording()
+        _state.value = _state.value.copy(
+            mode = VoiceMode.TRANSCRIBE,
+            source = TranscribeSource.FILE,
+            title = transcript.title,
+            segments = ai.ondevice.core.TranscriptSegments.parse(transcript.segmentsJson),
+            partial = emptyList(),
+            fileProgress = 1f,
+            error = null,
+            errorHint = null,
+        )
     }
 
     /**
@@ -1578,6 +1773,16 @@ data class VoiceState(
     val fileProgress: Float = 0.74f,
     val vadEnabled: Boolean = true,
     val stepMs: Int = 3000,
+
+    /**
+     * One pair for the whole screen, not one per mode.
+     *
+     * Transcribing and speaking never run at the same time — both go through
+     * the same single native runtime — so a second pair would only ever hold a
+     * stale copy of the first.
+     */
+    val liveTrace: ai.ondevice.engine.ResourceTrace? = null,
+    val lastTrace: ai.ondevice.engine.ResourceTrace? = null,
 
     // — Speak (§7) —
     val script: String = "",

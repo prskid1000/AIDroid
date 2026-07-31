@@ -10,6 +10,7 @@ import ai.ondevice.core.DownloadState
 import ai.ondevice.core.MessageRole
 import ai.ondevice.core.Modality
 import ai.ondevice.core.ModelFormat
+import ai.ondevice.core.PredictionKind
 import ai.ondevice.core.RuntimeState
 
 /**
@@ -36,6 +37,10 @@ class Converters {
     @TypeConverter fun rtStateTo(v: RuntimeState?): String? = v?.name
     @TypeConverter fun rtStateFrom(v: String?): RuntimeState? = v?.let { runCatching { RuntimeState.valueOf(it) }.getOrNull() }
 
+    @TypeConverter fun predictionKindTo(v: PredictionKind?): String? = v?.name
+    @TypeConverter fun predictionKindFrom(v: String?): PredictionKind? =
+        v?.let { runCatching { PredictionKind.valueOf(it) }.getOrNull() }
+
     @TypeConverter fun attachmentRoleTo(v: AttachmentRole?): String? = v?.name
     @TypeConverter fun attachmentRoleFrom(v: String?): AttachmentRole? =
         v?.let { runCatching { AttachmentRole.valueOf(it) }.getOrNull() }
@@ -56,6 +61,7 @@ class Converters {
         RuntimeBundleEntity::class,
         ParamManifestEntity::class,
         McpServerEntity::class,
+        PredictionRunEntity::class,
     ],
     version = DATABASE_VERSION,
     exportSchema = true,
@@ -75,6 +81,7 @@ abstract class OnDeviceDatabase : RoomDatabase() {
     abstract fun runtimes(): RuntimeDao
     abstract fun manifests(): ParamManifestDao
     abstract fun mcpServers(): McpServerDao
+    abstract fun predictionRuns(): PredictionRunDao
 
     /**
      * Versions, with a guard so a bump stays deliberate.
@@ -107,7 +114,7 @@ abstract class OnDeviceDatabase : RoomDatabase() {
          * refusal on release builds.
          */
         val MIGRATIONS: Array<androidx.room.migration.Migration> =
-            arrayOf(MIGRATION_1_2, MIGRATION_2_3)
+            arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
     }
 }
 
@@ -158,9 +165,50 @@ private val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
 }
 
 /**
+ * v4 — what each prediction cost.
+ *
+ * A new table only, so nothing existing is touched and there is no backfill to
+ * get wrong: runs recorded from this version on have traces, and everything
+ * generated before simply has none, which is the truth. The two indices match
+ * what Room derives from the entity's `@Index` declarations, and they have to,
+ * or Room's own schema validation rejects the migrated database on open.
+ */
+private val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `prediction_runs` (
+                `id` TEXT NOT NULL,
+                `kind` TEXT NOT NULL,
+                `artifactId` TEXT NOT NULL,
+                `modelId` TEXT,
+                `backend` TEXT,
+                `startedAt` INTEGER NOT NULL,
+                `elapsedMillis` INTEGER NOT NULL,
+                `peakCpuPercent` INTEGER NOT NULL,
+                `meanCpuPercent` INTEGER NOT NULL,
+                `peakRssBytes` INTEGER NOT NULL,
+                `traceJson` TEXT NOT NULL,
+                `statsJson` TEXT NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_prediction_runs_artifactId` " +
+                "ON `prediction_runs` (`artifactId`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_prediction_runs_startedAt` " +
+                "ON `prediction_runs` (`startedAt`)",
+        )
+    }
+}
+
+/**
  * Named rather than written into the annotation so a test can compare it with
  * [OnDeviceDatabase.MIGRATIONS] — an annotation argument is not readable at
  * runtime, and the pair only means anything when they are checked against each
  * other.
  */
-internal const val DATABASE_VERSION = 3
+internal const val DATABASE_VERSION = 4

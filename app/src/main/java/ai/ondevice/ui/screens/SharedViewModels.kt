@@ -45,6 +45,16 @@ fun activityChatViewModel(): ChatViewModel =
 fun activityImageViewModel(): ImageViewModel =
     hiltViewModel(viewModelStoreOwner = LocalContext.current.findActivity())
 
+/**
+ * Opening a synthesis or a transcript from the library has to reach the Voice
+ * screen's own state, and a nav-scoped instance would give the library its own
+ * copy — the script would land in a view model nothing renders, exactly as the
+ * gallery's "reuse parameters" would have without the Image entry above.
+ */
+@Composable
+fun activityVoiceViewModel(): ai.ondevice.ui.vm.VoiceViewModel =
+    hiltViewModel(viewModelStoreOwner = LocalContext.current.findActivity())
+
 private fun Context.findActivity(): ViewModelStoreOwner {
     var context = this
     while (context is ContextWrapper) {

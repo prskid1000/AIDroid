@@ -22,12 +22,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ai.ondevice.core.Fmt
+import ai.ondevice.core.PredictionKind
 import ai.ondevice.data.db.ConversationEntity
 import ai.ondevice.data.db.GeneratedImageEntity
 import ai.ondevice.data.db.SynthesisEntity
@@ -63,17 +63,14 @@ import ai.ondevice.ui.vm.LibraryViewModel
 fun LibraryScreen(
     currentRoute: String?,
     onNavigate: (String) -> Unit,
-    onOpenConversation: (String) -> Unit,
-    onOpenGallery: () -> Unit,
+    onOpenItem: (PredictionKind, String) -> Unit,
     viewModel: LibraryViewModel = hiltViewModel(),
-    chatViewModel: ai.ondevice.ui.vm.ChatViewModel = activityChatViewModel(),
 ) {
     val section by viewModel.section.collectAsStateWithLifecycle()
     val conversations by viewModel.conversations.collectAsStateWithLifecycle()
     val images by viewModel.images.collectAsStateWithLifecycle()
     val syntheses by viewModel.syntheses.collectAsStateWithLifecycle()
     val transcripts by viewModel.transcripts.collectAsStateWithLifecycle()
-    val context = LocalContext.current
 
     PhoneScaffold(
         toolbar = {
@@ -99,22 +96,25 @@ fun LibraryScreen(
             modifier = Modifier.padding(bottom = 10.dp),
         )
 
+        // Every row opens the same detail screen. Deleting is still here, so a
+        // clear-out does not cost one push per item — but *reading* one is now
+        // a push rather than four different behaviours per section.
         when (section) {
             LibrarySection.CHATS -> ChatsSection(
                 conversations = conversations,
-                onOpen = { id ->
-                    chatViewModel.openConversation(id)
-                    onOpenConversation(id)
-                },
-                onDelete = chatViewModel::deleteConversation,
+                onOpen = { id -> onOpenItem(PredictionKind.CHAT, id) },
+                onDelete = viewModel::deleteConversation,
             )
 
-            LibrarySection.IMAGES -> ImagesSection(images, onOpenGallery)
+            LibrarySection.IMAGES -> ImagesSection(
+                images = images,
+                onOpen = { id -> onOpenItem(PredictionKind.IMAGE, id) },
+            )
 
             LibrarySection.VOICE -> VoiceSection(
                 syntheses = syntheses,
                 transcripts = transcripts,
-                onShare = { file, mime -> shareFile(context, file, mime) },
+                onOpen = onOpenItem,
                 onDeleteSynthesis = viewModel::deleteSynthesis,
                 onDeleteTranscript = viewModel::deleteTranscript,
             )
@@ -169,7 +169,7 @@ private fun ConversationEntity.displayTitle(preview: String): String =
 @Composable
 private fun ImagesSection(
     images: List<GeneratedImageEntity>,
-    onOpenGallery: () -> Unit,
+    onOpen: (String) -> Unit,
 ) {
     if (images.isEmpty()) {
         NHelp(
@@ -192,10 +192,20 @@ private fun ImagesSection(
                         .aspectRatio(1f)
                         .clip(Radius.Sm)
                         .background(NocturneColors.Neutral900)
-                        .nClickableFlat(onClick = onOpenGallery),
+                        .nClickableFlat(onClick = { onOpen(image.id) }),
                     contentAlignment = Alignment.BottomStart,
                 ) {
-                    GeneratedField(image.seed)
+                    // The file on disk. These tiles used to draw a gradient
+                    // derived from the seed — a placeholder from before sd.cpp
+                    // could produce pixels, which outlived the reason for it and
+                    // turned the gallery into a wall of things that looked
+                    // generated and were not.
+                    coil3.compose.AsyncImage(
+                        model = image.path,
+                        contentDescription = image.prompt,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.matchParentSize(),
+                    )
                     Text(
                         image.seed.toString(),
                         style = NocturneType.MonoXs,
@@ -205,7 +215,7 @@ private fun ImagesSection(
                 }
             }
         }
-        NHelp("Tap any image to open the gallery, where its parameters can be reused.")
+        NHelp("Tap any image for its full parameter set, what it cost to make, and one-tap reuse.")
     }
 }
 
@@ -215,7 +225,7 @@ private fun ImagesSection(
 private fun VoiceSection(
     syntheses: List<SynthesisEntity>,
     transcripts: List<TranscriptEntity>,
-    onShare: (java.io.File, String) -> Unit,
+    onOpen: (PredictionKind, String) -> Unit,
     onDeleteSynthesis: (SynthesisEntity) -> Unit,
     onDeleteTranscript: (TranscriptEntity) -> Unit,
 ) {
@@ -241,7 +251,7 @@ private fun VoiceSection(
                     Fmt.duration(synthesis.durationMillis),
                     Fmt.relative(synthesis.createdAt),
                 ).joinToString(" · "),
-                onClick = { onShare(java.io.File(synthesis.path), "audio/wav") },
+                onClick = { onOpen(PredictionKind.SPEECH, synthesis.id) },
                 onDelete = { onDeleteSynthesis(synthesis) },
             )
         }
@@ -253,7 +263,9 @@ private fun VoiceSection(
                     Fmt.duration(transcript.durationMillis),
                     Fmt.relative(transcript.createdAt),
                 ).joinToString(" · "),
-                onClick = null,
+                // Tapping this did nothing at all until now — the only row in
+                // the library that listed something and then refused to open it.
+                onClick = { onOpen(PredictionKind.TRANSCRIBE, transcript.id) },
                 onDelete = { onDeleteTranscript(transcript) },
             )
         }

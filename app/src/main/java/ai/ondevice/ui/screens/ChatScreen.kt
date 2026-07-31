@@ -50,6 +50,7 @@ import ai.ondevice.ui.components.NCircleButton
 import ai.ondevice.ui.components.NDot
 import ai.ondevice.ui.components.NHelp
 import ai.ondevice.ui.components.PhoneScaffold
+import ai.ondevice.ui.components.ResourceBlock
 import ai.ondevice.ui.components.RootToolbar
 import ai.ondevice.ui.components.ToolbarAction
 import ai.ondevice.ui.components.nClickableFlat
@@ -188,6 +189,7 @@ fun ChatScreen(
                         onToggleThinking = { viewModel.toggleThinking(message.id) },
                         onRegenerate = { viewModel.regenerate(message) },
                         onInspect = onOpenPromptInspector,
+                        trace = state.traces[message.id],
                     )
                 }
                 state.streaming?.let { streaming ->
@@ -197,6 +199,7 @@ fun ChatScreen(
                             expanded = streaming.id in state.expandedThinking,
                             onToggleThinking = { viewModel.toggleThinking(streaming.id) },
                             tokensPerSecond = state.tokensPerSecond,
+                            trace = state.liveTrace,
                         )
                     }
                 }
@@ -337,6 +340,7 @@ private fun MessageBubble(
     onToggleThinking: () -> Unit,
     onRegenerate: () -> Unit,
     onInspect: () -> Unit,
+    trace: ai.ondevice.engine.ResourceTrace?,
 ) {
     when (message.role) {
         MessageRole.USER -> Column(
@@ -406,6 +410,16 @@ private fun MessageBubble(
                 onRegenerate = onRegenerate,
                 onInspect = onInspect,
             )
+            // Collapsed, and under the actions rather than above them: what a
+            // reply cost is worth having and is not what you came to read.
+            trace?.let {
+                var traceExpanded by rememberSaveable(message.id) { mutableStateOf(false) }
+                ResourceBlock(
+                    trace = it,
+                    expanded = traceExpanded,
+                    onToggle = { traceExpanded = !traceExpanded },
+                )
+            }
         }
     }
 }
@@ -611,6 +625,7 @@ private fun StreamingBubble(
     expanded: Boolean,
     onToggleThinking: () -> Unit,
     tokensPerSecond: Float,
+    trace: ai.ondevice.engine.ResourceTrace?,
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (streaming.thinking.isNotBlank()) {
@@ -644,6 +659,18 @@ private fun StreamingBubble(
                     color = NocturneColors.Accent300,
                 )
             }
+        }
+        // Live: expandable while it runs, because the moment a graph of what a
+        // model is doing to the device is worth watching is while it is doing
+        // it. The row reads the latest sample rather than the peak so far.
+        trace?.let {
+            var traceExpanded by rememberSaveable { mutableStateOf(false) }
+            ResourceBlock(
+                trace = it,
+                expanded = traceExpanded,
+                onToggle = { traceExpanded = !traceExpanded },
+                live = true,
+            )
         }
     }
 }

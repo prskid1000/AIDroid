@@ -246,7 +246,21 @@ class SpeechSynthesizer(
                 SynthProvider.SYSTEM -> null
             }
             if (neural != null) {
-                return@withContext neural.map { audio ->
+                neural.onFailure { android.util.Log.e(TAG, "render failed", it) }
+                return@withContext neural.mapCatching { audio ->
+                    android.util.Log.i(
+                        TAG,
+                        "writing ${audio.samples.size} samples at ${audio.sampleRate} Hz " +
+                            "to ${destination.name}",
+                    )
+                    // A waveform with no samples is not a file worth claiming to
+                    // have saved. WavFile.write happily emits the 44-byte header
+                    // on its own, and the screen then reports the name of a file
+                    // that plays nothing — which is how a broken engine passed
+                    // for a working one.
+                    check(audio.samples.isNotEmpty()) {
+                        "The engine returned no audio for that script, so there was nothing to save."
+                    }
                     WavFile.write(destination, audio.samples, audio.sampleRate)
                 }
             }
@@ -302,6 +316,8 @@ class SpeechSynthesizer(
     }
 
     companion object {
+        private const val TAG = "SpeechSynthesizer"
+
         const val OMNIVOICE_VOICE_ID = "omnivoice"
 
         /** How long past the audio's own duration playback is given to drain. */

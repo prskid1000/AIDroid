@@ -90,15 +90,18 @@ class LibraryViewModel @Inject constructor(
     }
 
     /**
-     * Deletes take the file with them.
+     * Deletes take the file and the recorded run with them.
      *
      * Leaving the WAV or the PNG behind would turn every removal into an orphan
      * the storage meter still counts and no screen can reach — the exact state
-     * the orphan report exists to clean up after.
+     * the orphan report exists to clean up after. A `prediction_runs` row is the
+     * same problem in the database: a record of what it cost to make something
+     * that no longer exists, which nothing will ever look up again.
      */
     fun deleteImage(image: GeneratedImageEntity) {
         viewModelScope.launch {
             runCatching { java.io.File(image.path).delete() }
+            db.predictionRuns().deleteForArtifact(image.id)
             db.images().deleteById(image.id)
         }
     }
@@ -106,6 +109,7 @@ class LibraryViewModel @Inject constructor(
     fun deleteSynthesis(synthesis: SynthesisEntity) {
         viewModelScope.launch {
             runCatching { java.io.File(synthesis.path).delete() }
+            db.predictionRuns().deleteForArtifact(synthesis.id)
             db.syntheses().deleteById(synthesis.id)
         }
     }
@@ -115,6 +119,26 @@ class LibraryViewModel @Inject constructor(
      * only the record goes.
      */
     fun deleteTranscript(transcript: TranscriptEntity) {
-        viewModelScope.launch { db.transcripts().deleteById(transcript.id) }
+        viewModelScope.launch {
+            db.predictionRuns().deleteForArtifact(transcript.id)
+            db.transcripts().deleteById(transcript.id)
+        }
+    }
+
+    /**
+     * A thread, its messages and every run they recorded.
+     *
+     * Moved off the shared chat view model, which the library used to reach into
+     * purely to borrow this function. That coupling meant the library held a
+     * whole chat session — its loaded model, its streaming state — to delete a
+     * row. The chat screen keeps its own copy for the thread it is *in*, where
+     * it also has to pick a replacement conversation; this one only removes.
+     */
+    fun deleteConversation(id: String) {
+        viewModelScope.launch {
+            db.messages().getFor(id).forEach { db.predictionRuns().deleteForArtifact(it.id) }
+            db.messages().clearFor(id)
+            db.conversations().deleteById(id)
+        }
     }
 }

@@ -870,16 +870,28 @@ class ModelResolver(
         // — a name the app itself had just extracted. None of these are GGUF
         // quantisations and none of them mean what the GGUF table says.
         if (onnx) {
+            // Half-precision *activations*, which is a different claim from
+            // half-precision weights and the one that decides whether this file
+            // can run here at all. ORT on arm64 — the only ABI this app ships —
+            // uses the CPU's real fp16 arithmetic, and float16 stops at 65504:
+            // a vocoder like Kokoro's runs past that, overflows to infinity, and
+            // returns NaN for every sample. It is not slow or lossy, it is
+            // silent. The same file computes fine on an x86 emulator, which has
+            // no fp16 kernels and falls back to fp32 — which is exactly how this
+            // shipped: tested on an emulator, mute on every phone.
+            val halfPrecisionMaths = Regex("(F16|FP16)$").containsMatchIn(quant)
             append(
                 when {
                     quant == ORIGINAL_EXPORT.uppercase() -> "as published"
                     quant.startsWith("QUANTIZED") -> "8-bit, dynamically quantised"
-                    quant.startsWith("UINT8F16") || quant.startsWith("INT8F16") ->
-                        "8-bit weights, half-precision maths"
+                    // Ordered before the bare Q8/INT4 cases on purpose: Q8F16
+                    // starts with Q8 and used to be described as plain "8-bit
+                    // weights", so the half-precision part — the part that makes
+                    // it produce nothing — was never mentioned at all.
+                    halfPrecisionMaths && quant.contains("8") -> "8-bit weights, half-precision maths"
+                    halfPrecisionMaths && quant.contains("4") -> "4-bit weights, half-precision maths"
                     quant.startsWith("UINT8") || quant.startsWith("INT8") || quant.startsWith("Q8") ->
                         "8-bit weights"
-                    quant.startsWith("Q4F16") || quant.startsWith("INT4F16") ->
-                        "4-bit weights, half-precision maths"
                     quant.startsWith("Q4") || quant.startsWith("INT4") || quant.startsWith("BNB4") ->
                         "4-bit weights, smallest"
                     quant.startsWith("FP16") || quant.startsWith("F16") -> "half precision"
@@ -888,6 +900,9 @@ class ModelResolver(
                     else -> "as published"
                 },
             )
+            if (halfPrecisionMaths || quant.startsWith("FP16") || quant.startsWith("F16")) {
+                append(" · silent on arm64, pick another")
+            }
             if (fileCount > 1) append(" · $fileCount files")
             return@buildString
         }

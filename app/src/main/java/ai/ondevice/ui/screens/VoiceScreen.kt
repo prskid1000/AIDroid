@@ -58,6 +58,7 @@ import ai.ondevice.ui.components.NTag
 import ai.ondevice.ui.components.NTagStyle
 import ai.ondevice.ui.components.NTextArea
 import ai.ondevice.ui.components.PhoneScaffold
+import ai.ondevice.ui.components.ResourceBlock
 import ai.ondevice.ui.components.RootToolbar
 import ai.ondevice.ui.components.SectionKicker
 import ai.ondevice.ui.components.ToolbarAction
@@ -96,7 +97,7 @@ fun VoiceScreen(
     currentRoute: String?,
     onNavigate: (String) -> Unit,
     onOpenAdvanced: (String) -> Unit,
-    viewModel: VoiceViewModel = hiltViewModel(),
+    viewModel: VoiceViewModel = activityVoiceViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -495,6 +496,20 @@ fun VoiceScreen(
                     onPickScript = pickScript,
                     onPickReference = pickReference,
                     onShareAudio = { file -> shareAudio(context, file) },
+                )
+            }
+
+            // Outside the mode switch, because there is one runtime and one
+            // trace: transcribing and speaking never overlap, so a block per
+            // panel would be the same block written twice.
+            (state.liveTrace ?: state.lastTrace)?.let { trace ->
+                var traceExpanded by rememberSaveable { mutableStateOf(false) }
+                ResourceBlock(
+                    trace = trace,
+                    expanded = traceExpanded,
+                    onToggle = { traceExpanded = !traceExpanded },
+                    live = state.recording || state.speaking || state.loading || state.rendering,
+                    modifier = Modifier.padding(top = 12.dp),
                 )
             }
         }

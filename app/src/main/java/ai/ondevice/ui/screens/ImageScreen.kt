@@ -58,6 +58,7 @@ import ai.ondevice.ui.components.NSlider
 import ai.ondevice.ui.components.NSwitch
 import ai.ondevice.ui.components.NTextArea
 import ai.ondevice.ui.components.PhoneScaffold
+import ai.ondevice.ui.components.ResourceBlock
 import ai.ondevice.ui.components.RootToolbar
 import ai.ondevice.ui.components.SectionKicker
 import ai.ondevice.ui.components.ToolbarAction
@@ -127,6 +128,20 @@ fun ImageScreen(
         Column(Modifier.verticalScroll(rememberScrollState())) {
 
             TaesdPreview(state)
+
+            // Live while sampling, then the finished run's. Directly under the
+            // preview because on this screen the two are read together: a step
+            // rate means something different at 40% CPU than at 100%.
+            (state.liveTrace ?: state.lastTrace)?.let { trace ->
+                var traceExpanded by rememberSaveable { mutableStateOf(false) }
+                ResourceBlock(
+                    trace = trace,
+                    expanded = traceExpanded,
+                    onToggle = { traceExpanded = !traceExpanded },
+                    live = state.generating,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
 
             // §1.2 — a model that cannot run says why, in the runtime's own
             // words, instead of leaving a blank frame.

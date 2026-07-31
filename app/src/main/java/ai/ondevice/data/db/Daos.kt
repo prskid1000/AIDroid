@@ -338,6 +338,37 @@ interface SynthesisDao {
 }
 
 @Dao
+interface PredictionRunDao {
+    @Query("SELECT * FROM prediction_runs ORDER BY startedAt DESC")
+    fun observeAll(): Flow<List<PredictionRunEntity>>
+
+    /**
+     * Every run for one artifact, oldest first.
+     *
+     * A list rather than a single row because a chat turn is not always one
+     * generation: a reply that calls tools generates again after each result,
+     * and each of those rounds is its own run against the same conversation.
+     */
+    @Query("SELECT * FROM prediction_runs WHERE artifactId = :artifactId ORDER BY startedAt")
+    fun observeFor(artifactId: String): Flow<List<PredictionRunEntity>>
+
+    @Query("SELECT * FROM prediction_runs WHERE artifactId IN (:artifactIds) ORDER BY startedAt")
+    fun observeForAny(artifactIds: List<String>): Flow<List<PredictionRunEntity>>
+
+    @Query("SELECT * FROM prediction_runs WHERE artifactId = :artifactId ORDER BY startedAt")
+    suspend fun getFor(artifactId: String): List<PredictionRunEntity>
+
+    @Upsert
+    suspend fun upsert(run: PredictionRunEntity)
+
+    @Query("DELETE FROM prediction_runs WHERE artifactId = :artifactId")
+    suspend fun deleteForArtifact(artifactId: String)
+
+    @Query("DELETE FROM prediction_runs WHERE artifactId IN (:artifactIds)")
+    suspend fun deleteForArtifacts(artifactIds: List<String>)
+}
+
+@Dao
 interface DownloadDao {
     @Query("SELECT * FROM download_jobs ORDER BY createdAt DESC")
     fun observeAll(): Flow<List<DownloadJobEntity>>

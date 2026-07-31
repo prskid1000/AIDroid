@@ -10,13 +10,14 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import ai.ondevice.core.PredictionKind
 import ai.ondevice.ui.components.NavDestination
 import ai.ondevice.ui.screens.AddModelScreen
 import ai.ondevice.ui.screens.AllParametersScreen
 import ai.ondevice.ui.screens.ChatScreen
 import ai.ondevice.ui.screens.DownloadQueueScreen
-import ai.ondevice.ui.screens.GalleryScreen
 import ai.ondevice.ui.screens.ImageScreen
+import ai.ondevice.ui.screens.LibraryDetailScreen
 import ai.ondevice.ui.screens.LibraryScreen
 import ai.ondevice.ui.screens.MaskEditorScreen
 import ai.ondevice.ui.screens.ModelDetailScreen
@@ -71,11 +72,23 @@ object Routes {
     const val MASK_EDITOR = "image/mask"
 
     /**
-     * Under Library, not Image. `NBottomBar` highlights by route prefix, so the
-     * old `image/gallery` lit the Image tab while the user was standing in a
-     * screen they reached from the library.
+     * One library item, opened. Under Library and not under the tab that made
+     * it: `NBottomBar` highlights by route prefix, so an image detail routed
+     * under `image/` would light the Image tab while the user is standing in a
+     * screen they reached from the library — the mistake the old gallery route
+     * made before it was moved here.
      */
-    const val GALLERY = "library/gallery"
+    const val LIBRARY_ITEM = "library/item/{kind}/{id}"
+
+    /**
+     * The id is a UUID for three of the four kinds and a conversation id for the
+     * fourth, so nothing here needs escaping today — but it is escaped anyway,
+     * for the same reason [modelDetail] has to: an unescaped separator turns one
+     * argument into two path segments and the router simply fails to match.
+     */
+    fun libraryItem(kind: PredictionKind, id: String) =
+        "library/item/${kind.name}/${android.net.Uri.encode(id)}"
+
     const val RUNTIMES = "settings/runtimes"
     const val TOOLS = "settings/tools"
 
@@ -166,11 +179,7 @@ fun OnDeviceApp(
             LibraryScreen(
                 currentRoute = currentRoute,
                 onNavigate = { navController.navigateToRoot(it) },
-                // Opening a thread switches the shared chat view model and then
-                // moves to Chat, so the tab the user lands on is already showing
-                // what they picked.
-                onOpenConversation = { navController.navigateToRoot(Routes.CHAT) },
-                onOpenGallery = { navController.navigate(Routes.GALLERY) },
+                onOpenItem = { kind, id -> navController.navigate(Routes.libraryItem(kind, id)) },
             )
         }
         composable(Routes.MODELS) {
@@ -254,8 +263,21 @@ fun OnDeviceApp(
                 onDone = { navController.popBackStack() },
             )
         }
-        composable(Routes.GALLERY) {
-            GalleryScreen(onBack = { navController.popBackStack() })
+        composable(Routes.LIBRARY_ITEM) {
+            // Each "open in" pops back to the library first, so the tab the user
+            // lands on is the top of its own stack rather than a detail screen
+            // waiting underneath it — pressing Back from Chat would otherwise
+            // return to the description of the thread they are already reading.
+            fun openTab(route: String) {
+                navController.popBackStack()
+                navController.navigateToRoot(route)
+            }
+            LibraryDetailScreen(
+                onBack = { navController.popBackStack() },
+                onOpenChat = { openTab(Routes.CHAT) },
+                onOpenImage = { openTab(Routes.IMAGE) },
+                onOpenVoice = { openTab(Routes.VOICE) },
+            )
         }
         composable(Routes.RUNTIMES) {
             RuntimesScreen(onBack = { navController.popBackStack() })
