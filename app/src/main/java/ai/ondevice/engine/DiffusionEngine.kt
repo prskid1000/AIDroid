@@ -93,6 +93,14 @@ class DiffusionEngine(
             )
             check(newHandle != 0L) { "The runtime returned no handle for $modelPath." }
             handle = newHandle
+            android.util.Log.i(
+                TAG,
+                "loaded ${File(modelPath).name} (${File(modelPath).length() / 1024 / 1024} MB) " +
+                    "threads=$threads " +
+                    "attached=" + AttachmentRole.entries
+                    .mapNotNull { role -> pathFor(role).takeIf { it.isNotBlank() }?.let { role.name } }
+                    .ifEmpty { listOf("none") }.joinToString("+"),
+            )
             loadedModelId = modelId
         }
     }
@@ -138,7 +146,18 @@ class DiffusionEngine(
             return@channelFlow
         }
 
-        applyParams(request.params)
+        // The report was thrown away here, and a rejected parameter is otherwise
+        // invisible: nothing fails, the run simply ignores what was asked for
+        // and produces a picture at the default. Rejections are the interesting
+        // half, so they are logged even when the list is empty and the
+        // acceptances only when there are some.
+        val report = applyParams(request.params)
+        android.util.Log.i(
+            TAG,
+            "params applied=${report.applied.size} rejected=${
+                report.rejected.ifEmpty { listOf("none") }.joinToString(",")
+            }",
+        )
 
         val init = request.initImageUri?.let { decodeRgb(it) }
         val control = request.controlImageUri?.let { decodeRgb(it) }
@@ -183,6 +202,7 @@ class DiffusionEngine(
         }.toString()
 
         var done = false
+        val started = System.currentTimeMillis()
         val worker = launch(Dispatchers.Default) {
             try {
                 val bytes = SdBridge.nativeGenerate(
@@ -193,12 +213,23 @@ class DiffusionEngine(
                     attachmentsJson,
                 )
                 if (bytes == null) {
+                    android.util.Log.e(TAG, "the run returned no pixels")
                     send(DiffusionEvent.Failed("The run produced no image.", null))
                 } else {
                     val image = unpack(bytes)
+                    // A run that produced black, a flat colour or static is a
+                    // successful run everywhere in this file — the bytes arrive,
+                    // the PNG writes, the library lists it. This line is the only
+                    // place that can say which of those it was.
+                    android.util.Log.i(
+                        TAG,
+                        "generated ${image.summary()} in " +
+                            "${(System.currentTimeMillis() - started) / 1000f}s",
+                    )
                     send(DiffusionEvent.Completed(image))
                 }
             } catch (t: Throwable) {
+                android.util.Log.e(TAG, "generation failed", t)
                 send(
                     DiffusionEvent.Failed(
                         t.message ?: "The diffusion run failed.",
@@ -343,6 +374,8 @@ class DiffusionEngine(
     }
 
     private companion object {
+        const val TAG = "DiffusionEngine"
+
         /** Fast enough to look live, slow enough not to spin a core polling. */
         const val POLL_MILLIS = 250L
     }

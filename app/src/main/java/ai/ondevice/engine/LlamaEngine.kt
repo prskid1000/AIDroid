@@ -95,8 +95,24 @@ class LlamaEngine(
                 loadMillis = System.currentTimeMillis() - started,
             )
             loaded = model
+            // What was loaded, and the four things that decide whether it can
+            // answer at all: the context it got (which is not the context that
+            // was asked for when the device could not spare it), the threads it
+            // will use, whether the GGUF carried a chat template, and whether the
+            // vocabulary declared any end-of-generation token. A model with no
+            // template produces a reply addressed to nobody, and one with no EOG
+            // never stops — both look like a bad model rather than a missing
+            // field, and neither is visible anywhere else.
+            android.util.Log.i(
+                TAG,
+                "loaded ${request.modelPath.substringAfterLast('/')} in ${model.loadMillis}ms " +
+                    "backend=${request.backend} context=${model.contextLength} " +
+                    "layers=${model.layers} threads=${info.int("threads") ?: 0} " +
+                    "template=${if (model.chatTemplate.isNullOrBlank()) "none" else "gguf"} " +
+                    "eog=${model.stopSequences.size}",
+            )
             model
-        }
+        }.onFailure { android.util.Log.e(TAG, "load failed", it) }
     }
 
     override suspend fun unload() = mutex.withLock { freeHandle() }
@@ -130,7 +146,16 @@ class LlamaEngine(
         }
 
         appliedParams = appliedParams.overlaidWith(request.params)
-        LlamaBridge.nativeApplyParams(handle, appliedParams.toJsonString())
+        // Parsed rather than discarded: a rejected sampler parameter changes
+        // nothing and says nothing, so a temperature the runtime refused looks
+        // exactly like one it honoured.
+        val report = json.parseToJsonElement(
+            LlamaBridge.nativeApplyParams(handle, appliedParams.toJsonString()),
+        ).jsonObject
+        val rejected = report.strings("rejected")
+        if (rejected.isNotEmpty()) {
+            android.util.Log.w(TAG, "parameters refused: ${rejected.joinToString(",")}")
+        }
 
         val formatted = formatPrompt(request, addGenerationPrompt = true)
         val start = json.parseToJsonElement(
@@ -138,9 +163,24 @@ class LlamaEngine(
         ).jsonObject
 
         start.string("error")?.let { error ->
+            android.util.Log.e(TAG, "generation refused: $error")
             emit(GenerationEvent.Failed(error, start.string("suggestion")))
             return@flow
         }
+
+        // Counts and template source, never the text. What goes wrong here is
+        // structural — an unrendered template, a prompt that overran the context,
+        // a cache that was invalidated and made every turn reprocess the whole
+        // conversation — and all of it is visible without logging what anyone
+        // said.
+        android.util.Log.i(
+            TAG,
+            "prompt tokens=${start.int("promptTokens") ?: 0} " +
+                "cached=${start.int("cachedTokens") ?: 0} " +
+                "messages=${request.messages.size} tools=${request.tools.size} " +
+                "template=${formatted.string("templateSource")?.takeIf { it.isNotBlank() } ?: "runtime default"} " +
+                "at ${"%.1f".format(start.float("promptPerSecond") ?: 0f)} t/s",
+        )
 
         emit(
             GenerationEvent.PromptProcessed(
@@ -223,11 +263,20 @@ class LlamaEngine(
                         ),
                     )
                 }
+                val stopReason = runCatching {
+                    StopReason.valueOf(step.string("stopReason") ?: "EOS")
+                }.getOrDefault(StopReason.EOS)
+                android.util.Log.i(
+                    TAG,
+                    "generated tokens=${step.int("generated") ?: index} " +
+                        "at ${"%.1f".format(step.float("tokensPerSecond") ?: 0f)} t/s " +
+                        "stop=$stopReason context=${step.int("contextUsed") ?: 0}/" +
+                        "${loaded?.contextLength ?: 0} " +
+                        "thinking=$thinkingTokens toolCalls=${step["toolCalls"]?.jsonArray?.size ?: 0}",
+                )
                 emit(
                     GenerationEvent.Done(
-                        stopReason = runCatching {
-                            StopReason.valueOf(step.string("stopReason") ?: "EOS")
-                        }.getOrDefault(StopReason.EOS),
+                        stopReason = stopReason,
                         generatedTokens = step.int("generated") ?: index,
                         elapsedMillis = step.long("elapsedMillis") ?: 0L,
                     ),
@@ -351,6 +400,8 @@ class LlamaEngine(
     }
 
     private companion object {
+        const val TAG = "LlamaEngine"
+
         /** Only used to label the inspector; the real count comes from mtmd. */
         const val IMAGE_TOKENS = 1456
     }

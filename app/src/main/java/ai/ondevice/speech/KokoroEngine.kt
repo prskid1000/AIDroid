@@ -3,6 +3,7 @@ package ai.ondevice.speech
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
+import ai.ondevice.engine.signalSummary
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -206,7 +207,7 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
                         Log.i(
                             TAG,
                             "chunk phonemes=${chunk.phonemes.length} tokens=${chunk.tokens.size} " +
-                                "raw=${piece.size} kept=${kept.size} ${piece.describe()}",
+                                "raw=${piece.size} kept=${kept.size} ${piece.signalSummary()}",
                         )
                         pieces += kept
                     }
@@ -254,32 +255,6 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
                 "quietly computes in fp32. Install a variant without f16 in its name (q8, q4, " +
                 "quantized or the full-precision graph) and this voice will speak.",
         )
-    }
-
-    /**
-     * A waveform's peak, and how it failed if it did.
-     *
-     * NaN and zero have to be told apart. `abs(NaN) > peak` is false, so a
-     * wholly non-finite waveform reports a peak of 0 exactly like a silent one —
-     * and they mean opposite things: silence is a graph that ran and said
-     * nothing, NaN is arithmetic that overflowed. Both end as a WAV with no
-     * audio, so the peak alone cannot say which happened.
-     */
-    private fun FloatArray.describe(): String {
-        var peak = 0f
-        var nonFinite = 0
-        var nonZero = 0
-        for (sample in this) {
-            if (!sample.isFinite()) {
-                nonFinite++
-                continue
-            }
-            if (sample != 0f) nonZero++
-            val magnitude = kotlin.math.abs(sample)
-            if (magnitude > peak) peak = magnitude
-        }
-        return "peak=$peak nonZero=$nonZero nonFinite=$nonFinite " +
-            "head=${take(4).joinToString()}"
     }
 
     // — the graph —

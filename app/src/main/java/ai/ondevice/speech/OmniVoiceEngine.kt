@@ -4,6 +4,8 @@ import ai.onnxruntime.OnnxJavaType
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
+import ai.ondevice.engine.codeSummary
+import ai.ondevice.engine.signalSummary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -80,6 +82,9 @@ class OmniVoiceEngine {
     private var describedGraphs = false
     private var describedShapes = false
 
+    /** Reset per synthesis; see the trace guard in [forward]. */
+    private var tracedForwards = 0
+
     /**
      * Whether the backbone declares `attention_mask` with four dimensions.
      *
@@ -91,6 +96,9 @@ class OmniVoiceEngine {
 
     /** Null until measured; see [attentionIsBidirectional]. Reset on unload. */
     private var bidirectional: Boolean? = null
+
+    /** Null until measured; see [vocoderProducesAudio]. Reset on unload. */
+    private var vocoderWorks: Boolean? = null
     private var llmEmbedType: OnnxJavaType = OnnxJavaType.FLOAT
     private var headsInputType: OnnxJavaType = OnnxJavaType.FLOAT
 
@@ -301,7 +309,7 @@ class OmniVoiceEngine {
                 val cloningGraphs = runCatching {
                     CLONING.map { open(find(directory, it) ?: error("$it is missing")) }
                 }.getOrElse {
-                    android.util.Log.i("OmniVoice", "no voice cloning: ${it.message}")
+                    android.util.Log.i(TAG, "no voice cloning: ${it.message}")
                     emptyList()
                 }
 
@@ -323,6 +331,27 @@ class OmniVoiceEngine {
                 llmEmbedType = typeOf(llm, "inputs_embeds")
                 headsInputType = typeOf(head, "hidden_states")
                 loadedPath = directory.absolutePath
+
+                // Which four files were picked, and how big each one really is.
+                // `find` chooses the largest copy of every name and the copies
+                // live in sibling folders, so the set that loads is assembled
+                // from several places and no screen shows which. When the voice
+                // comes out wrong the precision of these files is the first
+                // thing worth ruling out, and it is unreadable from anywhere
+                // else on the device.
+                files.forEach { (name, file) ->
+                    android.util.Log.i(TAG, "graph $name ← ${describeFile(directory, file)}")
+                }
+                android.util.Log.i(
+                    TAG,
+                    "loaded threads=$threads embeds=$llmEmbedType heads=$headsInputType " +
+                        "vocoder=${
+                            (voc.outputInfo.values.firstOrNull()?.info as? ai.onnxruntime.TensorInfo)
+                                ?.type ?: "unknown"
+                        } " +
+                        "pastInputs=${pastNames.size} fourDimensionalMask=$fourDimensionalMask " +
+                        "cloning=$supportsCloning vocab=${loadedTokenizer.size}",
+                )
             }
         }.onFailure { lastError = it.message }
     }
@@ -393,9 +422,44 @@ class OmniVoiceEngine {
                 if (d > largest) largest = d
             }
         }
-        android.util.Log.i("OmniVoice", "bidirectional probe: max|diff| before the change = $largest")
+        android.util.Log.i(TAG, "bidirectional probe: max|diff| before the change = $largest")
         largest > 1e-6f
     }.getOrDefault(true) // Could not ask; do not refuse on a failed measurement.
+
+    /**
+     * Whether the vocoder can turn codes into numbers at all, asked in about a
+     * tenth of a second before three minutes are spent filling a grid for it.
+     *
+     * The shipped `higgs_decoder.onnx` is float16 from its weights to its output
+     * with no Cast anywhere in it — 136 initialisers, 601 activations, all fp16 —
+     * and on arm64 the CPU has real ARMv8.2 fp16 arithmetic, which stops at
+     * 65504. It overflows, and every one of its 48 000 samples comes back NaN.
+     * The same file is fine on an x86 emulator, where ORT has no fp16 kernels
+     * and wraps the whole graph in fp32 casts instead, so a model can be
+     * verified on one and be incapable of speech on the other.
+     *
+     * Measured rather than assumed, and per device: nothing here refuses a graph
+     * for being fp16, only for returning arithmetic that is not a number. A
+     * probe that cannot run at all is not evidence of anything and does not
+     * refuse.
+     */
+    private fun vocoderProducesAudio(): Boolean = runCatching {
+        val codes = Array(CODEBOOKS) { cb ->
+            LongArray(PROBE_FRAMES) { f -> ((cb * 131 + f * 17) % CODEBOOK_SIZE).toLong() }
+        }
+        val probe = decodeToWaveform(codes, PROBE_FRAMES)
+        probe.isNotEmpty() && probe.all { it.isFinite() }
+    }.getOrDefault(true)
+
+    /** Why an all-NaN waveform happens, and the one thing that fixes it. */
+    private fun fp16Overflow(detail: String): String =
+        "This OmniVoice install cannot produce audio on this device: $detail. Its " +
+            "$VOCODER computes in float16 throughout, and arm64 has real fp16 arithmetic " +
+            "which stops at 65504, so the vocoder overflows. An x86 emulator has no fp16 " +
+            "kernels and quietly computes the same graph in fp32, which is why a model can " +
+            "pass testing there and be silent here. A copy of $VOCODER exported at full " +
+            "precision fixes it — put it in a subfolder of the model and it will be picked " +
+            "up, because the largest copy of each graph is the one that loads."
 
     suspend fun unload() = mutex.withLock { unlockedUnload() }
 
@@ -414,8 +478,10 @@ class OmniVoiceEngine {
         fourDimensionalMask = false
         loadedPath = null
         bidirectional = null
+        vocoderWorks = null
         describedGraphs = false
         describedShapes = false
+        tracedForwards = 0
     }
 
     suspend fun synthesize(request: OmniVoiceRequest): Result<KokoroAudio> =
@@ -442,6 +508,19 @@ class OmniVoiceEngine {
                 check(textTokens.isNotEmpty()) { "That text produced no tokens." }
 
                 val frames = request.frames ?: estimateFrames(text, request.speed)
+                tracedForwards = 0
+                android.util.Log.i(
+                    TAG,
+                    "synthesising chars=${text.length} tokens=${textTokens.size} frames=$frames " +
+                        "(${"%.2f".format(frames.toFloat() / FRAMES_PER_SECOND)}s grid) " +
+                        "steps=${request.steps} guidance=${request.guidance} " +
+                        "tShift=${request.timestepShift} layerPenalty=${request.layerPenalty} " +
+                        "posTemp=${request.positionTemperature} " +
+                        "classTemp=${request.classTemperature} " +
+                        "language=${request.language ?: "None"} " +
+                        "instruction=${if (request.instruction.isNullOrBlank()) "None" else "set"} " +
+                        "cloning=${reference != null}",
+                )
 
                 // Lift a quiet reference to a working level before encoding, and
                 // remember by how much so the generated audio can be put back
@@ -478,6 +557,16 @@ class OmniVoiceEngine {
                         "would work; nothing is wrong with your download or this device."
                 }
 
+                // Also once per load, and before the grid rather than after it:
+                // the failure it catches costs three minutes to reach otherwise,
+                // and arrives as a refusal either way.
+                if (vocoderWorks == null) {
+                    vocoderWorks = mutex.withLock { vocoderProducesAudio() }
+                }
+                check(vocoderWorks == true) {
+                    fp16Overflow("a $PROBE_FRAMES-frame probe of its vocoder returned no finite sample")
+                }
+
                 val codes = mutex.withLock { unmask(textTokens, referenceCodes, frames, request) }
                 val decoded = mutex.withLock { decodeToWaveform(codes, frames) }
                 // Put the clone back to the reference's own level.
@@ -487,13 +576,23 @@ class OmniVoiceEngine {
                     decoded
                 }
 
+                checkFinite(samples)
+                val kept = if (request.trimSilence) trimTail(samples) else samples
+                android.util.Log.i(
+                    TAG,
+                    "synthesised raw=${samples.size} kept=${kept.size} " +
+                        "(${"%.2f".format(kept.size.toFloat() / SAMPLE_RATE)}s)",
+                )
                 KokoroAudio(
-                    samples = if (request.trimSilence) trimTail(samples) else samples,
+                    samples = kept,
                     sampleRate = SAMPLE_RATE,
                     phonemes = "",
                     chunks = 1,
                 )
-            }.onFailure { lastError = it.message }
+            }.onFailure {
+                lastError = it.message
+                android.util.Log.e(TAG, "synthesis failed", it)
+            }
         }
 
     /**
@@ -637,6 +736,7 @@ class OmniVoiceEngine {
         val uncondAudio = BooleanArray(frames) { true }
         val uncondAttention = LongArray(frames) { 1L }
 
+        var committed = 0
         val scores = FloatArray(slots)
         val predicted = IntArray(slots)
         val probabilities = FloatArray(AUDIO_VOCAB)
@@ -694,8 +794,23 @@ class OmniVoiceEngine {
             order.forEach { slot ->
                 tokens[slot / frames][slot % frames] = predicted[slot].toLong()
             }
+            committed += order.size
+
+            // What this step actually decided. Degenerate unmasking is not an
+            // error at any layer — the codes are in range, the vocoder decodes
+            // them and the result is a buzz — so the count of distinct codes
+            // committed is the number that separates speech from a tone, and it
+            // is free here because `predicted` is already in hand.
+            android.util.Log.i(
+                TAG,
+                "step ${step + 1}/$steps take=$take committed=$committed/$slots " +
+                    "chose ${LongArray(order.size) { predicted[order[it]].toLong() }.codeSummary()}",
+            )
         }
 
+        for (cb in 0 until CODEBOOKS) {
+            android.util.Log.i(TAG, "grid codebook $cb ${tokens[cb].codeSummary()}")
+        }
         return tokens
     }
 
@@ -842,12 +957,17 @@ class OmniVoiceEngine {
         if (!describedGraphs) {
             describedGraphs = true
             android.util.Log.i(
-                "OmniVoice",
+                TAG,
                 "llm outputs=${llm.outputNames.take(4)} (${llm.outputNames.size} total) " +
                     "heads outputs=${head.outputNames} " +
                     "embeddings outputs=${emb.outputNames}",
             )
         }
+        // The first two passes are the conditional and unconditional branches of
+        // step one, which is where a broken graph is already broken. After that
+        // the numbers repeat and the log would be 64 copies of the same line.
+        val trace = tracedForwards < 2
+        if (trace) tracedForwards++
 
         val flat = LongArray(CODEBOOKS * sequence)
         for (cb in 0 until CODEBOOKS) ids[cb].copyInto(flat, cb * sequence)
@@ -919,14 +1039,35 @@ class OmniVoiceEngine {
                         if (!describedShapes) {
                             describedShapes = true
                             android.util.Log.i(
-                                "OmniVoice",
+                                TAG,
                                 "seq=$sequence embeds=${hidden.info.shape.toList()}/${hidden.info.type} " +
                                     "hidden=${states.info.shape.toList()} " +
                                     "logits=${logits.info.shape.toList()}/${logits.info.type} " +
                                     "expected logits=[1, $CODEBOOKS, $sequence, $AUDIO_VOCAB]",
                             )
                         }
-                        return readFloats(logits)
+                        val values = readFloats(logits)
+                        // Three stages, three lines, once. Each of them can hand
+                        // the next one finite numbers that are not the signal —
+                        // an embedding table read at the wrong precision, a
+                        // backbone whose hidden states have collapsed, a heads
+                        // graph scoring an attention cache it was handed by
+                        // mistake — and none of the three throws when it does.
+                        if (trace) {
+                            android.util.Log.i(
+                                TAG,
+                                "pass seq=$sequence embeds ${readFloats(hidden).signalSummary()}",
+                            )
+                            android.util.Log.i(
+                                TAG,
+                                "pass seq=$sequence hidden ${readFloats(states).signalSummary()}",
+                            )
+                            android.util.Log.i(
+                                TAG,
+                                "pass seq=$sequence logits ${values.signalSummary()}",
+                            )
+                        }
+                        return values
                     }
                 }
             }
@@ -1007,7 +1148,13 @@ class OmniVoiceEngine {
         )
         return try {
             voc.run(mapOf(voc.inputNames.first() to tensor)).use { result ->
-                readAudio(result.pick("waveform_24k"))
+                readAudio(result.pick("waveform_24k")).also { waveform ->
+                    android.util.Log.i(
+                        TAG,
+                        "vocoder frames=$frames ${waveform.signalSummary()} " +
+                            "(${"%.2f".format(waveform.size.toFloat() / SAMPLE_RATE)}s)",
+                    )
+                }
             }
         } finally {
             runCatching { tensor.close() }
@@ -1063,6 +1210,25 @@ class OmniVoiceEngine {
     }
 
     /**
+     * Refuse a waveform that is not a waveform.
+     *
+     * The backstop behind [vocoderProducesAudio], for the overflow a short probe
+     * does not reach. The same refusal Kokoro makes and for the same reason:
+     * [trimTail] reads a peak, `abs(NaN) > peak` is false, so an all-NaN buffer
+     * looks exactly like a quiet one and passes straight through to a WAV file
+     * the app reports as saved.
+     */
+    private fun checkFinite(samples: FloatArray) {
+        val nonFinite = samples.count { !it.isFinite() }
+        if (nonFinite == 0) return
+        error(
+            fp16Overflow(
+                "the vocoder returned $nonFinite non-finite samples out of ${samples.size}",
+            ),
+        )
+    }
+
+    /**
      * Trim the tail only.
      *
      * The grid is deliberately over-allocated, so the end of a clip is usually
@@ -1088,6 +1254,23 @@ class OmniVoiceEngine {
 
     private fun typeOf(session: OrtSession, input: String): OnnxJavaType =
         (session.inputInfo[input]?.info as? ai.onnxruntime.TensorInfo)?.type ?: OnnxJavaType.FLOAT
+
+    /**
+     * Where a graph came from and what it weighs, counting its external weights.
+     *
+     * The `.onnx` file of a graph with external data is a few kilobytes of
+     * structure, so its own size says nothing about precision — the 87 MB beside
+     * `audio_embeddings_encoder.onnx` is the part that distinguishes an int4
+     * export from an fp16 one. The path is relative to the model directory
+     * because which *folder* a graph came from is the whole question when the
+     * publisher ships one name at several precisions.
+     */
+    private fun describeFile(directory: File, file: File): String {
+        val data = File(file.parentFile, "${file.name}.data")
+        val bytes = file.length() + if (data.isFile) data.length() else 0L
+        val relative = file.absolutePath.removePrefix(directory.absolutePath).trimStart('/', '\\')
+        return "$relative (${bytes / 1024 / 1024} MB${if (data.isFile) " incl. .data" else ""})"
+    }
 
     /**
      * Locate a graph, preferring the *least* quantised copy available.
@@ -1116,6 +1299,8 @@ class OmniVoiceEngine {
             }
 
     companion object {
+        private const val TAG = "OmniVoice"
+
         /**
          * The parameter keys this engine reads. See [KokoroEngine.PARAM_KEYS]
          * for why these are declared rather than enumerated; the reader is the
@@ -1162,6 +1347,9 @@ class OmniVoiceEngine {
         const val DEFAULT_LAYER_PENALTY = 5.0f
         const val DEFAULT_POSITION_TEMPERATURE = 5.0f
         const val DEFAULT_CLASS_TEMPERATURE = 0.0f
+
+        /** Long enough for the decoder's dilated stack to reach its full depth. */
+        private const val PROBE_FRAMES = 8
 
         private const val MAX_STEPS = 256
         /** Below this the schedule's denominator collapses towards zero. */
