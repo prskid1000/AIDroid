@@ -83,18 +83,6 @@ data class ModelEntity(
     val attachmentRole: AttachmentRole? = null,
 )
 
-@Entity(
-    tableName = "benchmarks",
-    primaryKeys = ["modelId", "backend"],
-)
-data class BenchmarkEntity(
-    val modelId: String,
-    val backend: BackendId,
-    val promptTokPerSec: Float,
-    val genTokPerSec: Float,
-    val measuredAt: Long,
-)
-
 @Entity(tableName = "presets", indices = [Index("modality")])
 data class PresetEntity(
     @PrimaryKey val id: String,

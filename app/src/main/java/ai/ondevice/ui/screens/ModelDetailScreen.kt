@@ -104,17 +104,15 @@ fun ModelDetailScreen(
             }
 
             // Not every model has every property, and this screen used to act as
-            // though they all did. A ControlNet has no context window, an
-            // upscaler has no tokens per second, and neither is something an
-            // engine loads on its own — yet both were offered a context slider
-            // to drag, a benchmark to run and a "keep loaded" pin, all of which
-            // describe a language model. An add-on is a file another model
-            // reads; the only honest things to say about it are what it is,
-            // where it came from and what is on disk.
+            // though they all did. A ControlNet has no context window and is not
+            // something an engine loads on its own — yet it was offered a context
+            // slider to drag and a "keep loaded" pin, both of which describe a
+            // language model. An add-on is a file another model reads; the only
+            // honest things to say about it are what it is, where it came from
+            // and what is on disk.
             val isAddOn = model.attachmentRole != null
             val hasContextWindow = !isAddOn &&
                 (model.modality == Modality.TEXT || model.modality == Modality.VISION)
-            val isBenchmarkable = !isAddOn && model.modality == Modality.TEXT
 
             if (hasContextWindow) {
             SectionKicker("Context window", Modifier.padding(bottom = 10.dp))
@@ -197,65 +195,6 @@ fun ModelDetailScreen(
             }
             }
 
-            // §8.2 — measured, not assumed.
-            if (isBenchmarkable) {
-            SectionKicker("Measured on this device", Modifier.padding(top = 22.dp, bottom = 8.dp))
-            if (state.benchmarks.isEmpty()) {
-                NHelp(
-                    "No benchmark yet. Backend performance on this hardware is a measurement, not an " +
-                        "assumption — run one and the app auto-selects the winner and shows the numbers.",
-                )
-            } else {
-                val best = state.benchmarks.maxByOrNull { it.genTokPerSec }
-                NTable(
-                    header = {
-                        NTableHeaderCell("Backend", Modifier.weight(1f))
-                        NTableHeaderCell("Prompt", Modifier.weight(0.5f), TextAlign.End)
-                        NTableHeaderCell("Gen", Modifier.weight(0.4f), TextAlign.End)
-                    },
-                ) {
-                    state.benchmarks.forEach { row ->
-                        NTableRow {
-                            Row(
-                                Modifier.weight(1f),
-                                horizontalArrangement = Arrangement.spacedBy(5.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(row.backend.label, style = NocturneType.Row)
-                                if (row.id == best?.id) {
-                                    NTag(
-                                        "auto",
-                                        style = NTagStyle.Accent,
-                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 1.dp),
-                                    )
-                                }
-                            }
-                            Text(
-                                Fmt.tokensPerSecond(row.promptTokPerSec),
-                                style = NocturneType.MonoValue,
-                                modifier = Modifier.weight(0.5f),
-                                textAlign = TextAlign.End,
-                            )
-                            Text(
-                                Fmt.tokensPerSecond(row.genTokPerSec),
-                                style = NocturneType.MonoValue,
-                                modifier = Modifier.weight(0.4f),
-                                textAlign = TextAlign.End,
-                            )
-                        }
-                    }
-                }
-            }
-            NButton(
-                text = state.benchmarkingBackend?.let { "Benchmarking ${it.label}…" }
-                    ?: if (state.benchmarks.isEmpty()) "Run benchmark" else "Re-run benchmark",
-                onClick = viewModel::runBenchmark,
-                style = NButtonStyle.Secondary,
-                block = true,
-                enabled = !state.benchmarking,
-                modifier = Modifier.padding(top = 12.dp),
-            )
-            }
 
             if (state.companions.isNotEmpty()) {
                 SectionKicker("Companions · auto-paired", Modifier.padding(top = 22.dp, bottom = 8.dp))
@@ -353,4 +292,3 @@ fun ModelDetailScreen(
     }
 }
 
-private val ai.ondevice.data.db.BenchmarkEntity.id: String get() = "$modelId:${backend.name}"

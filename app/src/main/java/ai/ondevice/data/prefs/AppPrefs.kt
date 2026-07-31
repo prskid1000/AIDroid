@@ -32,14 +32,19 @@ class AppPrefs(private val context: Context) {
         val storageRoot = stringPreferencesKey("storage_root")
         val storageReserveMb = intPreferencesKey("storage_reserve_mb")
         val defaultTier = stringPreferencesKey("default_tier")
-        val preloadPinned = booleanPreferencesKey("preload_pinned")
         val blockPickle = booleanPreferencesKey("block_pickle")
         val lastConversationId = stringPreferencesKey("last_conversation_id")
         val toolsEnabled = booleanPreferencesKey("tools_enabled")
         val enabledToolProviders = androidx.datastore.preferences.core.stringSetPreferencesKey("enabled_tool_providers")
     }
 
-    /** "auto" means benchmark-driven selection (SPEC §8.1). */
+    /**
+     * "auto" takes the first backend the installed runtime registers.
+     *
+     * It used to mean benchmark-driven selection, which sounded better than
+     * it was: llama.cpp registers one backend in this build, so the benchmark
+     * compared CPU with itself and auto then picked the only candidate.
+     */
     val backendMode: Flow<String> = context.dataStore.data.map { it[Keys.backendMode] ?: BACKEND_AUTO }
 
     /** Default to performance-core count, not total cores (SPEC §8.1). */
@@ -56,8 +61,6 @@ class AppPrefs(private val context: Context) {
     val defaultTier: Flow<Tier> = context.dataStore.data.map {
         it[Keys.defaultTier]?.let { v -> runCatching { Tier.valueOf(v) }.getOrNull() } ?: Tier.BASIC
     }
-
-    val preloadPinned: Flow<Boolean> = context.dataStore.data.map { it[Keys.preloadPinned] ?: false }
 
     /** Pickle files are blocked by default; expert override (SPEC §3.2). */
     val blockPickle: Flow<Boolean> = context.dataStore.data.map { it[Keys.blockPickle] ?: true }
@@ -88,7 +91,6 @@ class AppPrefs(private val context: Context) {
     suspend fun setStorageRoot(v: String?) = edit { p -> if (v == null) p.remove(Keys.storageRoot) else p[Keys.storageRoot] = v }
     suspend fun setStorageReserveMb(v: Int) = edit { it[Keys.storageReserveMb] = v }
     suspend fun setDefaultTier(v: Tier) = edit { it[Keys.defaultTier] = v.name }
-    suspend fun setPreloadPinned(v: Boolean) = edit { it[Keys.preloadPinned] = v }
     suspend fun setBlockPickle(v: Boolean) = edit { it[Keys.blockPickle] = v }
     suspend fun setToolsEnabled(v: Boolean) = edit { it[Keys.toolsEnabled] = v }
     suspend fun setEnabledToolProviders(v: Set<String>) = edit { it[Keys.enabledToolProviders] = v }
@@ -103,7 +105,7 @@ class AppPrefs(private val context: Context) {
         const val BACKEND_AUTO = "auto"
 
         fun backendModeLabel(mode: String): String = when (mode) {
-            BACKEND_AUTO -> "Auto (benchmark-driven)"
+            BACKEND_AUTO -> "Auto (what the runtime registers)"
             else -> runCatching { BackendId.valueOf(mode).label }.getOrDefault(mode)
         }
     }

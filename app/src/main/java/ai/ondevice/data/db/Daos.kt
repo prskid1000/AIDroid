@@ -147,21 +147,6 @@ interface ModelDao {
 }
 
 @Dao
-interface BenchmarkDao {
-    @Query("SELECT * FROM benchmarks WHERE modelId = :modelId")
-    fun observeFor(modelId: String): Flow<List<BenchmarkEntity>>
-
-    @Query("SELECT * FROM benchmarks WHERE modelId = :modelId")
-    suspend fun getFor(modelId: String): List<BenchmarkEntity>
-
-    @Upsert
-    suspend fun upsert(result: BenchmarkEntity)
-
-    @Query("DELETE FROM benchmarks WHERE modelId = :modelId")
-    suspend fun clearFor(modelId: String)
-}
-
-@Dao
 interface PresetDao {
     /**
      * Seed order, not alphabetical. The built-in text presets read

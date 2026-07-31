@@ -59,9 +59,14 @@ object StarterModels {
      * This repo is that export redone with the attention mask as a real 4-D
      * input, quantised back to 4 bits (284 MB against the original's 296 MB),
      * measured at 54.6 dB dynamic range against the PyTorch reference's 54.7.
-     * Every other graph is copied from onnx-community unchanged — the
-     * embeddings encoder, heads decoder, Higgs vocoder and tokenizer were never
-     * at fault.
+     *
+     * It also carries the Higgs vocoder converted to fp32. onnx-community's is
+     * float16 throughout with no Cast node in it, which is fine on x86 — ONNX
+     * Runtime has no fp16 CPU kernels there and wraps the graph in fp32 casts —
+     * and fatal on arm64, where the CPU has real ARMv8.2 fp16 arithmetic and
+     * float16 stops at 65504. Measured on a phone: every earlier graph finite
+     * and healthy, then 48000 samples of NaN out of the vocoder. The embeddings
+     * encoder, heads decoder and tokenizer are copied unchanged.
      */
     const val OMNIVOICE_REPO = "prskid1000/OmniVoice-Onnx-bidirectional"
 
@@ -77,29 +82,29 @@ object StarterModels {
 
     val ALL: List<StarterModel> = listOf(
         // — chat —
+        //
+        // One family at three sizes, rather than four families at one size each.
+        // The choice a phone actually forces is how much RAM to spend, and a list
+        // that answers it with four different model families answers a question
+        // nobody asked while leaving that one implicit. Sizes are the Q4_K_M
+        // files as the Hugging Face API reports them, not estimates.
         StarterModel(
-            repoId = "unsloth/Qwen3-1.7B-GGUF",
+            repoId = "unsloth/Qwen3.5-2B-GGUF",
             modality = Modality.TEXT,
             summary = "Small and quick. The one to try first on a modest phone.",
-            sizeHint = "~1.1 GB at Q4",
+            sizeHint = "1.28 GB at Q4_K_M",
         ),
         StarterModel(
-            repoId = "unsloth/Qwen3-4B-Instruct-2507-GGUF",
+            repoId = "unsloth/Qwen3.5-4B-GGUF",
             modality = Modality.TEXT,
             summary = "Noticeably better answers, noticeably slower.",
-            sizeHint = "~2.4 GB at Q4",
+            sizeHint = "2.74 GB at Q4_K_M",
         ),
         StarterModel(
-            repoId = "bartowski/Llama-3.2-3B-Instruct-GGUF",
+            repoId = "unsloth/Qwen3.5-9B-GGUF",
             modality = Modality.TEXT,
-            summary = "A different family, for when Qwen's style does not suit.",
-            sizeHint = "~2.0 GB at Q4",
-        ),
-        StarterModel(
-            repoId = "unsloth/gemma-3-4b-it-GGUF",
-            modality = Modality.TEXT,
-            summary = "Gemma 3, and it takes images as well as text.",
-            sizeHint = "~2.5 GB at Q4",
+            summary = "The best of the three, and it wants a phone with the RAM to hold it.",
+            sizeHint = "5.68 GB at Q4_K_M",
         ),
 
         // — speech to text —
@@ -123,9 +128,11 @@ object StarterModels {
             summary = "Any language, [laughter] and [sigh], a voice you describe in words. " +
                 "Much slower than Kokoro.",
             // The int4 variant, as the resolver counted it on a device: the
-            // 284 MB backbone from `int4/`, 462 MB of shared graphs from
-            // `components/`, and the 11 MB tokenizer at the root — 746 MB.
-            // `fp32/` swaps the backbone for a 1.76 GB one and comes to 2.23 GB.
+            // 284 MB backbone from `int4/`, 506 MB of shared graphs from
+            // `components/`, and the 11 MB tokenizer at the root — 800 MB.
+            // `fp32/` swaps the backbone for a 1.76 GB one and comes to 2.28 GB.
+            // The components grew by 43 MB when the vocoder went to fp32, which
+            // is what it costs for it to work on the platform this app runs on.
             //
             // Worth knowing before the download: 328 MB of those components are
             // the acoustic, semantic and quantizer encoders, which only matter

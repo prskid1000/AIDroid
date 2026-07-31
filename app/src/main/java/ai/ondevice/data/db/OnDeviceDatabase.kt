@@ -49,7 +49,6 @@ class Converters {
 @Database(
     entities = [
         ModelEntity::class,
-        BenchmarkEntity::class,
         PresetEntity::class,
         PersonaEntity::class,
         ConversationEntity::class,
@@ -69,7 +68,6 @@ class Converters {
 @TypeConverters(Converters::class)
 abstract class OnDeviceDatabase : RoomDatabase() {
     abstract fun models(): ModelDao
-    abstract fun benchmarks(): BenchmarkDao
     abstract fun presets(): PresetDao
     abstract fun personas(): PersonaDao
     abstract fun conversations(): ConversationDao
@@ -114,7 +112,7 @@ abstract class OnDeviceDatabase : RoomDatabase() {
          * refusal on release builds.
          */
         val MIGRATIONS: Array<androidx.room.migration.Migration> =
-            arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+            arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
     }
 }
 
@@ -206,9 +204,28 @@ private val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
 }
 
 /**
+ * Drop `benchmarks`.
+ *
+ * The table stored one row per model per backend, and llama.cpp registers one
+ * backend in this build — so every row it ever held was a measurement of CPU
+ * against itself, and the selection it fed then picked the only candidate. The
+ * rows are not worth carrying and there is nothing to migrate them into.
+ *
+ * `DROP TABLE IF EXISTS` rather than `DROP TABLE`, because a database created at
+ * v4 by a build that had already been rebuilt without the entity has no such
+ * table, and a migration that fails on a database it was meant to repair is
+ * worse than the schema drift it fixes.
+ */
+private val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("DROP TABLE IF EXISTS `benchmarks`")
+    }
+}
+
+/**
  * Named rather than written into the annotation so a test can compare it with
  * [OnDeviceDatabase.MIGRATIONS] — an annotation argument is not readable at
  * runtime, and the pair only means anything when they are checked against each
  * other.
  */
-internal const val DATABASE_VERSION = 4
+internal const val DATABASE_VERSION = 5

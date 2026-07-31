@@ -5,6 +5,31 @@ import ai.ondevice.core.SpeedClass
 import ai.ondevice.core.Verdict
 
 /**
+ * What `flash_attn` is set to, which is three states and not two.
+ *
+ * llama.cpp's own type is `LLAMA_FLASH_ATTN_TYPE_{AUTO,ENABLED,DISABLED}`, and
+ * [AUTO] — the default when the key was never set — is the one that matters
+ * here: it lets the runtime turn flash attention on wherever the backend
+ * supports it, so it must not be priced as "off". Collapsing this to a Boolean
+ * would make every default configuration look like the expensive case.
+ */
+enum class FlashAttention {
+    AUTO,
+    ON,
+    OFF,
+    ;
+
+    companion object {
+        /** From a parameter value, where absent means the runtime decides. */
+        fun of(value: Boolean?): FlashAttention = when (value) {
+            null -> AUTO
+            true -> ON
+            false -> OFF
+        }
+    }
+}
+
+/**
  * The compatibility gate: SPEC §3.3, and the reason §1.2 ("honest refusal over
  * silent failure") is enforceable rather than aspirational.
  *
@@ -16,6 +41,17 @@ import ai.ondevice.core.Verdict
  *    moves, because a user who can see the sum can fix the problem themselves.
  */
 object CompatibilityGate {
+
+    /**
+     * llama.cpp's default physical batch — the unit the attention graph is
+     * actually built over, which is not the logical `n_batch` the compute
+     * buffer's other terms scale with.
+     */
+    const val DEFAULT_MICRO_BATCH = 512
+
+    /** Whether a cache type is one ggml calls quantized, as `ggml_is_quantized` does. */
+    fun isQuantizedCache(type: String): Boolean =
+        type.lowercase() !in setOf("f32", "f16", "bf16")
 
     /** Bytes per element for each KV cache type. */
     fun cacheTypeBytes(type: String): Float = when (type.lowercase()) {
@@ -47,13 +83,40 @@ object CompatibilityGate {
     }
 
     /**
-     * Compute buffer, which scales with the logical batch size rather than the
-     * context. Approximated from `n_batch × n_embd × bytes` with headroom for
-     * the graph's intermediate tensors; the canvas shows this landing around
-     * 0.20–0.25 GB for a 4B at default batch, which this reproduces.
+     * Compute buffer: the graph's intermediates, which flash attention changes
+     * by more than any other single setting.
+     *
+     * With flash attention the attention scores are never materialised — the
+     * kernel streams them — so the buffer scales with the batch and not with the
+     * context. That is the case this was calibrated for: `n_batch × n_embd ×
+     * bytes` with headroom, landing at 0.20–0.25 GB for a 4B at default batch.
+     *
+     * Without it, `KQ = K·Qᵀ` is a real f32 tensor of `[n_kv, n_ubatch, n_head]`
+     * for every layer in flight, and it grows with the context. At 32k with 32
+     * heads and the default 512-token micro-batch that is 2 GB — an order of
+     * magnitude more than the rest of the buffer, and the difference between a
+     * model that loads and one that does not. Leaving it out did not make the
+     * estimate slightly optimistic; it made it wrong in the only case where the
+     * user needed it to be right.
+     *
+     * [heads] is the query-head count from the GGUF. Without it the term cannot
+     * be computed honestly, so it is left out and [FitEstimate.exact] says so
+     * rather than a plausible number being invented.
      */
-    fun computeBufferBytes(nBatch: Int, embeddingLength: Int): Long =
-        (nBatch.toLong() * embeddingLength * 4L * 6L).coerceAtLeast(128L * 1024 * 1024)
+    fun computeBufferBytes(
+        nBatch: Int,
+        embeddingLength: Int,
+        contextTokens: Int = 0,
+        heads: Int? = null,
+        microBatch: Int = DEFAULT_MICRO_BATCH,
+        flashAttention: Boolean = true,
+    ): Long {
+        val base = (nBatch.toLong() * embeddingLength * 4L * 6L)
+            .coerceAtLeast(128L * 1024 * 1024)
+        if (flashAttention || heads == null || contextTokens <= 0) return base
+        val scores = microBatch.toLong() * contextTokens * heads * 4L
+        return base + scores
+    }
 
     /**
      * The full resident estimate. Every term is returned separately so the UI
@@ -68,6 +131,8 @@ object CompatibilityGate {
         nBatch: Int = 2048,
         cacheTypeK: String = "f16",
         cacheTypeV: String = "f16",
+        heads: Int? = null,
+        flashAttention: FlashAttention = FlashAttention.AUTO,
     ): FitEstimate {
         val kv = if (layers != null && embeddingLengthKv != null) {
             kvCacheBytes(layers, contextTokens, embeddingLengthKv, cacheTypeK, cacheTypeV)
@@ -77,7 +142,13 @@ object CompatibilityGate {
             // an exactness we don't have.
             (weightsBytes * 0.25).toLong()
         }
-        val compute = computeBufferBytes(nBatch, embeddingLength ?: 4096)
+        val compute = computeBufferBytes(
+            nBatch = nBatch,
+            embeddingLength = embeddingLength ?: 4096,
+            contextTokens = contextTokens,
+            heads = heads,
+            flashAttention = flashAttention != FlashAttention.OFF,
+        )
         return FitEstimate(
             weightsBytes = weightsBytes,
             kvCacheBytes = kv,
@@ -86,7 +157,11 @@ object CompatibilityGate {
             embeddingLengthKv = embeddingLengthKv,
             contextTokens = contextTokens,
             cacheTypeK = cacheTypeK,
-            exact = layers != null && embeddingLengthKv != null,
+            cacheTypeV = cacheTypeV,
+            heads = heads,
+            flashAttention = flashAttention,
+            exact = layers != null && embeddingLengthKv != null &&
+                (flashAttention != FlashAttention.OFF || heads != null),
         )
     }
 
@@ -152,7 +227,25 @@ data class FitEstimate(
     val contextTokens: Int,
     val cacheTypeK: String,
     val exact: Boolean,
+    val cacheTypeV: String = cacheTypeK,
+    val heads: Int? = null,
+    val flashAttention: FlashAttention = FlashAttention.AUTO,
 ) {
+    /**
+     * Whether llama.cpp will refuse this combination outright.
+     *
+     * `llama-context.cpp`: `if (ggml_is_quantized(params.type_v) &&
+     * params.flash_attn_type == LLAMA_FLASH_ATTN_TYPE_DISABLED) { … return
+     * nullptr; }`. The context is never created, so the model does not load —
+     * and until this was checked, the screen priced the smaller KV cache that a
+     * quantized V buys as though the user could have it.
+     *
+     * AUTO is not DISABLED, which is why only an explicit off trips this: left
+     * alone, llama.cpp turns flash attention on when the backend supports it.
+     */
+    val quantizedVWithoutFlashAttention: Boolean
+        get() = flashAttention == FlashAttention.OFF &&
+            CompatibilityGate.isQuantizedCache(cacheTypeV)
     val totalBytes: Long get() = weightsBytes + kvCacheBytes + computeBufferBytes
 
     fun headroomBytes(availableRam: Long): Long = availableRam - totalBytes
@@ -185,12 +278,34 @@ data class FitEstimate(
      */
     fun longWorking(): List<String> = buildList {
         add("weights ${Fmt.gb(weightsBytes)}")
-        if (exact && layers != null && embeddingLengthKv != null) {
-            add("KV cache 2 × $layers × ${contextTokens} × $embeddingLengthKv × $cacheTypeK = ${Fmt.gb(kvCacheBytes)}")
+        if (layers != null && embeddingLengthKv != null) {
+            val types = if (cacheTypeK == cacheTypeV) cacheTypeK else "$cacheTypeK/$cacheTypeV"
+            add("KV cache 2 × $layers × ${contextTokens} × $embeddingLengthKv × $types = ${Fmt.gb(kvCacheBytes)}")
         } else {
             add("KV cache ${Fmt.gb(kvCacheBytes)} (estimated — architecture metadata unavailable)")
         }
-        add("compute buffer ${Fmt.gb(computeBufferBytes)}")
+        when {
+            flashAttention != FlashAttention.OFF ->
+                add("compute buffer ${Fmt.gb(computeBufferBytes)} (flash attention on)")
+            heads != null ->
+                add(
+                    "compute buffer ${Fmt.gb(computeBufferBytes)} — includes attention scores " +
+                        "${CompatibilityGate.DEFAULT_MICRO_BATCH} × $contextTokens × $heads × f32, which flash " +
+                        "attention would not materialise",
+                )
+            else ->
+                add(
+                    "compute buffer ${Fmt.gb(computeBufferBytes)} (understated — flash attention " +
+                        "is off and the head count is unknown, so the attention scores are " +
+                        "not counted)",
+                )
+        }
+        if (quantizedVWithoutFlashAttention) {
+            add(
+                "cache_type_v is $cacheTypeV with flash_attn off — llama.cpp refuses this " +
+                    "combination and the model will not load",
+            )
+        }
     }
 
     /**

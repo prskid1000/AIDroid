@@ -11,7 +11,6 @@ import ai.ondevice.data.hf.HfApi
 import ai.ondevice.data.hf.ModelResolver
 import ai.ondevice.data.prefs.AppPrefs
 import ai.ondevice.data.secure.TokenStore
-import ai.ondevice.engine.Benchmarker
 import ai.ondevice.engine.EngineManager
 import ai.ondevice.engine.RuntimeRegistry
 import ai.ondevice.params.ParamRepository
@@ -135,10 +134,6 @@ object AppModule {
         capabilities: DeviceCapabilities,
         @ApplicationScope scope: CoroutineScope,
     ) = EngineManager(context, registry, db, prefs, capabilities, scope)
-
-    @Provides
-    @Singleton
-    fun provideBenchmarker(registry: RuntimeRegistry, db: OnDeviceDatabase) = Benchmarker(registry, db)
 
     @Provides
     @Singleton

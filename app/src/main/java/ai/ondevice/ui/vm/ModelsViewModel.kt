@@ -7,7 +7,6 @@ import ai.ondevice.core.Modality
 import ai.ondevice.core.SparseParams
 import ai.ondevice.data.ModelStorage
 import ai.ondevice.data.OrphanReport
-import ai.ondevice.data.db.BenchmarkEntity
 import ai.ondevice.data.db.ModelEntity
 import ai.ondevice.data.db.OnDeviceDatabase
 import ai.ondevice.data.hf.CompatibilityGate
@@ -15,7 +14,6 @@ import ai.ondevice.data.hf.DeviceCapabilities
 import ai.ondevice.data.hf.FitEstimate
 import ai.ondevice.data.download.DownloadJob
 import ai.ondevice.data.download.Downloader
-import ai.ondevice.engine.Benchmarker
 import ai.ondevice.engine.EngineManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -186,7 +184,6 @@ data class ModelGroup(val modality: Modality, val models: List<ModelEntity>)
 class ModelDetailViewModel @Inject constructor(
     private val db: OnDeviceDatabase,
     private val engines: EngineManager,
-    private val benchmarker: Benchmarker,
     private val storage: ModelStorage,
     private val capabilities: DeviceCapabilities,
     private val registry: ai.ondevice.engine.RuntimeRegistry,
@@ -230,11 +227,9 @@ class ModelDetailViewModel @Inject constructor(
         if (_state.value.model?.id == modelId) return
         viewModelScope.launch {
             val model = db.models().get(modelId) ?: return@launch
-            val benchmarks = db.benchmarks().getFor(modelId)
             val overrides = SparseParams.parse(model.paramOverridesJson)
             _state.value = ModelDetailState(
                 model = model,
-                benchmarks = benchmarks,
                 contextTokens = overrides.int("n_ctx") ?: model.contextLength ?: 8192,
                 maxContext = model.contextLength ?: 262_144,
                 loaded = engines.state.value.loaded?.modelId == modelId,
@@ -287,14 +282,19 @@ class ModelDetailViewModel @Inject constructor(
 
     private fun recompute() {
         val model = _state.value.model ?: return
+        val overrides = SparseParams.parse(model.paramOverridesJson)
         val estimate = CompatibilityGate.estimate(
             weightsBytes = model.sizeBytes,
             layers = engines.state.value.loaded?.layers ?: DEFAULT_LAYERS,
             contextTokens = _state.value.contextTokens,
             embeddingLengthKv = engines.state.value.loaded?.embeddingLengthKv ?: DEFAULT_KV_WIDTH,
             embeddingLength = engines.state.value.loaded?.embeddingLength,
-            cacheTypeK = SparseParams.parse(model.paramOverridesJson).string("cache_type_k") ?: "f16",
-            cacheTypeV = SparseParams.parse(model.paramOverridesJson).string("cache_type_v") ?: "f16",
+            cacheTypeK = overrides.string("cache_type_k") ?: "f16",
+            cacheTypeV = overrides.string("cache_type_v") ?: "f16",
+            // Both only known once the model has been loaded once — the head
+            // count comes from the GGUF, not from the file listing.
+            heads = engines.state.value.loaded?.heads,
+            flashAttention = ai.ondevice.data.hf.FlashAttention.of(overrides.bool("flash_attn")),
         )
         val verdict = CompatibilityGate.verdict(
             estimate = estimate,
@@ -314,21 +314,6 @@ class ModelDetailViewModel @Inject constructor(
             val updated = SparseParams.parse(model.paramOverridesJson)
                 .with("n_ctx", _state.value.contextTokens)
             db.models().setParamOverrides(model.id, updated.toJsonString())
-        }
-    }
-
-    fun runBenchmark() {
-        val model = _state.value.model ?: return
-        _state.value = _state.value.copy(benchmarking = true)
-        viewModelScope.launch {
-            val results = benchmarker.run(model, listOf(BackendId.OPENCL, BackendId.HEXAGON, BackendId.CPU)) { backend ->
-                _state.value = _state.value.copy(benchmarkingBackend = backend)
-            }
-            _state.value = _state.value.copy(
-                benchmarks = results,
-                benchmarking = false,
-                benchmarkingBackend = null,
-            )
         }
     }
 
@@ -358,14 +343,11 @@ class ModelDetailViewModel @Inject constructor(
 
 data class ModelDetailState(
     val model: ModelEntity? = null,
-    val benchmarks: List<BenchmarkEntity> = emptyList(),
     val contextTokens: Int = 8192,
     val maxContext: Int = 262_144,
     val estimate: FitEstimate? = null,
     val verdict: ai.ondevice.core.Verdict? = null,
     val loaded: Boolean = false,
-    val benchmarking: Boolean = false,
-    val benchmarkingBackend: BackendId? = null,
     val totalRamBytes: Long = 0,
     val availableRamBytes: Long = 0,
     val companions: List<Pair<String, String>> = emptyList(),

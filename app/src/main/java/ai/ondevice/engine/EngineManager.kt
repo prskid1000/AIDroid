@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.res.Configuration
 import ai.ondevice.core.BackendId
 import ai.ondevice.core.SparseParams
-import ai.ondevice.data.db.BenchmarkEntity
 import ai.ondevice.data.db.ModelEntity
 import ai.ondevice.data.db.OnDeviceDatabase
 import ai.ondevice.data.hf.DeviceCapabilities
@@ -69,8 +68,7 @@ class EngineManager(
 
     /**
      * Load a model, honouring the per-model backend override and otherwise
-     * picking the backend the on-device benchmark actually won (§8.1, §8.2) —
-     * not an assumption about the hardware.
+     * taking the backend from [resolveBackend].
      */
     suspend fun load(model: ModelEntity, paramOverrides: SparseParams = SparseParams.EMPTY): Result<LoadedModel> =
         loadMutex.withLock {
@@ -117,17 +115,23 @@ class EngineManager(
     }
 
     /**
-     * Backend selection: an explicit per-model override wins; then the global
-     * setting; then whichever backend measured fastest for this model on this
-     * device; then OpenCL, which is the upstream-recommended path on Adreno.
+     * Backend selection: an explicit per-model override wins, then the global
+     * setting, then the first backend the installed runtime registered.
      *
-     * Every one of those is a *preference*, so the answer is clamped to the
-     * backends the installed runtime actually registered. It used to end in a
-     * bare `return BackendId.OPENCL`, and since this value is what the Chat
-     * header reads, the badge said "OpenCL" on a build that has no GPU backend
-     * compiled in at all — runtimes.json honestly reports ["CPU"], and
+     * Both preferences are clamped to what the runtime actually has. This used
+     * to end in a bare `return BackendId.OPENCL`, and since the value is what
+     * the Chat header reads, the badge said "OpenCL" on a build with no GPU
+     * backend compiled in at all — runtimes.json honestly reports ["CPU"], and
      * whisper_jni sets `use_gpu = false` for the same reason. A cosmetic lie,
      * but an expensive one: it sent a plain-CPU slowness straight at the GPU.
+     *
+     * The middle step used to be a stored benchmark result. That measurement was
+     * the right instinct — §8.2 says not to assume backend performance — but a
+     * measurement over a one-element set is not a measurement. With ["CPU"]
+     * registered, the benchmark ran CPU against itself, wrote one row, and the
+     * selection then "chose" the only candidate. Falling back to the first
+     * registered backend says the same thing without the ceremony, and the day a
+     * GPU backend is compiled in is the day measuring is worth rebuilding.
      */
     private suspend fun resolveBackend(model: ModelEntity): BackendId {
         val available = registry.backendsFor(RuntimeRegistry.LLAMA)
@@ -138,9 +142,7 @@ class EngineManager(
         if (mode != AppPrefs.BACKEND_AUTO) {
             runCatching { BackendId.valueOf(mode) }.getOrNull()?.let { return clamp(it) }
         }
-        val measured = db.benchmarks().getFor(model.id)
-        measured.maxByOrNull { it.genTokPerSec }?.let { return clamp(it.backend) }
-        return clamp(BackendId.OPENCL)
+        return available.firstOrNull() ?: BackendId.CPU
     }
 
     /**
@@ -159,7 +161,7 @@ class EngineManager(
             )
             message.contains("backend", true) -> EngineError(
                 message = "The selected backend failed to initialise.",
-                suggestion = "Switch to CPU in Settings → Backend, or re-run the benchmark.",
+                suggestion = "Switch to CPU in Settings → Backend.",
             )
             else -> EngineError(message = message.ifBlank { "Model load failed." }, suggestion = null)
         }
@@ -199,70 +201,3 @@ data class EngineState(
 )
 
 data class EngineError(val message: String, val suggestion: String?)
-
-/**
- * SPEC §8.2 — "Do not assume backend performance on this hardware. Measure it."
- *
- * Runs a fixed prompt for a fixed token count on every available backend, stores
- * the result per model per backend, and lets the app auto-select the winner and
- * *show the numbers* rather than asserting which is faster.
- */
-class Benchmarker(
-    private val registry: RuntimeRegistry,
-    private val db: OnDeviceDatabase,
-) {
-    suspend fun run(
-        model: ModelEntity,
-        backends: List<BackendId>,
-        onProgress: (BackendId) -> Unit = {},
-    ): List<BenchmarkEntity> {
-        val descriptor = registry.descriptor(RuntimeRegistry.LLAMA) ?: return emptyList()
-        val engine = LlamaEngine(descriptor)
-        val results = mutableListOf<BenchmarkEntity>()
-
-        for (backend in backends) {
-            onProgress(backend)
-            engine.load(
-                LoadRequest(
-                    modelId = model.id,
-                    modelPath = model.localPath,
-                    backend = backend,
-                    chatTemplate = model.chatTemplate,
-                ),
-            ).getOrNull() ?: continue
-
-            var generated = 0
-            var promptRate = 0f
-            val started = System.currentTimeMillis()
-            engine.generate(
-                GenerateRequest(
-                    messages = listOf(EngineMessage("user", BENCH_PROMPT)),
-                    params = SparseParams.of("n_predict" to BENCH_TOKENS, "temp" to 0f),
-                ),
-            ).collect { event ->
-                when (event) {
-                    is GenerationEvent.PromptProcessed -> promptRate = event.promptTokensPerSecond
-                    is GenerationEvent.Token -> generated++
-                    else -> Unit
-                }
-            }
-            val elapsed = (System.currentTimeMillis() - started).coerceAtLeast(1)
-            val entity = BenchmarkEntity(
-                modelId = model.id,
-                backend = backend,
-                promptTokPerSec = promptRate,
-                genTokPerSec = generated * 1000f / elapsed,
-                measuredAt = System.currentTimeMillis(),
-            )
-            db.benchmarks().upsert(entity)
-            results += entity
-            engine.unload()
-        }
-        return results
-    }
-
-    private companion object {
-        const val BENCH_TOKENS = 64
-        const val BENCH_PROMPT = "Explain what a KV cache is in two sentences."
-    }
-}

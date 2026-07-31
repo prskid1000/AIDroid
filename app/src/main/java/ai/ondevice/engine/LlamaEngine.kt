@@ -84,6 +84,7 @@ class LlamaEngine(
                 layers = info.int("layers") ?: 0,
                 embeddingLength = info.int("embeddingLength") ?: 0,
                 embeddingLengthKv = info.int("embeddingLengthKv") ?: 0,
+                heads = info.int("heads") ?: 0,
                 chatTemplate = info.string("chatTemplate")?.takeIf { it.isNotBlank() },
                 // The end-of-generation tokens the *vocabulary* declares. A
                 // hand-kept list per model family is exactly the model-locking

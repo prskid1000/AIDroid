@@ -123,7 +123,6 @@ class ModelStorage(private val context: Context, private val db: OnDeviceDatabas
         runCatching { File(model.localPath).delete() }
         runCatching { modelDir(model.id).deleteRecursively() }
         db.models().deleteById(model.id)
-        db.benchmarks().clearFor(model.id)
     }
 
     fun usedBytes(): Long = runCatching {

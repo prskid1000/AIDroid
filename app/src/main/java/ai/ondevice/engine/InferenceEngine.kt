@@ -74,6 +74,14 @@ data class LoadedModel(
     val layers: Int,
     val embeddingLength: Int,
     val embeddingLengthKv: Int,
+    /**
+     * Query heads, as the GGUF declares them.
+     *
+     * Needed to price the attention scores when flash attention is off,
+     * where they are a real f32 tensor that grows with the context. The
+     * native side has always reported it; nothing carried it up.
+     */
+    val heads: Int = 0,
     val chatTemplate: String?,
     val stopSequences: List<String>,
     val loadMillis: Long,
