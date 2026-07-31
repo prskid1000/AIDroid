@@ -13,7 +13,6 @@ import androidx.lifecycle.lifecycleScope
 import ai.ondevice.MainActivity
 import ai.ondevice.R
 import ai.ondevice.core.Fmt
-import ai.ondevice.core.ThermalPolicy
 import ai.ondevice.data.hf.DeviceCapabilities
 import ai.ondevice.data.prefs.AppPrefs
 import dagger.hilt.android.AndroidEntryPoint
@@ -24,16 +23,22 @@ import javax.inject.Inject
 
 /**
  * SPEC §2.1 — the inference host. It survives backgrounding and owns
- * memory-pressure negotiation; §8.3 adds thermal and wake-lock policy.
+ * memory-pressure negotiation and the wake-lock.
  *
- * Three rules from the spec are enforced here rather than in the UI, because
- * the UI is not guaranteed to exist while generation runs:
+ * Two rules from the spec are enforced here rather than in the UI, because the
+ * UI is not guaranteed to exist while generation runs:
  *  - the wake-lock is held **only** while generating, and released on
  *    completion;
- *  - the thermal status is read live and the configured policy applied at
- *    `THERMAL_STATUS_SEVERE`;
  *  - generation is cancellable at every stage, and cancelling frees native
  *    memory rather than merely detaching the callback.
+ *
+ * There is deliberately no thermal policy. The kernel governor already throttles
+ * a hot SoC, and the app's own layer over it did not work: three of the four
+ * settings wrote `n_threads` into a struct that a live llama.cpp context never
+ * re-reads (it is reload-only), so "reduce threads" and "downshift to CPU"
+ * changed nothing at all, and the policy was sampled once with `first()` so
+ * editing it did nothing until the service restarted. A control that reads as
+ * protection and provides none is worse than admitting the platform handles it.
  */
 @AndroidEntryPoint
 class InferenceService : LifecycleService() {
@@ -58,7 +63,6 @@ class InferenceService : LifecycleService() {
             }
         }
 
-        lifecycleScope.launch { watchThermal() }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -68,34 +72,6 @@ class InferenceService : LifecycleService() {
             ACTION_RELEASE_WAKELOCK -> releaseWakeLock()
         }
         return START_NOT_STICKY
-    }
-
-    /**
-     * §8.3 — read `PowerManager.getCurrentThermalStatus()` and act on the
-     * configured policy. The user's choice is honoured literally: "continue
-     * regardless" means the app does not quietly throttle behind their back.
-     */
-    private suspend fun watchThermal() {
-        val policy = prefs.thermalPolicy.first()
-        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        pm.addThermalStatusListener { status ->
-            if (status < PowerManager.THERMAL_STATUS_SEVERE) return@addThermalStatusListener
-            when (policy) {
-                ThermalPolicy.CONTINUE -> Unit
-                ThermalPolicy.REDUCE_THREADS,
-                ThermalPolicy.DOWNSHIFT_CPU,
-                -> lifecycleScope.launch {
-                    // Both are applied through the same string-keyed boundary as
-                    // any other parameter change — there is no special path.
-                    engines.llama?.applyParams(
-                        ai.ondevice.core.SparseParams.of(
-                            "n_threads" to (capabilities.performanceCores / 2).coerceAtLeast(1),
-                        ),
-                    )
-                }
-                ThermalPolicy.PAUSE -> lifecycleScope.launch { engines.unload() }
-            }
-        }
     }
 
     private fun acquireWakeLock() {
@@ -133,7 +109,6 @@ class InferenceService : LifecycleService() {
                     if (state != null && state.tokensPerSecond > 0) {
                         append(" · ${Fmt.tokensPerSecond(state.tokensPerSecond)}")
                     }
-                    append(" · thermal ${capabilities.thermalLabel}")
                 },
             )
             .setContentIntent(open)

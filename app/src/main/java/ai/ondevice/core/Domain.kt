@@ -120,23 +120,6 @@ enum class DownloadState { QUEUED, RUNNING, PAUSED, VERIFYING, COMPLETE, FAILED 
 /** SPEC §17.3 — a bundle declaring an unsupported contract is refused, never loaded. */
 enum class RuntimeState { NOT_INSTALLED, INSTALLED, UPDATE_AVAILABLE, ROLLED_BACK }
 
-/** SPEC §8.3 — the configurable policy on THERMAL_STATUS_SEVERE. */
-enum class ThermalPolicy {
-    CONTINUE,
-    REDUCE_THREADS,
-    DOWNSHIFT_CPU,
-    PAUSE,
-    ;
-
-    val label: String
-        get() = when (this) {
-            CONTINUE -> "Continue regardless"
-            REDUCE_THREADS -> "Reduce threads at severe"
-            DOWNSHIFT_CPU -> "Downshift to CPU"
-            PAUSE -> "Pause generation"
-        }
-}
-
 enum class MessageRole { USER, ASSISTANT, SYSTEM, TOOL_CALL, TOOL_RESULT }
 
 /** SPEC §3.2 — every refusal gets its own message and its own remedy. */

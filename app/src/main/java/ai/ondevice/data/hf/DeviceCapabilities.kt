@@ -70,7 +70,12 @@ class DeviceCapabilities(private val context: Context) {
 
     private fun fallbackPerformanceCores() = (totalCores / 2).coerceIn(1, 8)
 
-    /** SPEC §8.3 — surfaced during generation, drives the thermal policy. */
+    /**
+     * Read, but no longer acted on: the app's thermal policy is gone because
+     * three of its four settings could not do what they claimed. Kept because
+     * the benchmark's own numbers mean less from a device that was already hot,
+     * so a reading is worth having even when nothing throttles on it.
+     */
     val thermalStatus: Int
         get() = runCatching { powerManager.currentThermalStatus }.getOrDefault(PowerManager.THERMAL_STATUS_NONE)
 

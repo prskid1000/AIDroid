@@ -103,30 +103,19 @@ fun RuntimesScreen(
                     verticalAlignment = Alignment.Bottom,
                 ) {
                     Text("v${manifest.version}", style = NocturneType.CardTitleSm, modifier = Modifier.weight(1f))
-                    Text(
-                        "bundled v${manifest.bundledVersion} · Ed25519 ${if (manifest.signatureOk) "✓" else "✗"}",
-                        style = NocturneType.MonoSm,
-                        color = NocturneColors.TextMuted,
-                    )
+                    NTag("bundled", style = NTagStyle.Neutral)
                 }
+                // No "Ed25519 ✓" and no "Auto-check · Wi-Fi only". Both described
+                // an over-the-air update path that does not exist: nothing writes
+                // the manifest table, so the app only ever reads the copy shipped
+                // inside it, and there is no signature check to pass.
                 Text(
-                    "Data, not code — so it updates freely. It can retier, relabel and reveal " +
+                    "Ships inside the app. Data, not code — it can retier, relabel and reveal " +
                         "parameters the installed engine already supports. It cannot add capability " +
-                        "the engine lacks.",
+                        "the engine lacks; that is what an engine update is for.",
                     style = NocturneType.CardBody,
                     color = NocturneColors.Text.copy(alpha = 0.8f),
                 )
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(9.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("Auto-check", style = NocturneType.Row, modifier = Modifier.weight(1f))
-                    NTag(
-                        if (settings.manifestWifiOnly) "Wi-Fi only" else "Any network",
-                        style = NTagStyle.Neutral,
-                    )
-                }
             }
 
             // §17.1/§17.2 — be explicit about why an engine update is a package.

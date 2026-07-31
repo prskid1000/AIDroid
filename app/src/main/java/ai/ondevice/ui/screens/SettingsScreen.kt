@@ -19,7 +19,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ai.ondevice.core.BackendId
 import ai.ondevice.core.Fmt
-import ai.ondevice.core.ThermalPolicy
 import ai.ondevice.data.prefs.AppPrefs
 import ai.ondevice.ui.BottomDestinations
 import ai.ondevice.ui.components.NBottomBar
@@ -41,8 +40,8 @@ import ai.ondevice.ui.theme.ruleBelow
 import ai.ondevice.ui.vm.SettingsViewModel
 
 /**
- * Settings root. Backend, thermal policy, storage, token, network, and the way
- * through to Runtimes (S15).
+ * Settings root. Backend, network, token, parameter tiering, and the way through
+ * to Tools and Runtimes (S15).
  *
  * The closing line is a load-bearing claim rather than marketing: SPEC §13 —
  * no account, no telemetry, and no network at all after download.
@@ -94,36 +93,18 @@ fun SettingsScreen(
                 Modifier.padding(top = 8.dp),
             )
 
-            SectionKicker("Thermal policy", Modifier.padding(top = 20.dp, bottom = 8.dp))
-            NCard(gap = 9.dp) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    NTag("status: ${state.thermalLabel}", style = NTagStyle.Neutral)
-                    Box(Modifier.weight(1f))
-                    Text(
-                        "battery ${state.batteryPercent}%",
-                        style = NocturneType.Meta,
-                        color = NocturneColors.TextMuted,
-                    )
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                    ThermalPolicy.entries.forEach { policy ->
-                        NRadio(
-                            label = policy.label,
-                            selected = state.thermalPolicy == policy,
-                            onSelect = { viewModel.setThermalPolicy(policy) },
-                        )
-                    }
-                }
-            }
+            // No thermal policy card. The kernel governor throttles a hot SoC on
+            // its own, and the four settings that used to sit here mostly did
+            // nothing — `n_threads` cannot be changed on a live llama.cpp
+            // context, so two of them were inert and a third was mislabelled.
 
             SectionKicker("Network", Modifier.padding(top = 20.dp, bottom = 8.dp))
             NCard(gap = 10.dp) {
+                // One toggle, because there is one thing that goes over the
+                // network. The manifest-update toggle that used to sit beside it
+                // gated a fetch that does not exist: nothing writes the manifest
+                // table, so the "newer than bundled" path can never be taken.
                 ToggleRow("Wi-Fi only downloads", state.wifiOnly, viewModel::setWifiOnly)
-                ToggleRow("Check for manifest updates on Wi-Fi only", state.manifestWifiOnly, viewModel::setManifestWifiOnly)
             }
 
             SectionKicker("Hugging Face token", Modifier.padding(top = 20.dp, bottom = 8.dp))
@@ -147,20 +128,10 @@ fun SettingsScreen(
                 )
             }
 
-            SectionKicker("Parameters", Modifier.padding(top = 20.dp, bottom = 8.dp))
-            NCard(gap = 10.dp) {
-                ToggleRow(
-                    "Show all parameters",
-                    state.showAllParameters,
-                    viewModel::setShowAllParameters,
-                )
-                Text(
-                    "Collapses the Basic / Advanced / Expert tiers entirely. Tiering only ever " +
-                        "controlled default visibility — nothing was hidden permanently.",
-                    style = NocturneType.CardBody,
-                    color = NocturneColors.Text.copy(alpha = 0.8f),
-                )
-            }
+            // No "Show all parameters" here. It was a second copy of the All tab
+            // that already sits on the parameters screen, one tap from the list
+            // it filters — a global preference for a per-screen choice, set in a
+            // different screen from the one it changes.
 
             NButton(
                 "Tools and MCP servers →",

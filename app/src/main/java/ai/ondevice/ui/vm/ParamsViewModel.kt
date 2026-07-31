@@ -89,7 +89,6 @@ class ParamsViewModel @Inject constructor(
             values = SparseParams.parse(model?.paramOverridesJson),
             modality = (model?.modality ?: modalityOf(runtimeId)).name.lowercase(),
             architecture = model?.architecture,
-            showAll = prefs.showAllParameters.first(),
             modelId = model?.id,
             query = "",
         )
@@ -170,9 +169,13 @@ class ParamsViewModel @Inject constructor(
         recompute()
     }
 
+    /**
+     * Screen state, not a preference. It used to be persisted globally and set
+     * from a toggle on the Settings screen as well as from the tab here — two
+     * controls for one thing, one of them nowhere near the list it filtered.
+     */
     fun setShowAll(showAll: Boolean) {
         _state.value = _state.value.copy(showAll = showAll)
-        viewModelScope.launch { prefs.setShowAllParameters(showAll) }
         recompute()
     }
 

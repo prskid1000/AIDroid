@@ -4,7 +4,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import ai.ondevice.BuildConfig
 import ai.ondevice.core.RuntimeState
-import ai.ondevice.core.ThermalPolicy
 import ai.ondevice.data.ModelStorage
 import ai.ondevice.data.db.McpServerEntity
 import ai.ondevice.data.db.OnDeviceDatabase
@@ -175,20 +174,13 @@ class SettingsViewModel @Inject constructor(
 
     val settings: StateFlow<SettingsState> = combine(
         prefs.backendMode,
-        prefs.thermalPolicy,
         prefs.wifiOnly,
-        prefs.showAllParameters,
-        prefs.manifestWifiOnly,
-    ) { backend, thermal, wifiOnly, showAll, manifestWifi ->
+    ) { backend, wifiOnly ->
         SettingsState(
             backendMode = backend,
-            thermalPolicy = thermal,
             wifiOnly = wifiOnly,
-            showAllParameters = showAll,
-            manifestWifiOnly = manifestWifi,
             hasToken = tokens.hasToken,
             maskedToken = tokens.maskedToken(),
-            thermalLabel = capabilities.thermalLabel,
             batteryPercent = capabilities.batteryPercent,
             totalRamBytes = capabilities.totalRamBytes,
             freeStorageBytes = capabilities.freeStorageBytes,
@@ -209,21 +201,12 @@ class SettingsViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            val loaded = paramRepository.manifest()
-            _manifest.value = ManifestState(
-                version = loaded.manifestVersion,
-                bundledVersion = paramRepository.bundledVersion(),
-                signatureOk = paramRepository.storedManifest()?.signatureOk ?: true,
-                lastCheckedMillis = prefs.manifestLastChecked.let { 0L },
-            )
+            _manifest.value = ManifestState(version = paramRepository.manifest().manifestVersion)
         }
     }
 
     fun setBackendMode(mode: String) = viewModelScope.launch { prefs.setBackendMode(mode) }
-    fun setThermalPolicy(policy: ThermalPolicy) = viewModelScope.launch { prefs.setThermalPolicy(policy) }
     fun setWifiOnly(value: Boolean) = viewModelScope.launch { prefs.setWifiOnly(value) }
-    fun setShowAllParameters(value: Boolean) = viewModelScope.launch { prefs.setShowAllParameters(value) }
-    fun setManifestWifiOnly(value: Boolean) = viewModelScope.launch { prefs.setManifestWifiOnly(value) }
 
     fun setToken(value: String?) {
         tokens.hfToken = value
@@ -270,13 +253,9 @@ class SettingsViewModel @Inject constructor(
 
 data class SettingsState(
     val backendMode: String = AppPrefs.BACKEND_AUTO,
-    val thermalPolicy: ThermalPolicy = ThermalPolicy.REDUCE_THREADS,
     val wifiOnly: Boolean = true,
-    val showAllParameters: Boolean = false,
-    val manifestWifiOnly: Boolean = true,
     val hasToken: Boolean = false,
     val maskedToken: String? = null,
-    val thermalLabel: String = "none",
     val batteryPercent: Int = 100,
     val totalRamBytes: Long = 0,
     val freeStorageBytes: Long = 0,
@@ -288,9 +267,9 @@ data class SettingsState(
     val updateChannel: String = "SIDELOAD",
 )
 
-data class ManifestState(
-    val version: Int = 0,
-    val bundledVersion: Int = 0,
-    val signatureOk: Boolean = true,
-    val lastCheckedMillis: Long = 0,
-)
+/**
+ * Just the version. It used to carry a bundled-versus-stored comparison, a
+ * signature verdict and a last-checked time — all three describing an update
+ * mechanism the app does not have.
+ */
+data class ManifestState(val version: Int = 0)
