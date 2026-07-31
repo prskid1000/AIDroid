@@ -113,22 +113,47 @@ class AddModelViewModel @Inject constructor(
     /**
      * Choose which file fills a companion role.
      *
-     * Tapping the one already chosen clears it, for the roles where nothing is
-     * a legitimate answer — a TAESD preview decoder is worth having and worth
-     * refusing, and a role with only one candidate and no requirement should
-     * not be a thing you cannot say no to. A required role always keeps a file.
+     * Two behaviours, because the roles mean two different things. Where the
+     * runtime takes one file the candidates are rivals, so picking one replaces
+     * the last; tapping the chosen one again clears it, since a preview decoder
+     * is worth having and worth refusing. Where they are parts — Kokoro's voice
+     * packs — each is independently useful, so tapping toggles just that one:
+     * the engine finds voices by scanning the folder, and someone who wants
+     * four of the fifty-five should not have to take all of them.
+     *
+     * A required role never empties. Kokoro with no voice pack is an install
+     * that cannot speak.
      */
     fun chooseCompanion(role: ai.ondevice.data.hf.CompanionRole, filename: String) {
         val group = _state.value.resolved?.companions?.firstOrNull { it.role == role } ?: return
-        val current = _state.value.companionChoice[role].orEmpty()
+        val current = _state.value.companionChoice[role] ?: group.selected
+        val parts = group.kind == ai.ondevice.data.hf.CompanionGroup.Kind.PARTS
         val next = when {
-            // Parts are not a choice: the set is the thing.
-            group.kind == ai.ondevice.data.hf.CompanionGroup.Kind.PARTS -> current
-            filename in current && !role.required -> emptySet()
+            parts && filename in current -> current - filename
+            parts -> current + filename
+            filename in current -> emptySet()
             else -> setOf(filename)
         }
+        apply(role, next.ifEmpty { if (role.required) current else next })
+    }
+
+    /** Take all of a role's files, or none of them. */
+    fun chooseAllCompanions(role: ai.ondevice.data.hf.CompanionRole, all: Boolean) {
+        val group = _state.value.resolved?.companions?.firstOrNull { it.role == role } ?: return
+        val everything = group.candidates.map { it.file.filename }.toSet()
+        val next = when {
+            all -> everything
+            role.required -> setOfNotNull(
+                ai.ondevice.data.hf.CompanionGrouping.preferred(group.candidates)?.file?.filename,
+            )
+            else -> emptySet()
+        }
+        apply(role, next)
+    }
+
+    private fun apply(role: ai.ondevice.data.hf.CompanionRole, selection: Set<String>) {
         _state.value = _state.value.copy(
-            companionChoice = _state.value.companionChoice + (role to next),
+            companionChoice = _state.value.companionChoice + (role to selection),
         )
         recomputeVerdict()
     }

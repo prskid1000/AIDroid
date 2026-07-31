@@ -336,12 +336,29 @@ fun AddModelScreen(
                     resolved.companions.forEach { group ->
                         val picked = state.companionChoice[group.role] ?: group.selected
 
+                        val parts = group.kind == ai.ondevice.data.hf.CompanionGroup.Kind.PARTS
+
                         Row(
                             Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp),
                             horizontalArrangement = Arrangement.spacedBy(9.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(group.role.label, style = NocturneType.CardTitleSm, modifier = Modifier.weight(1f))
+                            // Fifty-five voice packs is a lot of tapping to say
+                            // "actually, none of these".
+                            if (parts && group.candidates.size > 1) {
+                                val allPicked = picked.size == group.candidates.size
+                                Text(
+                                    if (allPicked) "none" else "all",
+                                    style = NocturneType.Meta,
+                                    color = NocturneColors.Accent,
+                                    modifier = Modifier
+                                        .nClickableFlat {
+                                            viewModel.chooseAllCompanions(group.role, !allPicked)
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                                )
+                            }
                             Text(
                                 Fmt.bytes(group.candidates.filter { it.file.filename in picked }
                                     .sumOf { it.file.sizeBytes }),
@@ -351,13 +368,7 @@ fun AddModelScreen(
                         }
                         group.note?.let { NHelp(it, Modifier.padding(bottom = 4.dp)) }
 
-                        // Parts are listed and not offered: picking a subset of
-                        // Kokoro's voice packs would be picking which voices to
-                        // be unable to use. Everything else is a row you can tap.
-                        val selectable = group.kind != ai.ondevice.data.hf.CompanionGroup.Kind.PARTS
-                        val shown = if (selectable) group.candidates else group.candidates.take(3)
-
-                        shown.forEach { candidate ->
+                        group.candidates.forEach { candidate ->
                             val chosen = candidate.file.filename in picked
                             Row(
                                 Modifier
@@ -371,17 +382,9 @@ fun AddModelScreen(
                                         if (chosen) NocturneColors.Accent else NocturneColors.Divider,
                                         Radius.Md,
                                     )
-                                    .then(
-                                        if (selectable) {
-                                            Modifier.nClickableFlat {
-                                                viewModel.chooseCompanion(
-                                                    group.role, candidate.file.filename,
-                                                )
-                                            }
-                                        } else {
-                                            Modifier
-                                        },
-                                    )
+                                    .nClickableFlat {
+                                        viewModel.chooseCompanion(group.role, candidate.file.filename)
+                                    }
                                     .padding(horizontal = 12.dp, vertical = 9.dp),
                                 horizontalArrangement = Arrangement.spacedBy(9.dp),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -398,14 +401,11 @@ fun AddModelScreen(
                                 )
                             }
                         }
-                        if (!selectable && group.candidates.size > shown.size) {
-                            NHelp("and ${group.candidates.size - shown.size} more, all queued")
-                        }
                     }
                     NHelp(
-                        "Parts of the model are queued with the weights. Where a repo ships the " +
-                            "same file at several precisions, or several things that fill the same " +
-                            "slot, only one is downloaded — tap to change it.",
+                        "Where a repo ships the same file at several precisions, or several " +
+                            "things that fill the same slot, one is chosen for you. Everything " +
+                            "here is a tap away from being changed.",
                         Modifier.padding(top = 4.dp),
                     )
                 }
