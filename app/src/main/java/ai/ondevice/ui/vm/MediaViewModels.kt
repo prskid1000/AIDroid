@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -60,10 +61,17 @@ class ImageViewModel @Inject constructor(
             // "No runtime" and "no model" are different problems with different
             // fixes, and SPEC §1.2 says a refusal has to name which one it is.
             val runtimeInstalled = db.runtimes().get(RUNTIME_ID)?.state != RuntimeState.NOT_INSTALLED
+            // Every query resolved before the write, for the reason spelled out
+            // in VoiceViewModel's init: a suspending call inside `copy(...)`
+            // writes back a snapshot taken before it suspended, and the live
+            // collector below is racing this exact block.
+            val model = baseModelsOnly(
+                db.models().observeInstalledByModality(Modality.DIFFUSION).first(),
+            ).firstOrNull()
+            val presets = db.presets().observeFor(Modality.DIFFUSION).first()
             _state.value = _state.value.copy(
-                model = baseModelsOnly(db.models().observeInstalledByModality(Modality.DIFFUSION).first())
-                    .firstOrNull(),
-                presets = db.presets().observeFor(Modality.DIFFUSION).first(),
+                model = model,
+                presets = presets,
                 runtimeInstalled = runtimeInstalled,
             )
             refreshAttachmentLibrary()
@@ -735,9 +743,23 @@ class VoiceViewModel @Inject constructor(
     /** Where the take in progress is being written; null when not recording. */
     private var captureFile: java.io.File? = null
 
+    private companion object {
+        const val TAG = "VoiceViewModel"
+    }
+
     init {
         viewModelScope.launch {
-            _state.value = _state.value.copy(transcripts = db.transcripts().observeAll().first())
+            // Read first, write second — and never `copy(x = <a suspending call>)`.
+            //
+            // That line looks atomic and is not. Kotlin evaluates the receiver
+            // before the argument, so `_state.value` is snapshotted *before* the
+            // query suspends and written back after it resumes, silently
+            // discarding everything written in between. This is what hid an
+            // installed whisper model from the Transcribe tab for weeks: the
+            // collector below put the model list in, and ten milliseconds later
+            // this line put the empty one back.
+            val transcripts = db.transcripts().observeAll().first()
+            _state.value = _state.value.copy(transcripts = transcripts)
         }
 
         // Both model lists are collected, not sampled once with `first()`.
@@ -750,7 +772,15 @@ class VoiceViewModel @Inject constructor(
         // Image and Chat pickers were fixed for this exact reason and this one
         // was missed.
         viewModelScope.launch {
-            db.models().observeInstalledByModality(Modality.SPEECH_TO_TEXT).collect { models ->
+            db.models().observeInstalledByModality(Modality.SPEECH_TO_TEXT)
+                .catch { failure ->
+                    // A Room flow that throws takes its collector with it and
+                    // says nothing: the list simply stays empty for the life of
+                    // the process, which reads on screen as "no model
+                    // installed" for a model that is installed.
+                    android.util.Log.e(TAG, "speech model list failed", failure)
+                }
+                .collect { models ->
                 _state.value = _state.value.copy(
                     sttModels = models,
                     // Keep the current choice if it survives; otherwise fall back.
@@ -1171,6 +1201,7 @@ class VoiceViewModel @Inject constructor(
             lastAudioPath = null,
             spokenRange = null,
             referenceSamples = null,
+            referencePath = null,
             referenceTranscript = "",
             referenceSeconds = 0f,
             referenceName = "",
@@ -1178,6 +1209,9 @@ class VoiceViewModel @Inject constructor(
             segments = emptyList(),
             partial = emptyList(),
             title = "",
+            sourcePath = null,
+            sourceName = null,
+            sourceIsRecording = false,
             error = null,
             errorHint = null,
             elapsedMillis = 0,
@@ -1255,6 +1289,10 @@ class VoiceViewModel @Inject constructor(
             val seconds = samples.size.toFloat() / REFERENCE_SAMPLE_RATE
             _state.value = _state.value.copy(
                 referenceSamples = samples,
+                // The copied file, kept alongside the samples so the clip can be
+                // heard. Judging whether a reference is clean enough to copy by
+                // reading its filename is not judging it at all.
+                referencePath = attachment.path,
                 referenceName = attachment.displayName,
                 referenceSeconds = seconds,
                 referenceTranscript = "",
@@ -1301,6 +1339,7 @@ class VoiceViewModel @Inject constructor(
     fun clearReferenceClip() {
         _state.value = _state.value.copy(
             referenceSamples = null,
+            referencePath = null,
             referenceName = "",
             referenceSeconds = 0f,
             referenceTranscript = "",
@@ -1310,17 +1349,6 @@ class VoiceViewModel @Inject constructor(
 
     fun setMode(mode: VoiceMode) {
         _state.value = _state.value.copy(mode = mode, error = null, errorHint = null)
-    }
-
-    fun setSource(source: TranscribeSource) {
-        // Switching source while the mic is open would leave it held.
-        if (_state.value.recording) stopRecording()
-        _state.value = _state.value.copy(source = source, error = null, errorHint = null)
-    }
-
-    fun setSpeakSource(source: SpeakSource) {
-        if (_state.value.speaking) stopSpeaking()
-        _state.value = _state.value.copy(speakSource = source, speakError = null)
     }
 
     /**
@@ -1343,7 +1371,10 @@ class VoiceViewModel @Inject constructor(
         _state.value = _state.value.copy(
             recording = true,
             paused = false,
-            recordedPath = null,
+            sourcePath = null,
+            sourceName = null,
+            sourceIsRecording = false,
+            segments = emptyList(),
             elapsedMillis = 0,
             partial = emptyList(),
             error = null,
@@ -1432,14 +1463,36 @@ class VoiceViewModel @Inject constructor(
     }
 
     fun stopRecording() {
-        recordingJob?.cancel()
+        val capture = recordingJob
         recordingJob = null
+        capture?.cancel()
         captureLiveJob?.cancel()
         captureLiveJob = null
         val trace = captureRecording?.stop()
         val startedAt = captureStartedAt
         captureRecording = null
         val segments = _state.value.partial
+        // The take is closed here, not left to the capture's teardown.
+        // `cancel()` only asks the loop to stop, and the loop may be inside a
+        // native decode of its last window — tens of seconds with a large
+        // model. Waiting for that would leave Stop reading "Stop" and the clip
+        // absent; not waiting, but publishing anyway, handed the player a file
+        // whose header still said zero samples, which is why a three-second
+        // take showed as 00:00. Closing it directly does neither.
+        transcriber.finishCapture()
+        val take = captureFile?.takeIf { it.isFile && it.length() > 44 }
+        _state.value = _state.value.copy(
+            recording = false,
+            paused = false,
+            liveTrace = null,
+            // Kept so the take can be played back and run again properly: the
+            // live pass only ever saw a sliding window, and a decode of the
+            // whole file gets real segment boundaries the window could never
+            // produce.
+            sourcePath = take?.absolutePath,
+            sourceName = take?.name,
+            sourceIsRecording = take != null,
+        )
         viewModelScope.launch {
             if (segments.isNotEmpty()) {
                 val transcriptId = UUID.randomUUID().toString()
@@ -1485,36 +1538,66 @@ class VoiceViewModel @Inject constructor(
                     )
                 }
             }
+            val transcripts = db.transcripts().observeAll().first()
             _state.value = _state.value.copy(
-                recording = false,
-                paused = false,
-                // Kept so the take can be played back and run again properly:
-                // the live pass only ever saw a sliding window, and a decode of
-                // the whole file gets real segment boundaries the window could
-                // never produce.
-                recordedPath = captureFile?.takeIf { it.isFile && it.length() > 44 }?.absolutePath,
-                liveTrace = null,
                 lastTrace = trace ?: _state.value.lastTrace,
-                transcripts = db.transcripts().observeAll().first(),
+                transcripts = transcripts,
             )
         }
     }
 
     /**
-     * Decode the recording properly, now that it is a file.
+     * SPEC §6.3 — take a picked file as the clip to work on.
      *
-     * The live pass reads a ten-second window every few seconds, so its output
-     * has no segment boundaries and re-decodes words as the window slides. This
-     * runs the whole take once, which is what produces timed segments — the
-     * same path a picked file takes, because by now it *is* one.
+     * It is *staged*, not transcribed. Picking used to start a decode straight
+     * away, which meant the two ways of getting audio in behaved differently:
+     * a recording could be played back and then run, a file could only be run.
+     * Copying it in here also gets it out of the content provider and onto local
+     * disk, which is what makes the player and a re-run possible at all.
      */
-    fun processRecording() {
-        val path = _state.value.recordedPath ?: return
-        transcribeFile(android.net.Uri.fromFile(java.io.File(path)))
+    fun chooseFile(uri: android.net.Uri) {
+        if (_state.value.recording) stopRecording()
+        viewModelScope.launch {
+            val attachment = attachments.copyIn(uri)
+            if (attachment == null) {
+                _state.value = _state.value.copy(error = "That file could not be read.")
+                return@launch
+            }
+            _state.value = _state.value.copy(
+                sourcePath = attachment.path,
+                sourceName = attachment.displayName,
+                sourceIsRecording = false,
+                segments = emptyList(),
+                partial = emptyList(),
+                fileProgress = 0f,
+                error = null,
+                errorHint = null,
+            )
+        }
     }
 
-    /** SPEC §6.3 — transcribe a file the user picked. */
-    fun transcribeFile(uri: android.net.Uri) {
+    /** Put the clip down without leaving the panel. */
+    fun clearSource() {
+        _state.value = _state.value.copy(
+            sourcePath = null,
+            sourceName = null,
+            sourceIsRecording = false,
+            segments = emptyList(),
+            partial = emptyList(),
+            fileProgress = 0f,
+        )
+    }
+
+    /**
+     * Decode the clip properly, whichever way it arrived.
+     *
+     * For a recording this is not a repeat of the live pass: that read a
+     * ten-second window every few seconds, so it has no segment boundaries and
+     * re-decodes words as the window slides. This runs the whole take once,
+     * which is what produces timed segments.
+     */
+    fun process() {
+        val path = _state.value.sourcePath ?: return
         val model = _state.value.sttModel
         if (model == null) {
             _state.value = _state.value.copy(
@@ -1523,13 +1606,10 @@ class VoiceViewModel @Inject constructor(
             )
             return
         }
+        val file = java.io.File(path)
+        val name = _state.value.sourceName ?: file.name
         viewModelScope.launch {
             _state.value = _state.value.copy(loading = true, error = null, fileProgress = 0f)
-            val attachment = attachments.copyIn(uri)
-            if (attachment == null) {
-                _state.value = _state.value.copy(loading = false, error = "That file could not be read.")
-                return@launch
-            }
             if (transcriber.loadedModelId != model.id) {
                 val loaded = transcriber.load(model.id, model.localPath, SparseParams.parse(model.paramOverridesJson))
                 if (loaded.isFailure) {
@@ -1547,7 +1627,7 @@ class VoiceViewModel @Inject constructor(
                     _state.value = _state.value.copy(liveTrace = trace)
                 }
             }
-            val result = transcriber.transcribeFile(java.io.File(attachment.path))
+            val result = transcriber.transcribeFile(file)
             liveJob.cancel()
             val trace = recording.stop()
             val elapsed = System.currentTimeMillis() - started
@@ -1558,8 +1638,8 @@ class VoiceViewModel @Inject constructor(
                     db.transcripts().upsert(
                         TranscriptEntity(
                             id = transcriptId,
-                            sourcePath = attachment.path,
-                            title = attachment.displayName,
+                            sourcePath = path,
+                            title = name,
                             segmentsJson = ai.ondevice.core.TranscriptSegments.encode(segments),
                             modelId = model.id,
                             paramsJson = model.paramOverridesJson,
@@ -1584,7 +1664,7 @@ class VoiceViewModel @Inject constructor(
                     _state.value = _state.value.copy(
                         loading = false,
                         segments = segments,
-                        title = attachment.displayName,
+                        title = name,
                         fileProgress = 1f,
                         realtimeFactor = realtimeFactor,
                         liveTrace = null,
@@ -1626,7 +1706,6 @@ class VoiceViewModel @Inject constructor(
         val params = SparseParams.parse(synthesis.paramsJson)
         _state.value = _state.value.copy(
             mode = VoiceMode.SPEAK,
-            speakSource = SpeakSource.TYPED,
             script = synthesis.text,
             scriptSource = null,
             voice = synthesis.voice ?: _state.value.voice,
@@ -1643,8 +1722,13 @@ class VoiceViewModel @Inject constructor(
         if (_state.value.recording) stopRecording()
         _state.value = _state.value.copy(
             mode = VoiceMode.TRANSCRIBE,
-            source = TranscribeSource.FILE,
             title = transcript.title,
+            // The clip comes back too, when it is still there — a stored
+            // transcript you can read but not listen to is half the artifact,
+            // and this is the same path the picker fills.
+            sourcePath = transcript.sourcePath?.takeIf { java.io.File(it).isFile },
+            sourceName = transcript.title,
+            sourceIsRecording = false,
             segments = ai.ondevice.core.TranscriptSegments.parse(transcript.segmentsJson),
             partial = emptyList(),
             fileProgress = 1f,
@@ -1705,18 +1789,13 @@ enum class VoiceMode(val label: String) {
     SPEAK("Speak"),
 }
 
-/**
- * Where each mode gets its input.
- *
- * The two tabs are deliberately symmetrical: each takes input either live from
- * the device or from a file, and each produces an artifact you can play back
- * *and* save. Transcribe turns audio into text; Speak turns text into audio.
- * Naming the sources the same way on both sides makes that inverse obvious
- * rather than something you have to work out.
- */
-enum class TranscribeSource(val label: String) { MICROPHONE("Microphone"), FILE("File") }
-
-enum class SpeakSource(val label: String) { TYPED("Type"), FILE("File") }
+// Both halves of this screen used to name where their input came from — Speak
+// had TYPED/FILE, Transcribe had MICROPHONE/FILE — and neither distinction
+// survived contact with the panels. A loaded script is text in the same box you
+// can type into; a picked clip is the same WAV on disk the microphone writes.
+// What is left is one script box with a button that fills it, and one clip with
+// a button that fills it: see [VoiceState.scriptSource] and
+// [VoiceState.sourcePath].
 
 /** One bar per read of the input buffer, sized to the canvas' waveform. */
 private const val WAVEFORM_BARS = 40
@@ -1731,8 +1810,6 @@ data class PartialSegment(val text: String, val confidence: Float)
 
 data class VoiceState(
     val mode: VoiceMode = VoiceMode.TRANSCRIBE,
-    val source: TranscribeSource = TranscribeSource.MICROPHONE,
-    val speakSource: SpeakSource = SpeakSource.TYPED,
     val sttModel: ModelEntity? = null,
     /** Every installed speech model, so the tab can offer a choice. */
     val sttModels: List<ModelEntity> = emptyList(),
@@ -1768,6 +1845,8 @@ data class VoiceState(
      * at which its length can be checked and reported.
      */
     val referenceSamples: FloatArray? = null,
+    /** The same clip as a file, so it can be played back before it is copied. */
+    val referencePath: String? = null,
     val referenceName: String = "",
     val referenceSeconds: Float = 0f,
     val referenceTranscript: String = "",
@@ -1831,8 +1910,15 @@ data class VoiceState(
     /** Word being spoken right now, as character offsets into the script. */
     val spokenRange: Pair<Int, Int>? = null,
     val lastAudioPath: String? = null,
-    /** The WAV of the take just recorded, once it has been stopped. */
-    val recordedPath: String? = null,
+    /**
+     * The clip Transcribe is working on — the WAV just recorded, or the file
+     * that was picked, held the same way because by this point they are the
+     * same thing: a decodable file on local disk with a name.
+     */
+    val sourcePath: String? = null,
+    val sourceName: String? = null,
+    /** True when [sourcePath] came from the microphone rather than the picker. */
+    val sourceIsRecording: Boolean = false,
     val paused: Boolean = false,
     /** True for exactly one recomposition after a Speak, so the player starts itself. */
     val autoPlay: Boolean = false,

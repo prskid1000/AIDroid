@@ -73,9 +73,8 @@ import ai.ondevice.ui.theme.Radius
 import ai.ondevice.ui.theme.ring
 import ai.ondevice.ui.theme.ruleBelow
 import ai.ondevice.ui.components.NSeg
-import ai.ondevice.ui.vm.SpeakSource
-import ai.ondevice.ui.vm.TranscribeSource
 import ai.ondevice.ui.vm.VoiceMode
+import ai.ondevice.ui.vm.VoiceState
 import ai.ondevice.ui.vm.VoiceViewModel
 
 /**
@@ -121,7 +120,7 @@ fun VoiceScreen(
 
     val audioLauncher = rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
-    ) { uri -> uri?.let(viewModel::transcribeFile) }
+    ) { uri -> uri?.let(viewModel::chooseFile) }
     val pickAudio = { audioLauncher.launch(arrayOf("audio/*", "video/*")) }
 
     // A separate launcher from the one above: both take a recording, but one is
@@ -280,277 +279,25 @@ fun VoiceScreen(
                 }
             }
 
-            when {
-                state.mode == VoiceMode.TRANSCRIBE &&
-                    state.source == TranscribeSource.MICROPHONE -> {
-                    // The waveform: one bar per window slot, accent where the
-                    // VAD says speech, neutral where it doesn't.
-                    Row(
-                        Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 2.dp),
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        state.waveform.forEach { level ->
-                            Box(
-                                Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight(level.coerceIn(0.05f, 1f))
-                                    .background(
-                                        if (level > 0.45f) NocturneColors.Accent500 else NocturneColors.Neutral700,
-                                        RoundedCornerShape(2.dp),
-                                    ),
-                            )
+            when (state.mode) {
+                VoiceMode.TRANSCRIBE -> TranscribePanel(
+                    state = state,
+                    viewModel = viewModel,
+                    onRecord = {
+                        when {
+                            state.recording -> viewModel.stopRecording()
+                            // The permission is asked for at the moment it is
+                            // needed, with the reason on screen — not at launch,
+                            // before the user has any context for the request.
+                            !hasMicPermission ->
+                                micPermission.launch(Manifest.permission.RECORD_AUDIO)
+                            else -> viewModel.startRecording()
                         }
-                    }
+                    },
+                    onPickAudio = pickAudio,
+                )
 
-                    Row(
-                        Modifier.fillMaxWidth().padding(top = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            if (state.recording) {
-                                "● REC ${Fmt.duration(state.elapsedMillis)}"
-                            } else {
-                                "○ idle"
-                            },
-                            style = NocturneType.MonoSm,
-                            color = if (state.recording) NocturneColors.Accent else NocturneColors.TextMuted,
-                        )
-                        Text(
-                            "VAD ${if (state.vadEnabled) "on" else "off"} · step ${Fmt.grouped(state.stepMs)} ms",
-                            style = NocturneType.MonoSm,
-                            color = NocturneColors.TextMuted,
-                        )
-                    }
-
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(top = 12.dp)
-                            .background(NocturneColors.Surface, Radius.Md)
-                            .padding(12.dp),
-                    ) {
-                        if (state.partial.isEmpty()) {
-                            Text(
-                                "Start recording and partials appear here, shaded by confidence.",
-                                style = NocturneType.Message,
-                                color = NocturneColors.TextMuted,
-                            )
-                        } else {
-                            Text(
-                                buildAnnotatedTranscript(state.partial),
-                                style = NocturneType.Message,
-                            )
-                        }
-                    }
-
-                    NHelp(
-                        "Opacity tracks per-token confidence. Faded text may still change as the " +
-                            "window slides.",
-                        Modifier.padding(top = 8.dp),
-                    )
-
-                    // Record, hold, stop — the three states a recorder has.
-                    // Pause keeps the microphone, so resuming does not risk
-                    // losing the device to another app in the handover.
-                    Row(
-                        Modifier.fillMaxWidth().padding(top = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(7.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        NButton(
-                            when {
-                                state.loading -> "Loading model…"
-                                state.recording -> "Stop"
-                                else -> "Record"
-                            },
-                            onClick = {
-                                when {
-                                    state.recording -> viewModel.stopRecording()
-                                    // The permission is asked for at the moment
-                                    // it is needed, with the reason on screen —
-                                    // not at launch, before the user has any
-                                    // context for the request.
-                                    !hasMicPermission ->
-                                        micPermission.launch(Manifest.permission.RECORD_AUDIO)
-                                    else -> viewModel.startRecording()
-                                }
-                            },
-                            style = NButtonStyle.Primary,
-                            modifier = Modifier.weight(1f),
-                            minHeight = 48.dp,
-                        )
-                        if (state.recording) {
-                            NIconButton(
-                                if (state.paused) NIcons.Play else NIcons.Pause,
-                                if (state.paused) "Resume recording" else "Pause recording",
-                                onClick = {
-                                    if (state.paused) viewModel.resumeRecording()
-                                    else viewModel.pauseRecording()
-                                },
-                                size = 48.dp,
-                            )
-                        }
-                        NIconButton(
-                            NIcons.File,
-                            "Choose a recording",
-                            onClick = {
-                                viewModel.setSource(TranscribeSource.FILE)
-                                pickAudio()
-                            },
-                            size = 48.dp,
-                        )
-                    }
-
-                    // The take, once it exists: hear it before deciding to
-                    // spend the decode on it, and decode the whole file rather
-                    // than the sliding window the live pass could see.
-                    state.recordedPath?.let { path ->
-                        NAudioPlayer(
-                            file = java.io.File(path),
-                            label = path.substringAfterLast('/'),
-                            modifier = Modifier.padding(top = 10.dp),
-                        )
-                        NButton(
-                            if (state.loading) "Processing…" else "Process",
-                            onClick = viewModel::processRecording,
-                            style = NButtonStyle.Primary,
-                            block = true,
-                            enabled = !state.loading,
-                            minHeight = 46.dp,
-                            modifier = Modifier.padding(top = 8.dp),
-                        )
-                        NHelp(
-                            "The live text above came from a sliding window. Processing decodes " +
-                                "the whole recording, which is what produces timed segments.",
-                            Modifier.padding(top = 6.dp),
-                        )
-                    }
-                }
-
-                state.mode == VoiceMode.TRANSCRIBE -> {
-                    if (state.segments.isEmpty()) {
-                        NHelp(
-                            "Pick an audio file and whisper.cpp transcribes it on this device. " +
-                                "Anything Android can decode works — m4a, mp3, wav, opus.",
-                            Modifier.padding(bottom = 10.dp),
-                        )
-                    } else {
-                        NCard(gap = 8.dp) {
-                            Text(state.title, style = NocturneType.CardTitleSm)
-                            Text(
-                                "${Fmt.duration(state.segments.maxOf { it.endMillis })} · " +
-                                    "${state.segments.size} segments",
-                                style = NocturneType.MonoXs,
-                                color = NocturneColors.TextMuted,
-                            )
-                            NProgressBar(fraction = state.fileProgress)
-                            NCardMeta(gap = 8.dp) {
-                                Text(
-                                    Fmt.percent(state.fileProgress),
-                                    style = NocturneType.MonoSm,
-                                    color = NocturneColors.Accent300,
-                                )
-                                NMetaText("·")
-                                NMetaText(state.sttModel?.displayName ?: "no model")
-                                Box(Modifier.weight(1f))
-                                // Measured, not asserted (§8.2).
-                                NMetaText(String.format("%.1f× realtime", state.realtimeFactor))
-                            }
-                        }
-                    }
-
-                    NButton(
-                        if (state.loading) "Transcribing…" else "Choose an audio file",
-                        onClick = pickAudio,
-                        style = NButtonStyle.Primary,
-                        block = true,
-                        minHeight = 46.dp,
-                        modifier = Modifier.padding(bottom = 8.dp),
-                    )
-
-                    // The way back to the microphone. Without it, picking a file
-                    // once would be a one-way door now that the source is no
-                    // longer a tab you can simply switch away from.
-                    NButton(
-                        "Record instead",
-                        onClick = { viewModel.setSource(TranscribeSource.MICROPHONE) },
-                        style = NButtonStyle.Secondary,
-                        block = true,
-                        minHeight = 44.dp,
-                        modifier = Modifier.padding(bottom = 8.dp),
-                    )
-
-                    // The transcript panel is always here, the way Microphone's
-                    // is. It used to appear only once segments existed, so File
-                    // mode jumped from a line of help text to four live export
-                    // buttons with nothing to export — the one mode that reads
-                    // its confidence off a finished decode looked like it did not
-                    // report confidence at all.
-                    if (state.segments.isEmpty()) {
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .background(NocturneColors.Surface, Radius.Md)
-                                .padding(12.dp),
-                        ) {
-                            Text(
-                                "Choose a file and its segments appear here with timings, shaded by " +
-                                    "confidence.",
-                                style = NocturneType.Message,
-                                color = NocturneColors.TextMuted,
-                            )
-                        }
-                    }
-
-                    state.segments.forEachIndexed { index, segment ->
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .ruleBelow()
-                                .padding(vertical = 10.dp)
-                                // Faded by the decoder's own confidence, not by
-                                // position — a late segment the model is sure of
-                                // reads at full strength.
-                                .alpha(0.35f + segment.confidence * 0.65f),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            Text(
-                                timestamp(segment.startMillis),
-                                style = NocturneType.MonoTimestamp,
-                                color = if (segment.confidence < 0.7f) {
-                                    NocturneColors.TextMuted
-                                } else {
-                                    NocturneColors.Accent300
-                                },
-                                modifier = Modifier.width(52.dp),
-                            )
-                            Text(segment.text, style = NocturneType.Row, modifier = Modifier.weight(1f))
-                        }
-                    }
-
-                    if (state.segments.isNotEmpty()) {
-                        NHelp(
-                            "Opacity tracks the decoder's own confidence for each segment.",
-                            Modifier.padding(top = 8.dp),
-                        )
-                    }
-
-                    // The four format buttons moved to Library, where every
-                    // artifact is saved and shared the same way and the file
-                    // lands in a folder you chose rather than in app-private
-                    // storage no file manager will show you.
-                    if (state.segments.isNotEmpty()) {
-                        NHelp(
-                            "Saved to the library. Open it there to export as TXT, SRT, VTT or " +
-                                "JSON into a folder of your choosing.",
-                            Modifier.padding(top = 12.dp),
-                        )
-                    }
-                }
-
-                else -> SpeakPanel(
+                VoiceMode.SPEAK -> SpeakPanel(
                     state = state,
                     viewModel = viewModel,
                     onPickScript = pickScript,
@@ -583,6 +330,271 @@ fun VoiceScreen(
             viewModel = viewModel,
             onDismiss = { settingsOpen = false },
             onOpenAdvanced = onOpenAdvanced,
+        )
+    }
+}
+
+/**
+ * **Transcribe — SPEC §6.**
+ *
+ * One clip, however it arrived.
+ *
+ * This was two panels behind a source switch, and the switch was a wall: the
+ * file button took you to a different screen, with a "Record instead" button to
+ * get back, as though picking a file and recording one were different jobs. They
+ * are not — both end as a decodable file on disk, and everything after that
+ * point is identical. So there is one recorder, a file button beside it, and a
+ * clip that behaves the same way whichever button produced it: play it, run it,
+ * or put it down.
+ *
+ * Picking a file no longer starts a decode on its own. It stages the clip, the
+ * way stopping the recorder does, and **Process** is the one thing that spends
+ * compute — which also means a picked file can be listened to before it is run.
+ */
+@Composable
+private fun TranscribePanel(
+    state: VoiceState,
+    viewModel: VoiceViewModel,
+    onRecord: () -> Unit,
+    onPickAudio: () -> Unit,
+) {
+    // — the recorder —
+    //
+    // The waveform stays on screen when idle rather than appearing on the first
+    // press: it is the face of the recorder, and a control that materialises
+    // under your thumb moves everything below it.
+    Row(
+        Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        state.waveform.forEach { level ->
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight(if (state.recording) level.coerceIn(0.05f, 1f) else 0.05f)
+                    .background(
+                        if (state.recording && level > 0.45f) {
+                            NocturneColors.Accent500
+                        } else {
+                            NocturneColors.Neutral700
+                        },
+                        RoundedCornerShape(2.dp),
+                    ),
+            )
+        }
+    }
+
+    Row(
+        Modifier.fillMaxWidth().padding(top = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            when {
+                state.paused -> "❙❙ held ${Fmt.duration(state.elapsedMillis)}"
+                state.recording -> "● REC ${Fmt.duration(state.elapsedMillis)}"
+                else -> "○ idle"
+            },
+            style = NocturneType.MonoSm,
+            color = if (state.recording) NocturneColors.Accent else NocturneColors.TextMuted,
+        )
+        Text(
+            "VAD ${if (state.vadEnabled) "on" else "off"} · step ${Fmt.grouped(state.stepMs)} ms",
+            style = NocturneType.MonoSm,
+            color = NocturneColors.TextMuted,
+        )
+    }
+
+    // Record, hold, stop — the three states a recorder has — and the other way
+    // in, as an icon beside them rather than as a second screen. Pause keeps the
+    // microphone, so resuming does not risk losing the device to another app in
+    // the handover.
+    Row(
+        Modifier.fillMaxWidth().padding(top = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        NButton(
+            // Not "Loading model…" any more. `loading` is also true while
+            // Process runs, so the recorder announced a model load that was
+            // really a transcription happening in the card below it. The
+            // recorder says what the recorder is doing; it is simply
+            // unavailable while the decoder has the runtime.
+            if (state.recording) "Stop" else "Record",
+            onClick = onRecord,
+            style = NButtonStyle.Primary,
+            enabled = !state.loading || state.recording,
+            modifier = Modifier.weight(1f),
+            minHeight = 48.dp,
+        )
+        if (state.recording) {
+            NIconButton(
+                if (state.paused) NIcons.Play else NIcons.Pause,
+                if (state.paused) "Resume recording" else "Pause recording",
+                onClick = {
+                    if (state.paused) viewModel.resumeRecording() else viewModel.pauseRecording()
+                },
+                size = 48.dp,
+            )
+        }
+        NIconButton(
+            NIcons.File,
+            if (state.sourcePath != null) "Choose a different file" else "Choose an audio file",
+            onClick = onPickAudio,
+            size = 48.dp,
+        )
+    }
+
+    // What the live pass is hearing. Only while it is hearing something — an
+    // empty transcript panel above an idle microphone explained a feature that
+    // was not running.
+    if (state.recording || state.partial.isNotEmpty()) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp)
+                .background(NocturneColors.Surface, Radius.Md)
+                .padding(12.dp),
+        ) {
+            if (state.partial.isEmpty()) {
+                Text(
+                    "Listening. Partials appear here, shaded by confidence.",
+                    style = NocturneType.Message,
+                    color = NocturneColors.TextMuted,
+                )
+            } else {
+                Text(buildAnnotatedTranscript(state.partial), style = NocturneType.Message)
+            }
+        }
+        NHelp(
+            "Opacity tracks per-token confidence. Faded text may still change as the " +
+                "window slides.",
+            Modifier.padding(top = 8.dp),
+        )
+    }
+
+    // — the clip —
+    val clip = state.sourcePath
+    if (clip == null) {
+        // Not while the microphone is open: it describes how to get a clip, and
+        // by then you are getting one.
+        if (!state.recording) NHelp(
+            "Record, or pick a file — anything Android can decode works, so m4a, mp3, wav " +
+                "and opus are all fine. Either way you get the clip back to listen to before " +
+                "it is transcribed.",
+            Modifier.padding(top = 12.dp),
+        )
+    } else {
+        SectionKicker("Clip", Modifier.padding(top = 18.dp, bottom = 8.dp))
+        NCard(gap = 8.dp) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    if (state.sourceIsRecording) NIcons.Mic else NIcons.File,
+                    contentDescription = null,
+                    tint = NocturneColors.Accent300,
+                    modifier = Modifier.size(15.dp),
+                )
+                Text(
+                    state.sourceName ?: clip.substringAfterLast('/'),
+                    style = NocturneType.CardTitleSm,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f),
+                )
+                NTag(if (state.sourceIsRecording) "recorded" else "file", style = NTagStyle.Outline)
+                NIconButton(
+                    NIcons.Trash,
+                    "Remove the clip",
+                    onClick = viewModel::clearSource,
+                    enabled = !state.loading,
+                )
+            }
+            // Hear it before deciding to spend the decode on it.
+            NAudioPlayer(file = java.io.File(clip))
+            NButton(
+                if (state.loading) "Transcribing…" else "Process",
+                onClick = viewModel::process,
+                style = NButtonStyle.Primary,
+                block = true,
+                enabled = !state.loading && !state.recording,
+                minHeight = 46.dp,
+            )
+        }
+        if (state.sourceIsRecording && state.segments.isEmpty()) {
+            NHelp(
+                "The live text above came from a sliding window. Processing decodes the whole " +
+                    "recording, which is what produces timed segments.",
+                Modifier.padding(top = 6.dp),
+            )
+        }
+    }
+
+    // — the transcript —
+    if (state.segments.isNotEmpty()) {
+        SectionKicker("Transcript", Modifier.padding(top = 18.dp, bottom = 8.dp))
+        NCard(gap = 8.dp) {
+            Text(state.title, style = NocturneType.CardTitleSm)
+            Text(
+                "${Fmt.duration(state.segments.maxOf { it.endMillis })} · " +
+                    "${state.segments.size} segments",
+                style = NocturneType.MonoXs,
+                color = NocturneColors.TextMuted,
+            )
+            NProgressBar(fraction = state.fileProgress)
+            NCardMeta(gap = 8.dp) {
+                Text(
+                    Fmt.percent(state.fileProgress),
+                    style = NocturneType.MonoSm,
+                    color = NocturneColors.Accent300,
+                )
+                NMetaText("·")
+                NMetaText(state.sttModel?.displayName ?: "no model")
+                Box(Modifier.weight(1f))
+                // Measured, not asserted (§8.2).
+                NMetaText(String.format("%.1f× realtime", state.realtimeFactor))
+            }
+        }
+
+        state.segments.forEachIndexed { _, segment ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .ruleBelow()
+                    .padding(vertical = 10.dp)
+                    // Faded by the decoder's own confidence, not by position — a
+                    // late segment the model is sure of reads at full strength.
+                    .alpha(0.35f + segment.confidence * 0.65f),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    timestamp(segment.startMillis),
+                    style = NocturneType.MonoTimestamp,
+                    color = if (segment.confidence < 0.7f) {
+                        NocturneColors.TextMuted
+                    } else {
+                        NocturneColors.Accent300
+                    },
+                    modifier = Modifier.width(52.dp),
+                )
+                Text(segment.text, style = NocturneType.Row, modifier = Modifier.weight(1f))
+            }
+        }
+
+        NHelp(
+            "Opacity tracks the decoder's own confidence for each segment.",
+            Modifier.padding(top = 8.dp),
+        )
+        // The four format buttons moved to Library, where every artifact is
+        // saved and shared the same way and the file lands in a folder you chose
+        // rather than in app-private storage no file manager will show you.
+        NHelp(
+            "Saved to the library. Open it there to export as TXT, SRT, VTT or JSON into a " +
+                "folder of your choosing.",
+            Modifier.padding(top = 10.dp),
         )
     }
 }
@@ -687,7 +699,31 @@ private fun SpeakPanel(
 
         // — the voice to copy —
         NCard(gap = 8.dp, modifier = Modifier.padding(top = 8.dp)) {
-            Text("Copy a voice", style = NocturneType.CardTitleSm)
+            // The same shape as Transcribe's clip: a title row that carries the
+            // verbs as icons, and the clip itself playable underneath. A
+            // reference you can only read the filename of is one you cannot
+            // judge — whether it is clean enough to copy is a question about
+            // the sound.
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Copy a voice", style = NocturneType.CardTitleSm, modifier = Modifier.weight(1f))
+                if (state.cloningAvailable) {
+                    NIconButton(
+                        NIcons.File,
+                        if (state.referenceSamples != null) "Replace the recording" else "Choose a recording",
+                        onClick = onPickReference,
+                    )
+                    NIconButton(
+                        NIcons.Trash,
+                        "Remove the recording",
+                        onClick = viewModel::clearReferenceClip,
+                        enabled = state.referenceSamples != null,
+                    )
+                }
+            }
             if (!state.cloningAvailable) {
                 Text(
                     "This OmniVoice install does not have the three encoders that turn a " +
@@ -704,18 +740,12 @@ private fun SpeakPanel(
                     style = NocturneType.CardBody,
                     color = NocturneColors.Text.copy(alpha = 0.8f),
                 )
-                NButton(
-                    "Choose a recording",
-                    onClick = onPickReference,
-                    style = NButtonStyle.Secondary,
-                    block = true,
-                    minHeight = 46.dp,
-                )
             } else {
                 Text(
                     "${state.referenceName} · ${"%.1f".format(state.referenceSeconds)} s",
                     style = NocturneType.Row,
                 )
+                state.referencePath?.let { NAudioPlayer(file = java.io.File(it)) }
                 if (state.referenceSeconds > 20f) {
                     NHelp(
                         "Longer than twenty seconds. Upstream's own warning is that this makes " +
@@ -743,22 +773,6 @@ private fun SpeakPanel(
                     minHeight = 64.dp,
                     textStyle = NocturneType.Row,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    NButton(
-                        "Replace",
-                        onClick = onPickReference,
-                        style = NButtonStyle.Secondary,
-                        modifier = Modifier.weight(1f),
-                        minHeight = 44.dp,
-                    )
-                    NButton(
-                        "Remove",
-                        onClick = viewModel::clearReferenceClip,
-                        style = NButtonStyle.Ghost,
-                        modifier = Modifier.weight(1f),
-                        minHeight = 44.dp,
-                    )
-                }
             }
         }
     }

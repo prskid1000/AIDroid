@@ -158,6 +158,7 @@ class Transcriber(
         val writer = captureTo?.let {
             runCatching { ai.ondevice.speech.WavWriter(it, SAMPLE_RATE) }.getOrNull()
         }
+        captureWriter = writer
 
         try {
             while (true) {
@@ -204,15 +205,33 @@ class Transcriber(
             runCatching { record.stop() }
             runCatching { record.release() }
             activeRecord = null
-            // Closed here rather than by the caller: this is the only place
-            // that runs whether the capture ended, failed or was cancelled, and
-            // an unclosed writer leaves a header claiming zero samples.
-            runCatching { writer?.close() }
+            // A backstop, not the usual path: [finishCapture] closes the take
+            // the moment Stop is pressed, and both are idempotent. This one
+            // covers the capture ending or failing on its own.
+            finishCapture()
             paused = false
         }
     }.flowOn(Dispatchers.IO).onCompletion {
         activeRecord?.let { runCatching { it.stop() }; runCatching { it.release() } }
         activeRecord = null
+    }
+
+    /**
+     * End the take now, without waiting for the loop to unwind.
+     *
+     * Cancelling the capture does not stop it promptly: the collector may be
+     * inside a native decode of the last window, and with a large model that is
+     * tens of seconds during which the header still claims zero samples and the
+     * microphone is still held. So Stop closes the writer and releases the
+     * device itself, and the loop's `finally` finds both already done — both
+     * calls are idempotent. Without this, a three-second recording handed to a
+     * player read 00:00, because the length is written at close.
+     */
+    fun finishCapture() {
+        val writer = captureWriter
+        captureWriter = null
+        runCatching { writer?.close() }
+        activeRecord?.let { runCatching { it.stop() } }
     }
 
     /**
@@ -222,6 +241,10 @@ class Transcriber(
      * handover takes, and on some phones another app takes it in the gap. A
      * flag costs one branch per buffer.
      */
+    /** The take being written, so Stop can close it without waiting. */
+    @Volatile
+    private var captureWriter: ai.ondevice.speech.WavWriter? = null
+
     @Volatile
     var paused: Boolean = false
         private set
