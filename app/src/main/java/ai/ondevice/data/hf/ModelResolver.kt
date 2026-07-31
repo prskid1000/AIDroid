@@ -404,7 +404,7 @@ class ModelResolver(
         info: HfModelInfo,
         format: ModelFormat,
         files: List<String>,
-        companions: List<CompanionFile>,
+        companions: List<CompanionGroup>,
     ): Modality {
         val arch = info.gguf?.architecture?.lowercase()
         return when {
@@ -452,26 +452,40 @@ class ModelResolver(
      * ControlNets attached to a 723 MB download. Kokoro is unaffected, since its
      * voice packs are .bin and its variants are .onnx, which is the case
      * companion detection exists for.
+     *
+     * That exclusion only covers alternatives to the *primary* model, though.
+     * `mmproj-BF16`, `mmproj-F16` and `mmproj-F32` are alternatives to each
+     * other, no variant of anything, and used to be queued together — 2.68 GB
+     * for a model that loads one, of which only one could even be recorded,
+     * since the manifest they end up in is keyed by role. [CompanionGrouping]
+     * is what tells those apart from Kokoro's fifty-five voice packs.
+     *
+     * Note there is deliberately no LoRA or IP-Adapter rule in [companionRole],
+     * though `AttachmentRole.classify` has both: those are models someone
+     * installs and attaches on purpose, not sidecars that belong to another
+     * download.
      */
     private fun detectCompanions(
         files: List<String>,
         sizes: Map<String, HfPathInfo>,
         variantFiles: Set<String> = emptySet(),
-    ): List<CompanionFile> = files.mapNotNull { name ->
-        if (name in variantFiles) return@mapNotNull null
-        val role = companionRole(name) ?: return@mapNotNull null
-        val info = sizes[name]
-        CompanionFile(
-            file = RemoteFile(
-                filename = name,
-                sizeBytes = info?.size ?: 0L,
-                sha256 = info?.sha256,
-                commitId = info?.lastCommit?.id,
-                securityStatus = info?.securityFileStatus?.status,
-            ),
-            role = role,
-        )
-    }.distinctBy { it.role to it.file.filename }
+    ): List<CompanionGroup> = CompanionGrouping.group(
+        files.mapNotNull { name ->
+            if (name in variantFiles) return@mapNotNull null
+            val role = companionRole(name) ?: return@mapNotNull null
+            val info = sizes[name]
+            CompanionFile(
+                file = RemoteFile(
+                    filename = name,
+                    sizeBytes = info?.size ?: 0L,
+                    sha256 = info?.sha256,
+                    commitId = info?.lastCommit?.id,
+                    securityStatus = info?.securityFileStatus?.status,
+                ),
+                role = role,
+            )
+        }.distinctBy { it.role to it.file.filename },
+    )
 
     /**
      * Correct the filename's verdict against the file's own tensor names.

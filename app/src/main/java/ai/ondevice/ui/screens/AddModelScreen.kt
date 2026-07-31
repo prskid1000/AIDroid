@@ -332,26 +332,82 @@ fun AddModelScreen(
                 )
 
                 if (resolved.companions.isNotEmpty()) {
-                    SectionKicker("Companions · auto-paired", Modifier.padding(top = 20.dp, bottom = 8.dp))
-                    resolved.companions.forEach { companion ->
+                    SectionKicker("Companions", Modifier.padding(top = 20.dp, bottom = 8.dp))
+                    resolved.companions.forEach { group ->
+                        val picked = state.companionChoice[group.role] ?: group.selected
+
                         Row(
-                            Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                            Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp),
                             horizontalArrangement = Arrangement.spacedBy(9.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            Text(group.role.label, style = NocturneType.CardTitleSm, modifier = Modifier.weight(1f))
                             Text(
-                                companion.file.filename.substringAfterLast('/'),
-                                style = NocturneType.MonoXs,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Text(
-                                Fmt.bytes(companion.file.sizeBytes),
+                                Fmt.bytes(group.candidates.filter { it.file.filename in picked }
+                                    .sumOf { it.file.sizeBytes }),
                                 style = NocturneType.Meta,
                                 color = NocturneColors.TextMuted,
                             )
                         }
+                        group.note?.let { NHelp(it, Modifier.padding(bottom = 4.dp)) }
+
+                        // Parts are listed and not offered: picking a subset of
+                        // Kokoro's voice packs would be picking which voices to
+                        // be unable to use. Everything else is a row you can tap.
+                        val selectable = group.kind != ai.ondevice.data.hf.CompanionGroup.Kind.PARTS
+                        val shown = if (selectable) group.candidates else group.candidates.take(3)
+
+                        shown.forEach { candidate ->
+                            val chosen = candidate.file.filename in picked
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 4.dp)
+                                    .background(
+                                        if (chosen) NocturneColors.Accent900 else NocturneColors.Surface,
+                                        Radius.Md,
+                                    )
+                                    .ring(
+                                        if (chosen) NocturneColors.Accent else NocturneColors.Divider,
+                                        Radius.Md,
+                                    )
+                                    .then(
+                                        if (selectable) {
+                                            Modifier.nClickableFlat {
+                                                viewModel.chooseCompanion(
+                                                    group.role, candidate.file.filename,
+                                                )
+                                            }
+                                        } else {
+                                            Modifier
+                                        },
+                                    )
+                                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    candidate.file.filename.substringAfterLast('/'),
+                                    style = NocturneType.MonoXs,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Text(
+                                    Fmt.bytes(candidate.file.sizeBytes),
+                                    style = NocturneType.Meta,
+                                    color = NocturneColors.TextMuted,
+                                )
+                            }
+                        }
+                        if (!selectable && group.candidates.size > shown.size) {
+                            NHelp("and ${group.candidates.size - shown.size} more, all queued")
+                        }
                     }
-                    NHelp("Queued with the weights — a multi-file model is never hand-assembled.")
+                    NHelp(
+                        "Parts of the model are queued with the weights. Where a repo ships the " +
+                            "same file at several precisions, or several things that fill the same " +
+                            "slot, only one is downloaded — tap to change it.",
+                        Modifier.padding(top = 4.dp),
+                    )
                 }
 
                 // Type and role, stated rather than guessed.
@@ -400,14 +456,14 @@ fun AddModelScreen(
 
                 val selectedQuant = resolved.quants.firstOrNull { it.name == state.selectedQuant }
                 val runnable = state.verdict?.verdict?.runnable == true
-                // The required companions are downloaded with the weights, so
-                // they belong in the figure on the button. Kokoro's 55 voice
-                // packs are 28 MB against a 92 MB graph — quoting the weights
-                // alone understates the download by a quarter, and the number a
-                // user agrees to should be the number that gets transferred.
-                val downloadBytes = (selectedQuant?.totalBytes ?: 0) +
-                    resolved.companions.filter { it.role.required || it.autoSelected }
-                        .sumOf { it.file.sizeBytes }
+                // The companions are downloaded with the weights, so they belong
+                // in the figure on the button. Kokoro's 55 voice packs are 28 MB
+                // against a 92 MB graph — quoting the weights alone understates
+                // the download by a quarter, and the number a user agrees to
+                // should be the number that gets transferred. Which companions
+                // those are is decided in one place, so this figure and the
+                // enqueue cannot drift apart.
+                val downloadBytes = (selectedQuant?.totalBytes ?: 0) + state.companionBytes
                 // A variant can be blocked while the *model* is fine, so this is
                 // a separate question from the verdict. The verdict answers
                 // "does this device have the memory"; blockedReason answers

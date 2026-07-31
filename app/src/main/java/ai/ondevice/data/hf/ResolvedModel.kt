@@ -70,7 +70,14 @@ data class ResolvedModel(
     val embeddingLengthKv: Int?,
     val gated: Boolean,
     val quants: List<QuantVariant>,
-    val companions: List<CompanionFile>,
+    /**
+     * Auxiliary files, grouped by role, each carrying its own default.
+     *
+     * Grouped rather than flat because the flat list could not express the
+     * difference between "these three files are all needed" and "these three
+     * files are the same file three times".
+     */
+    val companions: List<CompanionGroup>,
     /** True when metadata came from the Range-request header parser, not the API. */
     val metadataFromHeader: Boolean,
     val securityStatus: String?,
@@ -123,17 +130,41 @@ data class RemoteFile(
     val securityStatus: String? = null,
 )
 
-enum class CompanionRole {
-    VISION_PROJECTOR,
-    VAE,
-    CLIP_L,
-    CLIP_G,
-    T5XXL,
-    TAESD,
-    CONTROLNET,
-    UPSCALER,
-    VOICES,
-    VAD,
+/**
+ * How many files of one role the thing that consumes them can actually take.
+ *
+ * A property of the runtimes this app bundles rather than of any model, which
+ * is why it is safe to state here: it is read off the native call each role
+ * feeds, not guessed from a filename.
+ */
+enum class Cardinality {
+    /**
+     * One path, and only one. `sd_ctx_params_t` has a single `jstring` field
+     * per role (sd_jni.cpp), llama.cpp takes one projector, and the app's own
+     * `companionPathsJson` is a map keyed by role — so a second file of the
+     * same role is not merely unused, it is unaddressable.
+     */
+    ONE,
+
+    /**
+     * Every file is part of one thing. Kokoro reads one voice pack per
+     * utterance, but which one is the user's choice at speak time, so all of
+     * them have to be on disk for the choice to exist.
+     */
+    ALL,
+}
+
+enum class CompanionRole(val cardinality: Cardinality) {
+    VISION_PROJECTOR(Cardinality.ONE),
+    VAE(Cardinality.ONE),
+    CLIP_L(Cardinality.ONE),
+    CLIP_G(Cardinality.ONE),
+    T5XXL(Cardinality.ONE),
+    TAESD(Cardinality.ONE),
+    CONTROLNET(Cardinality.ONE),
+    UPSCALER(Cardinality.ONE),
+    VOICES(Cardinality.ALL),
+    VAD(Cardinality.ONE),
     ;
 
     val label: String
@@ -162,8 +193,62 @@ enum class CompanionRole {
 data class CompanionFile(
     val file: RemoteFile,
     val role: CompanionRole,
-    val autoSelected: Boolean = true,
 )
+
+/**
+ * Every file found for one role, and which of them to download.
+ *
+ * The spec's rule is about *parts*: nobody should have to work out that a
+ * projector belongs with the weights. It says nothing about *alternatives*, and
+ * treating those as parts is how three vision projectors — 2.68 GB — ended up
+ * queued for a model that loads one. Worse, only one survives: the manifest
+ * this all ends up in is keyed by role, so the other two are bytes on disk that
+ * nothing can ever refer to.
+ *
+ * So the group states which of the three cases it is and carries a default that
+ * the user is free to change.
+ */
+data class CompanionGroup(
+    val role: CompanionRole,
+    val candidates: List<CompanionFile>,
+    /** Filenames chosen by default. The screen may replace this wholesale. */
+    val selected: Set<String>,
+    val kind: Kind,
+) {
+    enum class Kind {
+        /** All of them, together, are one thing. Kokoro's voice packs. */
+        PARTS,
+
+        /** The same file at different precisions. Pick one; prefer F16. */
+        ALTERNATIVES,
+
+        /**
+         * Different things that happen to fill the same slot — ControlNet's
+         * canny against its depth, an upscaler's ×2 against its ×4. The
+         * runtime still takes one, but which one is a question about the
+         * picture the user wants, and no default can answer it.
+         */
+        CHOICES,
+    }
+
+    val chosen: List<CompanionFile> get() = candidates.filter { it.file.filename in selected }
+    val selectedBytes: Long get() = chosen.sumOf { it.file.sizeBytes }
+
+    /** Null when there is nothing to say, so a screen can skip the line. */
+    val note: String?
+        get() = when {
+            candidates.size <= 1 -> null
+            kind == Kind.PARTS -> "${candidates.size} files, all needed"
+            kind == Kind.ALTERNATIVES ->
+                "${candidates.size} precisions available" +
+                    (chosen.firstOrNull()?.let { ", ${precisionOf(it.file.filename)} chosen" } ?: "")
+            selected.isEmpty() -> "${candidates.size} to choose from, none selected"
+            else -> "${candidates.size} to choose from"
+        }
+
+    private fun precisionOf(filename: String): String =
+        CompanionGrouping.precisionToken(filename) ?: "one"
+}
 
 /** The compatibility verdict attached to a specific quant at a specific context. */
 data class VerdictResult(

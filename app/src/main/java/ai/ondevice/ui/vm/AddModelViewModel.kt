@@ -93,6 +93,10 @@ class AddModelViewModel @Inject constructor(
                         resolving = false,
                         resolved = enriched,
                         selectedQuant = defaultQuant?.name,
+                        // The resolver's defaults are a starting point the user
+                        // can move; holding them here rather than reading them
+                        // back off the resolved model is what makes them movable.
+                        companionChoice = enriched.companions.associate { it.role to it.selected },
                         contextTokens = (enriched.contextLength ?: 8192).coerceAtMost(8192),
                     )
                     recomputeVerdict()
@@ -103,6 +107,29 @@ class AddModelViewModel @Inject constructor(
 
     fun selectQuant(name: String) {
         _state.value = _state.value.copy(selectedQuant = name)
+        recomputeVerdict()
+    }
+
+    /**
+     * Choose which file fills a companion role.
+     *
+     * Tapping the one already chosen clears it, for the roles where nothing is
+     * a legitimate answer — a TAESD preview decoder is worth having and worth
+     * refusing, and a role with only one candidate and no requirement should
+     * not be a thing you cannot say no to. A required role always keeps a file.
+     */
+    fun chooseCompanion(role: ai.ondevice.data.hf.CompanionRole, filename: String) {
+        val group = _state.value.resolved?.companions?.firstOrNull { it.role == role } ?: return
+        val current = _state.value.companionChoice[role].orEmpty()
+        val next = when {
+            // Parts are not a choice: the set is the thing.
+            group.kind == ai.ondevice.data.hf.CompanionGroup.Kind.PARTS -> current
+            filename in current && !role.required -> emptySet()
+            else -> setOf(filename)
+        }
+        _state.value = _state.value.copy(
+            companionChoice = _state.value.companionChoice + (role to next),
+        )
         recomputeVerdict()
     }
 
@@ -125,7 +152,12 @@ class AddModelViewModel @Inject constructor(
             val autoregressive = resolved.modality == ai.ondevice.core.Modality.TEXT ||
                 resolved.modality == ai.ondevice.core.Modality.VISION
             val estimate = CompatibilityGate.estimate(
-                weightsBytes = quant.totalBytes,
+                // Companions are resident too, and for a vision or diffusion
+                // model the companion can outweigh the model — a T5-XXL encoder
+                // is gigabytes. Counting them on the download button but not in
+                // the headroom check made the two numbers describe different
+                // downloads.
+                weightsBytes = quant.totalBytes + _state.value.companionBytes,
                 layers = resolved.layers,
                 contextTokens = if (autoregressive) _state.value.contextTokens else 0,
                 embeddingLengthKv = resolved.embeddingLengthKv,
@@ -243,7 +275,7 @@ class AddModelViewModel @Inject constructor(
                     shardCount = if (quant.isSharded) quant.files.size else null,
                 )
             }
-            val companions = resolved.companions.filter { it.role.required || it.autoSelected }.map { companion ->
+            val companions = _state.value.chosenCompanions.map { companion ->
                 DownloadFile(
                     filename = companion.file.filename,
                     url = api.resolveUrl(resolved.repoId, companion.file.filename, resolved.revision),
@@ -368,10 +400,33 @@ data class AddModelState(
     val selectedRole: AttachmentRole? = null,
     /** True once [selectedRole] has been answered, including answered as "none". */
     val roleAnswered: Boolean = false,
+    /**
+     * Which file fills each companion role, seeded from the resolver's defaults.
+     *
+     * Held apart from [resolved] so the user's answer survives a recompute and
+     * so there is exactly one place that says what will be downloaded.
+     */
+    val companionChoice: Map<ai.ondevice.data.hf.CompanionRole, Set<String>> = emptyMap(),
 ) {
     val runnable: Boolean get() = verdict?.verdict?.runnable == true
     val isRefused: Boolean get() = refusal != null || verdict?.verdict == Verdict.WONT_FIT
 
     /** Type and role are required, so Download stays closed until both are set. */
     val classified: Boolean get() = selectedModality != null && roleAnswered
+
+    /**
+     * The companion files this download will actually fetch.
+     *
+     * One definition, used by the figure on the button, the fit estimate and the
+     * enqueue alike. The predicate used to be written out twice — once in the
+     * screen and once in the view model — which is a disagreement waiting to
+     * happen, and the copy in the screen was the one people read.
+     */
+    val chosenCompanions: List<ai.ondevice.data.hf.CompanionFile>
+        get() = resolved?.companions.orEmpty().flatMap { group ->
+            val picked = companionChoice[group.role] ?: group.selected
+            group.candidates.filter { it.file.filename in picked }
+        }
+
+    val companionBytes: Long get() = chosenCompanions.sumOf { it.file.sizeBytes }
 }
