@@ -75,6 +75,16 @@ struct od_engine {
     int64_t                  t_gen_start   = 0;
     std::vector<std::string> stops;
     common_chat_params       chat_params;
+    // The compiled form of `chat_params.parser`. Upstream keeps the PEG grammar
+    // in the applied params as a *serialised string*, and
+    // `common_chat_parser_params(const common_chat_params &)` copies only the
+    // format and the generation prompt — not that. Whoever parses has to load
+    // it, which is what the server does before it hands a request to a slot.
+    // Left empty, `common_chat_peg_parse` quietly falls back to "everything is
+    // content", so <think> and <tool_call> arrive as literal text and no tool
+    // is ever called. Deserialising is not free, so it happens once per applied
+    // template rather than once per token.
+    common_peg_arena         chat_parser;
     common_chat_msg          last_msg;
     bool                     saw_stop      = false;
     std::string              stop_reason;
@@ -724,6 +734,21 @@ Java_ai_ondevice_engine_LlamaBridge_nativeFormatPrompt(
 
         std::lock_guard<std::mutex> lock(e->mutex);
         e->chat_params = params;
+        e->chat_parser = common_peg_arena();
+        if (!params.parser.empty()) {
+            try {
+                e->chat_parser.load(params.parser);
+            } catch (const std::exception & ex) {
+                // Content-only is the honest fallback, and it is what the app
+                // gets anyway; say so rather than leaving a silent mystery.
+                LOGE("chat parser for format %s would not load: %s",
+                     common_chat_format_name(params.format), ex.what());
+            }
+        }
+
+        LOGI("chat format=%s tools=%zu parser=%zub loaded=%d",
+             common_chat_format_name(params.format), inputs.tools.size(),
+             params.parser.size(), e->chat_parser.empty() ? 0 : 1);
 
         json out;
         out["prompt"]           = params.prompt;
@@ -887,16 +912,20 @@ Java_ai_ondevice_engine_LlamaBridge_nativeNextToken(JNIEnv * env, jobject, jlong
         // that knows every model family's reasoning tags and tool-call shapes;
         // reimplementing that in Kotlin is exactly the model-specific knowledge
         // SPEC §1.3 forbids.
+        //
+        // `generation_prompt` is deliberately left as the applied template set
+        // it. The generated grammar opens with `literal(generation_prompt)` and
+        // `common_chat_peg_parse` prepends the same string to the input so that
+        // literal has something to match; clearing it makes the very first rule
+        // fail, the parse throw, and the catch below hand back the whole raw
+        // reply. It was cleared for a while because the assistant header leaked
+        // into the output — but that was the *content-only fallback* parser,
+        // which has no literal to consume the prefix with, and it only ran at
+        // all because the arena above was never loaded. With a real parser the
+        // literal is consumed, not emitted.
         common_chat_parser_params pparams(e->chat_params);
+        pparams.parser           = e->chat_parser;
         pparams.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
-        // The parser is built to read a whole assistant turn, header included,
-        // so that a prefilled reply can be continued. `e->generated` holds only
-        // the completion — the header was consumed as prompt tokens and never
-        // enters this string. Leaving generation_prompt set made the parser
-        // supply the prefix it expected but did not find, so every reply began
-        // with a literal "<|im_start|>assistant", and that stray prefix also
-        // pushed <think> off the front and stopped reasoning being split out.
-        pparams.generation_prompt.clear();
         common_chat_msg msg;
         try {
             msg = common_chat_parse(e->generated, true, pparams);
@@ -972,8 +1001,8 @@ Java_ai_ondevice_engine_LlamaBridge_nativeNextToken(JNIEnv * env, jobject, jlong
         // The final parse is non-partial, so a tool call that was still being
         // written is now either complete or was never one.
         common_chat_parser_params pparams(e->chat_params);
+        pparams.parser           = e->chat_parser;
         pparams.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
-        pparams.generation_prompt.clear(); // same reason as the streaming parse
         try {
             const auto msg = common_chat_parse(e->generated, false, pparams);
             out["content"]   = msg.content;
@@ -983,7 +1012,12 @@ Java_ai_ondevice_engine_LlamaBridge_nativeNextToken(JNIEnv * env, jobject, jlong
                 calls.push_back(from_tool_call(call));
             }
             out["toolCalls"] = calls;
-        } catch (const std::exception &) {
+        } catch (const std::exception & ex) {
+            // Loud, because this is what a silent failure looks like: the whole
+            // reply — thinking tags, tool-call syntax and all — handed back as
+            // if the model had written it as prose, and no tool ever run.
+            LOGE("%s parse failed, falling back to raw text: %s",
+                 common_chat_format_name(e->chat_params.format), ex.what());
             out["content"] = e->generated;
         }
     }
