@@ -53,6 +53,12 @@ object SdBridge {
         /** Required whenever [ipAdapterPath] is set — see AttachmentRole.CLIP_VISION. */
         clipVisionPath: String,
         threads: Int,
+        /**
+         * The ggml registry name of the chosen compute device — "OpenCL",
+         * "HTP", "CPU" — or empty to let sd.cpp choose as it always did.
+         * See [ai.ondevice.core.BackendId.registryNames].
+         */
+        backend: String,
     ): Long
 
     /**

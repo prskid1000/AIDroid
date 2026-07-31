@@ -47,6 +47,7 @@ import kotlin.math.min
  */
 class Transcriber(
     private val context: Context,
+    private val computeDevice: ComputeDevice,
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
@@ -67,7 +68,14 @@ class Transcriber(
                     WhisperBridge.loadError ?: "The whisper.cpp runtime is not installed in this build."
                 }
                 unload()
-                val newHandle = WhisperBridge.nativeLoad(path)
+                // Settings → Compute device, asked of whisper's own binary.
+                // whisper offered exactly one way to say this and it was a
+                // hardcoded `true`, which meant "whichever accelerator ggml
+                // registered first" — fine while that was only ever OpenCL, a
+                // silent choice now that the NPU registers alongside it.
+                val backend = computeDevice.registryName(RuntimeRegistry.WHISPER)
+                android.util.Log.i(TAG, "loading ${java.io.File(path).name} on $backend")
+                val newHandle = WhisperBridge.nativeLoad(path, backend)
                 check(newHandle != 0L) { "The runtime returned no handle for $path." }
                 handle = newHandle
                 loadedModelId = modelId
@@ -445,6 +453,7 @@ class Transcriber(
     }
 
     private companion object {
+        const val TAG = "Transcriber"
         const val SAMPLE_RATE = 16_000
         const val CHANNEL = AudioFormat.CHANNEL_IN_MONO
         const val ENCODING = AudioFormat.ENCODING_PCM_16BIT

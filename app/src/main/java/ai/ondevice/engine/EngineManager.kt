@@ -8,12 +8,10 @@ import ai.ondevice.core.SparseParams
 import ai.ondevice.data.db.ModelEntity
 import ai.ondevice.data.db.OnDeviceDatabase
 import ai.ondevice.data.hf.DeviceCapabilities
-import ai.ondevice.data.prefs.AppPrefs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -35,7 +33,7 @@ class EngineManager(
     private val context: Context,
     private val registry: RuntimeRegistry,
     private val db: OnDeviceDatabase,
-    private val prefs: AppPrefs,
+    private val computeDevice: ComputeDevice,
     private val capabilities: DeviceCapabilities,
     private val scope: CoroutineScope,
 ) : ComponentCallbacks2 {
@@ -132,27 +130,13 @@ class EngineManager(
     /**
      * Which device runs this model: a per-model override, else the setting.
      *
-     * Both are clamped to what the runtime actually registered, and the clamp is
-     * the load-bearing part. This used to end in a bare `return
-     * BackendId.OPENCL`, and since the value is what the Chat header reads, the
-     * badge said OpenCL on a build with no GPU backend compiled in at all —
-     * a cosmetic lie, but an expensive one, because it sent plain CPU slowness
-     * straight at the GPU.
-     *
-     * There is no "auto" step in the middle any more. It was a benchmark once,
-     * which compared CPU with itself because one backend was registered, and
-     * then "the first registered backend", which is an ordering rather than a
-     * choice. Now that more than one device can register, the setting is a real
-     * question with a real answer, and the answer is the user's.
+     * The resolution itself lives in [ComputeDevice], because it is the same
+     * question on all three tabs and the answer has to match. This used to be
+     * six lines here and nowhere else, which is precisely why transcribe and
+     * image ignored a setting that looked global.
      */
-    private suspend fun resolveBackend(model: ModelEntity): BackendId {
-        val available = registry.backendsFor(RuntimeRegistry.LLAMA)
-        fun clamp(backend: BackendId) = backend.takeIf { it in available } ?: BackendId.CPU
-
-        model.backendOverride?.let { return clamp(it) }
-        val chosen = runCatching { BackendId.valueOf(prefs.backendMode.first()) }.getOrNull()
-        return clamp(chosen ?: BackendId.CPU)
-    }
+    private suspend fun resolveBackend(model: ModelEntity): BackendId =
+        computeDevice.chosen(RuntimeRegistry.LLAMA, model.backendOverride)
 
     /**
      * SPEC §8.4 — a native allocation failure surfaces as a real message with

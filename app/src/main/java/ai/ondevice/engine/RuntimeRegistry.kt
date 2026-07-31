@@ -130,6 +130,7 @@ class RuntimeRegistry(private val context: Context) {
         val info = runCatching {
             when (runtimeId) {
                 LLAMA -> if (LlamaBridge.available) LlamaBridge.nativeSystemInfo() else null
+                WHISPER -> if (WhisperBridge.available) WhisperBridge.nativeSystemInfo() else null
                 STABLE_DIFFUSION -> if (SdBridge.available) SdBridge.nativeSystemInfo() else null
                 else -> null
             }
@@ -172,7 +173,7 @@ class RuntimeRegistry(private val context: Context) {
         const val OMNIVOICE = "omnivoice"
 
         /** Bumped only when the Kotlin↔JNI signature changes — §16.7 makes that rare. */
-        const val REQUIRED_JNI_CONTRACT = 3
+        const val REQUIRED_JNI_CONTRACT = 4
     }
 }
 

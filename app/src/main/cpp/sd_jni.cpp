@@ -348,7 +348,7 @@ JNIEXPORT jlong JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeLoad(
         JNIEnv * env, jobject, jstring jmodel, jstring jvae, jstring jtaesd, jstring jcontrolNet,
         jstring jclipL, jstring jclipG, jstring jt5xxl, jstring jipAdapter, jstring jembeddings,
-        jstring jclipVision, jint threads) {
+        jstring jclipVision, jint threads, jstring jbackend) {
     const auto model      = jni_to_string(env, jmodel);
     const auto vae        = jni_to_string(env, jvae);
     const auto taesd      = jni_to_string(env, jtaesd);
@@ -398,9 +398,31 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
     params.clip_vision_path = clipVision.empty() ? nullptr : clipVision.c_str();
     params.n_threads        = threads > 0 ? threads : od_default_threads();
     params.enable_mmap      = true;
-    // The GPU backends are not compiled in on this platform, so asking for
-    // flash attention would be a claim the build cannot honour.
+    // Flash attention stays off. It is an accelerator kernel, and asking for one
+    // that a given backend does not have is how a load turns into a fallback
+    // nobody asked for; the Compute device choice below is the honest knob.
     params.flash_attn       = false;
+
+    // The Compute device setting, in the one field sd.cpp takes it in.
+    //
+    // `backend` is a *spec string*, and sd.cpp resolves it against both device
+    // names and registry names (ggml_extend_backend.cpp:126), so the same
+    // "OpenCL"/"HTP"/"CPU" the other two runtimes match on works here
+    // unchanged. Empty means sd.cpp picks, which is what it did before this and
+    // is still the answer when nothing was chosen.
+    //
+    // `params_backend` — where the *weights* live, as opposed to where the
+    // arithmetic happens — is only pinned for CPU. Pinning it to an accelerator
+    // would put every tensor in that device's memory at load time, which on a
+    // phone is how a 2 GB checkpoint fails to load at all; left empty, sd.cpp's
+    // own fitting decides, and it knows the budget.
+    const auto backend = jni_to_string(env, jbackend);
+    const bool cpu_only = jni_iequals(backend, "CPU");
+    if (!backend.empty()) {
+        params.backend        = backend.c_str();
+        params.params_backend = cpu_only ? backend.c_str() : nullptr;
+    }
+    SLOGI("load on backend=%s", backend.empty() ? "(sd.cpp chooses)" : backend.c_str());
 
     {
         std::lock_guard<std::mutex> lock(g_last_error_mutex);

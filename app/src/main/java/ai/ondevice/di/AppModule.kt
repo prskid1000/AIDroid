@@ -124,16 +124,24 @@ object AppModule {
         @ApplicationScope scope: CoroutineScope,
     ) = Downloader(context, client, db, prefs, tokens, scope)
 
+    // One answer to "which device", shared by all three runtimes. The setting
+    // is global, so a per-engine copy of the resolution is how two of the three
+    // came to ignore it.
+    @Provides
+    @Singleton
+    fun provideComputeDevice(prefs: AppPrefs, registry: RuntimeRegistry) =
+        ai.ondevice.engine.ComputeDevice(prefs, registry)
+
     @Provides
     @Singleton
     fun provideEngineManager(
         @ApplicationContext context: Context,
         registry: RuntimeRegistry,
         db: OnDeviceDatabase,
-        prefs: AppPrefs,
+        computeDevice: ai.ondevice.engine.ComputeDevice,
         capabilities: DeviceCapabilities,
         @ApplicationScope scope: CoroutineScope,
-    ) = EngineManager(context, registry, db, prefs, capabilities, scope)
+    ) = EngineManager(context, registry, db, computeDevice, capabilities, scope)
 
     @Provides
     @Singleton
@@ -185,11 +193,16 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideTranscriber(@ApplicationContext context: Context) =
-        ai.ondevice.engine.Transcriber(context)
+    fun provideTranscriber(
+        @ApplicationContext context: Context,
+        computeDevice: ai.ondevice.engine.ComputeDevice,
+    ) = ai.ondevice.engine.Transcriber(context, computeDevice)
 
     @Provides
     @Singleton
-    fun provideDiffusionEngine(@ApplicationContext context: Context, capabilities: DeviceCapabilities) =
-        ai.ondevice.engine.DiffusionEngine(context, capabilities)
+    fun provideDiffusionEngine(
+        @ApplicationContext context: Context,
+        capabilities: DeviceCapabilities,
+        computeDevice: ai.ondevice.engine.ComputeDevice,
+    ) = ai.ondevice.engine.DiffusionEngine(context, capabilities, computeDevice)
 }

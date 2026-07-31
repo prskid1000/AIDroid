@@ -26,7 +26,15 @@ object WhisperBridge {
     /** `{"<key>":{"reload":bool}, …}` — see [LlamaBridge.nativeSupportedParams]. */
     external fun nativeSupportedParams(): String
 
-    external fun nativeLoad(path: String): Long
+    /** `{"backends":[…]}` — what ggml registered in this binary. */
+    external fun nativeSystemInfo(): String
+
+    /**
+     * @param backend the ggml registry name of the chosen compute device —
+     *   "OpenCL", "HTP", "CPU" — or empty for CPU. See
+     *   [ai.ondevice.core.BackendId.registryNames].
+     */
+    external fun nativeLoad(path: String, backend: String): Long
 
     external fun nativeFree(handle: Long)
 

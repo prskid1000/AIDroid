@@ -20,6 +20,7 @@
 #include <android/log.h>
 
 #include "whisper.h"
+#include "ggml-backend.h"
 #include "nlohmann/json.hpp"
 
 #include "jni_util.h"
@@ -27,6 +28,7 @@
 using json = nlohmann::ordered_json;
 
 #define WLOGE(...) __android_log_print(ANDROID_LOG_ERROR, "ondevice.whisper", __VA_ARGS__)
+#define WLOGI(...) __android_log_print(ANDROID_LOG_INFO,  "ondevice.whisper", __VA_ARGS__)
 
 namespace {
 
@@ -248,18 +250,62 @@ Java_ai_ondevice_engine_WhisperBridge_nativeSupportedParams(JNIEnv * env, jobjec
     return jni_from_string(env, out.dump());
 }
 
+/**
+ * What ggml registered in *this* binary — the same question llama and sd are
+ * asked, and it was the one runtime with no way to answer.
+ *
+ * That gap was not cosmetic. With no answer, the registry fell back to the
+ * manifest, which lists what CMake compiles rather than what the phone has, so
+ * the Compute device list on a whisper model was a statement about the APK.
+ */
+JNIEXPORT jstring JNICALL
+Java_ai_ondevice_engine_WhisperBridge_nativeSystemInfo(JNIEnv * env, jobject) {
+    json backends = json::array();
+    for (size_t i = 0; i < ggml_backend_reg_count(); ++i) {
+        backends.push_back(ggml_backend_reg_name(ggml_backend_reg_get(i)));
+    }
+    return jni_from_string(env, json{ { "backends", backends } }.dump());
+}
+
 JNIEXPORT jlong JNICALL
-Java_ai_ondevice_engine_WhisperBridge_nativeLoad(JNIEnv * env, jobject, jstring jpath) {
-    const auto path = jni_to_string(env, jpath);
+Java_ai_ondevice_engine_WhisperBridge_nativeLoad(JNIEnv * env, jobject, jstring jpath, jstring jbackend) {
+    const auto path    = jni_to_string(env, jpath);
+    const auto backend = jni_to_string(env, jbackend);
 
     whisper_context_params cparams = whisper_context_default_params();
-    // Asked for, not asserted. whisper enumerates ggml's devices and takes a
-    // GPU only if one registered — on a build or a phone without OpenCL that
-    // loop finds nothing and it runs on the CPU, which is why this can be a
-    // constant. It read `false` for as long as no GPU backend was compiled in;
-    // now one is, and leaving it would have been the same kind of stale claim
-    // in the other direction.
-    cparams.use_gpu = true;
+    // The Compute device setting, in the two fields whisper offers.
+    //
+    // This was a hardcoded `use_gpu = true` with a comment arguing it was safe
+    // because the device loop finds nothing when no GPU registered. True, and
+    // beside the point: once two accelerators register, "the GPU" is a choice,
+    // and a constant makes it silently — whisper takes the *first* device of
+    // GPU type, which is an ordering, not a decision. The NPU registers as a
+    // GPU-type device too, so on this build that constant would have picked
+    // whichever backend happened to register first.
+    //
+    // `gpu_device` counts only devices of GPU or IGPU type, so the index has to
+    // be counted the same way rather than taken from the full device list.
+    cparams.use_gpu = false;
+    if (!backend.empty() && !jni_iequals(backend, "CPU")) {
+        int gpu_index = 0;
+        for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+            ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+            const auto type = ggml_backend_dev_type(dev);
+            if (type != GGML_BACKEND_DEVICE_TYPE_GPU && type != GGML_BACKEND_DEVICE_TYPE_IGPU) {
+                continue;
+            }
+            ggml_backend_reg_t reg = ggml_backend_dev_backend_reg(dev);
+            const char * reg_name = reg != nullptr ? ggml_backend_reg_name(reg) : nullptr;
+            if (reg_name != nullptr && jni_iequals(backend, reg_name)) {
+                cparams.gpu_device = gpu_index;
+                cparams.use_gpu    = true;
+                break;
+            }
+            ++gpu_index;
+        }
+    }
+    WLOGI("load %s on %s", path.c_str(),
+          cparams.use_gpu ? backend.c_str() : "CPU");
 
     auto * engine = new od_whisper();
     engine->ctx = whisper_init_from_file_with_params(path.c_str(), cparams);

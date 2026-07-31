@@ -39,6 +39,7 @@ import java.nio.ByteOrder
 class DiffusionEngine(
     private val context: Context,
     private val capabilities: ai.ondevice.data.hf.DeviceCapabilities,
+    private val computeDevice: ComputeDevice,
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
@@ -78,6 +79,11 @@ class DiffusionEngine(
                 attachments.firstOrNull { it.enabled && it.role == role }?.path
                     ?: params.string(role.paramKey).orEmpty()
 
+            // Settings → Compute device. sd.cpp picked its own device before
+            // this, which was defensible while there was only one to pick and a
+            // silent override of the user's answer once there were three.
+            val backend = computeDevice.registryName(RuntimeRegistry.STABLE_DIFFUSION)
+
             val newHandle = SdBridge.nativeLoad(
                 modelPath = modelPath,
                 vaePath = pathFor(AttachmentRole.VAE),
@@ -90,13 +96,14 @@ class DiffusionEngine(
                 embeddingsPath = pathFor(AttachmentRole.EMBEDDING),
                 clipVisionPath = pathFor(AttachmentRole.CLIP_VISION),
                 threads = threads,
+                backend = backend,
             )
             check(newHandle != 0L) { "The runtime returned no handle for $modelPath." }
             handle = newHandle
             android.util.Log.i(
                 TAG,
                 "loaded ${File(modelPath).name} (${File(modelPath).length() / 1024 / 1024} MB) " +
-                    "threads=$threads " +
+                    "backend=$backend threads=$threads " +
                     "attached=" + AttachmentRole.entries
                     .mapNotNull { role -> pathFor(role).takeIf { it.isNotBlank() }?.let { role.name } }
                     .ifEmpty { listOf("none") }.joinToString("+"),

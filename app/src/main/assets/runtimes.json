@@ -18,7 +18,7 @@
       "id": "llama.cpp",
       "buildTag": "b10175",
       "upstreamCommit": "60bccc3",
-      "jniContract": 3,
+      "jniContract": 4,
       "installed": true,
       "sizeBytes": 224395264,
       "formats": [
@@ -180,7 +180,7 @@
       "id": "whisper.cpp",
       "buildTag": "v1.9.1",
       "upstreamCommit": "f049fff",
-      "jniContract": 3,
+      "jniContract": 4,
       "installed": true,
       "sizeBytes": 71303168,
       "formats": [
@@ -202,7 +202,7 @@
       "id": "kokoro",
       "buildTag": "1.52.0",
       "upstreamCommit": "4870adf",
-      "jniContract": 3,
+      "jniContract": 4,
       "installed": true,
       "sizeBytes": 42991616,
       "formats": [
@@ -227,7 +227,7 @@
       "id": "omnivoice",
       "buildTag": "OmniVoice-Onnx",
       "upstreamCommit": "65b5f53",
-      "jniContract": 3,
+      "jniContract": 4,
       "installed": true,
       "sizeBytes": 788529152,
       "formats": [
@@ -247,7 +247,7 @@
       "id": "stable-diffusion.cpp",
       "buildTag": "master-2251699",
       "upstreamCommit": "2251699",
-      "jniContract": 3,
+      "jniContract": 4,
       "installed": true,
       "sizeBytes": 432013312,
       "formats": [

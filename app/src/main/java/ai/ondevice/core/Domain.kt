@@ -63,16 +63,29 @@ enum class BackendId {
         }
 
     /**
-     * Whether a name ggml registered means this backend.
+     * What ggml's own registry calls this, which is none of the three above.
      *
-     * ggml names its registries after the API — "OpenCL", "CPU" — this enum
-     * names them for a database column, and [label] names them for a person,
-     * so all three only coincide by luck.
-     * Matching on both spellings, case-insensitively, means a rename upstream
-     * degrades to "unrecognised backend" rather than to a wrong one.
+     * The Hexagon backend registers as **"HTP"** — not "Hexagon", not "NPU" —
+     * and that is also the string sd.cpp's `--backend` accepts and whisper
+     * matches its device list against. It was worth finding out rather than
+     * assuming: with only [name], [api] and [label] to match on, a registered
+     * NPU would have gone unrecognised and the setting stayed dimmed on a build
+     * that had one.
+     *
+     * More than one per backend because upstream is free to rename, and a list
+     * degrades to "unrecognised" rather than to a wrong answer.
      */
+    val registryNames: List<String>
+        get() = when (this) {
+            OPENCL -> listOf("OpenCL")
+            HEXAGON -> listOf("HTP", "Hexagon")
+            CPU -> listOf("CPU")
+        }
+
+    /** Whether a name ggml registered means this backend. */
     fun matches(registered: String): Boolean =
-        registered.equals(name, ignoreCase = true) ||
+        registryNames.any { it.equals(registered, ignoreCase = true) } ||
+            registered.equals(name, ignoreCase = true) ||
             registered.equals(api, ignoreCase = true) ||
             registered.equals(label, ignoreCase = true)
 }
