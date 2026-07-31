@@ -38,6 +38,7 @@ import java.nio.ByteOrder
  */
 class DiffusionEngine(
     private val context: Context,
+    private val capabilities: ai.ondevice.data.hf.DeviceCapabilities,
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
@@ -55,7 +56,7 @@ class DiffusionEngine(
         modelId: String,
         modelPath: String,
         attachments: List<ModelAttachment> = emptyList(),
-        threads: Int = 0,
+        threads: Int = capabilities.inferenceThreads,
         params: ai.ondevice.core.SparseParams = ai.ondevice.core.SparseParams.EMPTY,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
@@ -293,7 +294,7 @@ class DiffusionEngine(
         image: DiffusionImage,
         esrganPath: String,
         factor: Int = 0,
-        threads: Int = 0,
+        threads: Int = capabilities.inferenceThreads,
         tileSize: Int = 0,
     ): Result<DiffusionImage> = withContext(Dispatchers.Default) {
         runCatching {

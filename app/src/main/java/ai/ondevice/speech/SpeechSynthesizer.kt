@@ -39,6 +39,7 @@ class SpeechSynthesizer(
     private val context: Context,
     private val kokoro: KokoroEngine,
     private val omniVoice: OmniVoiceEngine,
+    private val capabilities: ai.ondevice.data.hf.DeviceCapabilities,
 ) {
 
     private var tts: TextToSpeech? = null
@@ -318,6 +319,9 @@ class SpeechSynthesizer(
     companion object {
         private const val TAG = "SpeechSynthesizer"
 
+        // The thread policy lives on DeviceCapabilities, so all four engines
+        // answer this question the same way — see `inferenceThreads` there.
+
         const val OMNIVOICE_VOICE_ID = "omnivoice"
 
         /** How long past the audio's own duration playback is given to drain. */
@@ -357,7 +361,7 @@ class SpeechSynthesizer(
             ),
         )
 
-        kokoro.load(directory).onFailure { return Result.failure(it) }
+        kokoro.load(directory, threads = capabilities.inferenceThreads).onFailure { return Result.failure(it) }
 
         return kokoro.synthesize(
             KokoroRequest(
@@ -392,7 +396,7 @@ class SpeechSynthesizer(
                     ai.ondevice.core.StarterModels.OMNIVOICE_REPO + ".",
             ),
         )
-        omniVoice.load(directory).onFailure { return Result.failure(it) }
+        omniVoice.load(directory, threads = capabilities.inferenceThreads).onFailure { return Result.failure(it) }
         return omniVoice.synthesize(
             OmniVoiceRequest(
                 text = request.text,

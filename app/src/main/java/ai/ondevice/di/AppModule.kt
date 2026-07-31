@@ -180,7 +180,8 @@ object AppModule {
         @ApplicationContext context: Context,
         kokoro: ai.ondevice.speech.KokoroEngine,
         omniVoice: ai.ondevice.speech.OmniVoiceEngine,
-    ) = ai.ondevice.speech.SpeechSynthesizer(context, kokoro, omniVoice)
+        capabilities: DeviceCapabilities,
+    ) = ai.ondevice.speech.SpeechSynthesizer(context, kokoro, omniVoice, capabilities)
 
     @Provides
     @Singleton
@@ -189,6 +190,6 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideDiffusionEngine(@ApplicationContext context: Context) =
-        ai.ondevice.engine.DiffusionEngine(context)
+    fun provideDiffusionEngine(@ApplicationContext context: Context, capabilities: DeviceCapabilities) =
+        ai.ondevice.engine.DiffusionEngine(context, capabilities)
 }

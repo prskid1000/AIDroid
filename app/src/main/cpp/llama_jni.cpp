@@ -580,7 +580,20 @@ Java_ai_ondevice_engine_LlamaBridge_nativeLoad(JNIEnv * env, jobject, jstring jp
     engine->params.n_batch    = 512;
     engine->params.n_ubatch   = 256;
     engine->params.n_gpu_layers = 0;
-    engine->params.cpuparams.n_threads = std::max(1, static_cast<int>(std::thread::hardware_concurrency() / 2));
+    // Every core but one.
+    //
+    // This was `hardware_concurrency() / 2` — half the machine, on a constant
+    // that no screen showed and no setting reached. The Kotlin side computes a
+    // performance-core count and reports it in Settings, which made it look as
+    // though that number was what ran; it was never passed to anything. A
+    // caller can still override via the `n_threads` parameter, which is
+    // reload-only in llama.cpp and documented as such.
+    //
+    // One core is left free so the UI thread still has somewhere to draw the
+    // progress it is being asked to show — a device with nothing left to
+    // schedule the compositor on reads as hung rather than as busy.
+    engine->params.cpuparams.n_threads =
+        std::max(1, static_cast<int>(std::thread::hardware_concurrency()) - 1);
     engine->params.cpuparams_batch.n_threads = engine->params.cpuparams.n_threads;
     engine->params.warmup     = false;
 

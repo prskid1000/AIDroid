@@ -30,6 +30,20 @@
 
 #include "jni_util.h"
 
+
+/**
+ * The fallback thread count: every core but one.
+ *
+ * sd.cpp's own `sd_get_num_physical_cores()` was the fallback, and on a phone
+ * with 8 logical cores it returns the physical count and leaves the rest idle.
+ * The Kotlin caller now always passes DeviceCapabilities.inferenceThreads, so
+ * this only decides what happens when something forgets to — and it should
+ * agree with the policy rather than quietly differ from it.
+ */
+static int od_default_threads() {
+    return std::max(1, static_cast<int>(std::thread::hardware_concurrency()) - 1);
+}
+
 using json = nlohmann::ordered_json;
 
 #define SLOGI(...) __android_log_print(ANDROID_LOG_INFO, "ondevice.sd", __VA_ARGS__)
@@ -382,7 +396,7 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
     params.ip_adapter_path  = ipAdapter.empty() ? nullptr : ipAdapter.c_str();
     params.embeddings_connectors_path = embeddings.empty() ? nullptr : embeddings.c_str();
     params.clip_vision_path = clipVision.empty() ? nullptr : clipVision.c_str();
-    params.n_threads        = threads > 0 ? threads : sd_get_num_physical_cores();
+    params.n_threads        = threads > 0 ? threads : od_default_threads();
     params.enable_mmap      = true;
     // The GPU backends are not compiled in on this platform, so asking for
     // flash attention would be a claim the build cannot honour.
@@ -725,7 +739,7 @@ Java_ai_ondevice_engine_SdBridge_nativeUpscale(
     upscaler_ctx_t * upscaler = new_upscaler_ctx(
         esrgan.c_str(),
         /* direct         */ false,
-        /* n_threads      */ threads > 0 ? threads : sd_get_num_physical_cores(),
+        /* n_threads      */ threads > 0 ? threads : od_default_threads(),
         /* tile_size      */ tileSize,
         defaults.backend,
         defaults.params_backend);

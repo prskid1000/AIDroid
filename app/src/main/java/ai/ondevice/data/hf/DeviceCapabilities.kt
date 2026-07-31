@@ -71,6 +71,30 @@ class DeviceCapabilities(private val context: Context) {
     private fun fallbackPerformanceCores() = (totalCores / 2).coerceIn(1, 8)
 
     /**
+     * How many threads an inference run should take: every core but one.
+     *
+     * Stated once, here, because until now every engine had its own answer and
+     * none of them was this device's. llama.cpp took
+     * `hardware_concurrency() / 2` in its JNI layer — half the machine, on a
+     * constant nothing could see or change. sd.cpp took the physical core count.
+     * Kokoro and OmniVoice took a `threads` parameter that every caller left at
+     * zero, so ONNX Runtime chose for itself, and the recorded traces show that
+     * choice using under a quarter of an eight-core phone. Three engines, three
+     * policies, no way to tell what any of them did.
+     *
+     * One core is left free rather than all of them being claimed. Inference is
+     * not the only thing running: the UI thread still has to draw the progress
+     * it is being asked to show, and a device with nothing left to schedule the
+     * compositor on reads as hung rather than as busy. On a single-core device
+     * the arithmetic would hand back zero, so it is floored at one.
+     *
+     * This supersedes [performanceCores] as the *inference* thread count. That
+     * property survives because the Settings screen reports it, and because the
+     * distinction it draws is real — it is simply not the choice being made here.
+     */
+    val inferenceThreads: Int get() = (totalCores - 1).coerceAtLeast(1)
+
+    /**
      * Read, but no longer acted on: the app's thermal policy is gone because
      * three of its four settings could not do what they claimed. Kept because
      * the benchmark's own numbers mean less from a device that was already hot,

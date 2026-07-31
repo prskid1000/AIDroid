@@ -143,7 +143,7 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
                     TAG,
                     "loaded ${model.name} (${model.length() / 1024 / 1024} MB) " +
                         "inputs=${created.inputNames.joinToString()} " +
-                        "vocab=${vocabulary.size}",
+                        "vocab=${vocabulary.size} threads=$threads",
                 )
             }
         }.onFailure {
