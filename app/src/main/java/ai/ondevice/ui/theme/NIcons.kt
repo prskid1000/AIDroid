@@ -233,6 +233,21 @@ object NIcons {
     }
 
     val Brush: ImageVector by lazy { icon(1.7f, stroked = listOf("M15.5 4.5l4 4-9 9H6v-4.5")) }
+
+    /**
+     * Outpainting: four corners opening outwards.
+     *
+     * It has to be legible beside [Image] and [Brush] at 18 dp, and it is the
+     * odd one of the three — generate makes a picture, inpaint repairs part of
+     * one, and this grows the canvas past its edges. Corner brackets say that
+     * without borrowing either of their shapes.
+     */
+    val Expand: ImageVector by lazy {
+        icon(
+            1.7f,
+            stroked = listOf("M4 9V4h5", "M15 4h5v5", "M20 15v5h-5", "M9 20H4v-5"),
+        )
+    }
     val Erase: ImageVector by lazy { icon(1.7f, stroked = listOf("M9 19H5l-1.5-4 11-11 4 4-11 11z", "M13 21h8")) }
 
     /** Invert: a circle with one half filled. */

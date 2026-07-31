@@ -70,9 +70,6 @@ fun ChatSettingsSheet(
     onSystemPromptChange: (String) -> Unit,
     onLiveParam: (String, Any?) -> Unit,
     onOpenParametersAtTier: (Tier) -> Unit,
-    onExport: (ExportFormat) -> Unit,
-    onExportAll: () -> Unit,
-    onImport: () -> Unit,
 ) {
     // The same chrome Image and Voice use. It was written inline here first,
     // which is how all three ended up drawing their last row underneath the
@@ -247,39 +244,14 @@ fun ChatSettingsSheet(
                     // On the sheet rather than behind a menu because SPEC §13
                     // makes getting a conversation *out* a first-class action,
                     // not an advanced one.
-                    SectionKicker("This conversation", Modifier.padding(top = 20.dp, bottom = 8.dp))
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(7.dp),
-                    ) {
-                        NButton(
-                            "Export .zip",
-                            { onExport(ExportFormat.ARCHIVE) },
-                            modifier = Modifier.weight(1f),
-                        )
-                        NButton(
-                            "Export .md",
-                            { onExport(ExportFormat.MARKDOWN) },
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    Row(
-                        Modifier.fillMaxWidth().padding(top = 7.dp),
-                        horizontalArrangement = Arrangement.spacedBy(7.dp),
-                    ) {
-                        NButton("Export all", onExportAll, modifier = Modifier.weight(1f))
-                        NButton("Import…", onImport, modifier = Modifier.weight(1f))
-                    }
-                    NHelp(
-                        "The archive round-trips: parameters, tok/s, backend and attachments all come " +
-                            "back. Markdown is for reading — it does not import.",
-                        Modifier.padding(top = 6.dp),
-                    )
+                    // Export left this sheet. It wrote into app-private
+                    // storage and called that a save; Library saves every
+                    // artifact the same way, into a folder you picked, and a
+                    // conversation saved there as .zip is the archive Import
+                    // reads back. Import itself is now a toolbar action, beside
+                    // the plus, because it makes a conversation too.
                     state.importSummary?.let { summary ->
-                        NHelp(summary, Modifier.padding(top = 6.dp))
-                    }
-                    state.lastExport?.let { path ->
-                        NHelp("Last export: ${path.substringAfterLast('/')}", Modifier.padding(top = 6.dp))
+                        NHelp(summary, Modifier.padding(top = 20.dp))
                     }
 
                     // — system prompt —

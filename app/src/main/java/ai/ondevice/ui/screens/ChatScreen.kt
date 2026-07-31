@@ -127,6 +127,7 @@ fun ChatScreen(
                     state,
                     onOpenSettings = { sheetOpen = true },
                     onNewConversation = viewModel::startNewConversation,
+                    onImport = { importLauncher.launch(arrayOf("application/zip", "*/*")) },
                 )
             },
             bottomBar = {
@@ -242,13 +243,6 @@ fun ChatScreen(
                 // when Parameters is pushed, and `rememberSaveable` puts the
                 // sheet back when Back returns here.
                 onOpenParametersAtTier = onOpenParameters,
-                onExport = { format ->
-                    viewModel.export(format) { file -> shareFile(context, file, format.mime) }
-                },
-                onExportAll = {
-                    viewModel.exportEverything { file -> shareFile(context, file, "application/zip") }
-                },
-                onImport = { importLauncher.launch(arrayOf("application/zip", "*/*")) },
             )
         }
     }
@@ -268,6 +262,7 @@ private fun ChatToolbar(
     state: ChatState,
     onOpenSettings: () -> Unit,
     onNewConversation: () -> Unit,
+    onImport: () -> Unit,
 ) {
     RootToolbar(
         title = listOfNotNull(state.model?.displayName, state.presetName).joinToString(" · ")
@@ -303,6 +298,11 @@ private fun ChatToolbar(
     ) {
         // A new conversation, not a wiped one — the old thread stays whole in
         // the library, which is why this is a plus rather than a bin.
+        // Import sits beside the plus because it makes a conversation too,
+        // just from a file rather than from a model. Its counterpart moved to
+        // Library, where every artifact is saved the same way — a conversation
+        // saved there as .zip is the archive this reads back.
+        ToolbarAction(NIcons.Send, "Import a conversation", onImport)
         ToolbarAction(NIcons.Plus, "New conversation", onNewConversation)
         ToolbarAction(NIcons.Settings, "Chat settings", onOpenSettings)
     }

@@ -112,21 +112,28 @@ fun ImageScreen(
             // tab, where the images sit alongside the conversations and the
             // rendered audio instead of being reachable from one screen only.
             RootToolbar("Image") {
-                // Two modes, in the toolbar for the same reason Voice's are:
+                // The modes, in the toolbar for the same reason Voice's are:
                 // the row they used to sit in cost a full band of a screen
                 // whose whole point is showing a picture.
-                ToolbarToggle(
-                    NIcons.Image,
-                    "Generate",
-                    selected = state.mode == ImageMode.GENERATE,
-                    onClick = { viewModel.setMode(ImageMode.GENERATE) },
-                )
-                ToolbarToggle(
-                    NIcons.Brush,
-                    "Inpaint",
-                    selected = state.mode == ImageMode.INPAINT,
-                    onClick = { viewModel.setMode(ImageMode.INPAINT) },
-                )
+                //
+                // Iterated rather than listed. Writing the toggles out by hand
+                // is how Extend was dropped when this first moved up here — the
+                // pill row had always built itself from `entries`, and spelling
+                // three calls instead lost one silently. The `when` below is
+                // exhaustive, so the next mode added to the enum fails to
+                // compile until it has an icon.
+                ImageMode.entries.forEach { mode ->
+                    ToolbarToggle(
+                        when (mode) {
+                            ImageMode.GENERATE -> NIcons.Image
+                            ImageMode.INPAINT -> NIcons.Brush
+                            ImageMode.OUTPAINT -> NIcons.Expand
+                        },
+                        mode.label,
+                        selected = state.mode == mode,
+                        onClick = { viewModel.setMode(mode) },
+                    )
+                }
                 ToolbarAction(NIcons.Plus, "New image", viewModel::reset)
                 ToolbarAction(NIcons.Settings, "Image settings", { settingsOpen = true })
             }

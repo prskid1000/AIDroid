@@ -158,18 +158,19 @@ fun VoiceScreen(
             // Both icons carry a content description, because a microphone and
             // a speaker are only obvious once you already know.
             RootToolbar("Voice") {
-                ToolbarToggle(
-                    NIcons.Mic,
-                    "Transcribe",
-                    selected = state.mode == VoiceMode.TRANSCRIBE,
-                    onClick = { viewModel.setMode(VoiceMode.TRANSCRIBE) },
-                )
-                ToolbarToggle(
-                    NIcons.Speaker,
-                    "Speak",
-                    selected = state.mode == VoiceMode.SPEAK,
-                    onClick = { viewModel.setMode(VoiceMode.SPEAK) },
-                )
+                // Iterated, not listed — see the note on Image's toolbar. A mode
+                // added to the enum has to be given an icon before this builds.
+                VoiceMode.entries.forEach { mode ->
+                    ToolbarToggle(
+                        when (mode) {
+                            VoiceMode.TRANSCRIBE -> NIcons.Mic
+                            VoiceMode.SPEAK -> NIcons.Speaker
+                        },
+                        mode.label,
+                        selected = state.mode == mode,
+                        onClick = { viewModel.setMode(mode) },
+                    )
+                }
                 ToolbarAction(NIcons.Plus, "Start over", viewModel::reset)
                 ToolbarAction(NIcons.Settings, "Voice settings", { settingsOpen = true })
             }
