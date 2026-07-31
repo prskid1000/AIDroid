@@ -469,10 +469,15 @@ class ChatViewModel @Inject constructor(
         parentId: String?,
     ) {
         val engine = engines.llama ?: return
-        val toolsEnabled = prefs.toolsEnabled.first()
-        val registry = if (toolsEnabled) toolProviders.registry() else null
-        val enabledIds = if (toolsEnabled) prefs.enabledToolProviders.first() else emptySet()
-        val tools = registry?.specs(enabledIds).orEmpty()
+        val registry = if (prefs.toolsEnabled.first()) {
+            toolProviders.registry(
+                builtInEnabled = ai.ondevice.tools.BuiltInToolProvider.ID in
+                    prefs.enabledToolProviders.first(),
+            )
+        } else {
+            null
+        }
+        val tools = registry?.specs().orEmpty()
 
         var round = 0
         var lastParent = parentId
@@ -615,7 +620,7 @@ class ChatViewModel @Inject constructor(
             // the model wrote them expecting to be read in order.
             for (call in toolCalls) {
                 _state.value = _state.value.copy(runningTool = call.name)
-                val result = registry.call(call.name, call.argumentsJson, enabledIds)
+                val result = registry.call(call.name, call.argumentsJson)
                 db.messages().upsert(
                     toolMessage(
                         conversation.id,

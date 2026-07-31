@@ -106,7 +106,8 @@ abstract class OnDeviceDatabase : RoomDatabase() {
          * consults this list, and anything it cannot find a path for is a
          * refusal on release builds.
          */
-        val MIGRATIONS: Array<androidx.room.migration.Migration> = arrayOf(MIGRATION_1_2)
+        val MIGRATIONS: Array<androidx.room.migration.Migration> =
+            arrayOf(MIGRATION_1_2, MIGRATION_2_3)
     }
 }
 
@@ -142,9 +143,24 @@ private val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
 }
 
 /**
+ * v3 — which tools on an MCP server the user has switched off.
+ *
+ * A column with a default, so existing rows land on "nothing disabled", which
+ * is what they meant before the column existed. `lastToolsJson` changes meaning
+ * in the same release — from a comma-joined list of names to a JSON array of
+ * name and description — but its *type* does not, and the reader accepts both,
+ * so there is nothing to rewrite here.
+ */
+private val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `mcp_servers` ADD COLUMN `disabledToolsJson` TEXT NOT NULL DEFAULT '[]'")
+    }
+}
+
+/**
  * Named rather than written into the annotation so a test can compare it with
  * [OnDeviceDatabase.MIGRATIONS] — an annotation argument is not readable at
  * runtime, and the pair only means anything when they are checked against each
  * other.
  */
-internal const val DATABASE_VERSION = 2
+internal const val DATABASE_VERSION = 3

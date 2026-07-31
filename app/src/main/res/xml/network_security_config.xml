@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext HTTP is off everywhere except this device.
+
+  An MCP server is very often something the user runs themselves, and the
+  ordinary way to run one is on localhost — `http://127.0.0.1:3000/mcp`. Refusing
+  that outright would mean the only servers this app can talk to are ones on the
+  public internet, which is the opposite of what a local-first app should
+  prefer. So loopback is permitted, and `10.0.2.2` with it, because that is the
+  address the Android emulator gives the machine it runs on and is loopback in
+  every sense that matters.
+
+  Everything else stays HTTPS. A LAN address is deliberately *not* included: an
+  MCP request carries whatever the model decided to send, and putting that on a
+  shared network in the clear is exactly the leak this app exists to avoid. The
+  Hugging Face API is HTTPS and unaffected.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">::1</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

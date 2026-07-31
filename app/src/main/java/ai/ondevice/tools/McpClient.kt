@@ -5,6 +5,8 @@ import ai.ondevice.data.db.OnDeviceDatabase
 import ai.ondevice.engine.ToolSpec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -51,7 +53,10 @@ class McpToolProvider(
     @Volatile
     private var cachedSpecs: List<ToolSpec>? = null
 
-    override suspend fun specs(): List<ToolSpec> = cachedSpecs ?: withContext(Dispatchers.IO) {
+    private val disabledTools: Set<String> = McpTools.disabled(server)
+
+    /** The tools this server offers, before the user's own exclusions. */
+    private suspend fun offered(): List<ToolSpec> = cachedSpecs ?: withContext(Dispatchers.IO) {
         initialize()
         val result = rpc("tools/list", buildJsonObject { })
         val tools = result["tools"]?.jsonArray.orEmpty()
@@ -69,7 +74,25 @@ class McpToolProvider(
         specs
     }
 
+    /**
+     * What the model is told about — the server's list, minus the tools the user
+     * switched off. Not offering it is the real control: a tool the model was
+     * never told exists cannot be called, whereas one that is merely refused at
+     * call time still costs a round trip and an apology.
+     */
+    override suspend fun specs(): List<ToolSpec> =
+        offered().filterNot { it.name in disabledTools }
+
     override suspend fun call(name: String, argumentsJson: String): ToolResult = withContext(Dispatchers.IO) {
+        // Belt and braces. The model should not know this name, but it can
+        // guess one, and a switch that only hides a tool is not a switch.
+        if (name in disabledTools) {
+            return@withContext ToolResult(
+                "\"$name\" is switched off for ${server.name}.",
+                isError = true,
+                providerId = id,
+            )
+        }
         runCatching {
             initialize()
             val result = rpc(
@@ -104,17 +127,24 @@ class McpToolProvider(
         }
     }
 
-    /** Probe a server without registering it — what the "Test" button calls. */
+    /**
+     * Probe a server without registering it — what the "Test" button calls, and
+     * what Refresh calls to pick up tools that have appeared or gone away.
+     *
+     * Reports everything the server offers, including tools the user has
+     * switched off: this is the inventory the picker is drawn from, so hiding
+     * the disabled ones here would make them unrecoverable.
+     */
     suspend fun probe(): McpProbe = withContext(Dispatchers.IO) {
         runCatching {
             val info = initialize(force = true)
-            val specs = specs()
+            val offered = offered()
             McpProbe(
                 ok = true,
                 serverName = info["serverInfo"]?.jsonObject?.get("name")?.jsonPrimitive?.content
                     ?: server.name,
                 protocolVersion = info["protocolVersion"]?.jsonPrimitive?.content.orEmpty(),
-                toolNames = specs.map { it.name },
+                tools = offered.map { McpTool(it.name, it.description) },
             )
         }.getOrElse { McpProbe(ok = false, error = it.message ?: it.toString()) }
     }
@@ -219,18 +249,61 @@ class McpToolProvider(
     }
 }
 
+/** One tool as a server described it. */
+@kotlinx.serialization.Serializable
+data class McpTool(val name: String, val description: String = "")
+
 data class McpProbe(
     val ok: Boolean,
     val serverName: String = "",
     val protocolVersion: String = "",
-    val toolNames: List<String> = emptyList(),
+    val tools: List<McpTool> = emptyList(),
     val error: String? = null,
 )
 
 /**
- * Builds the live provider list. Rebuilt per turn rather than cached, so
- * disabling a server takes effect on the next message rather than the next
- * process start.
+ * Reading and writing the two tool lists on a server row.
+ *
+ * Both are stored as JSON in a text column rather than as their own tables. A
+ * tool list is only ever read whole, alongside the server it belongs to, and is
+ * replaced wholesale by the next refresh — there is nothing to query across, so
+ * a join table would be structure without a use for it.
+ */
+object McpTools {
+
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private val toolList = ListSerializer(McpTool.serializer())
+    private val nameList = ListSerializer(String.serializer())
+
+    /**
+     * Accepts the old format too. Before tools carried descriptions this column
+     * held a comma-joined list of bare names, and a server the user added last
+     * week should not come back empty because the shape changed — it comes back
+     * with names and no descriptions, until the next refresh fills them in.
+     */
+    fun parse(raw: String?): List<McpTool> {
+        val text = raw?.trim().orEmpty()
+        if (text.isEmpty()) return emptyList()
+        if (text.startsWith("[")) {
+            return runCatching { json.decodeFromString(toolList, text) }.getOrDefault(emptyList())
+        }
+        return text.split(',').map { it.trim() }.filter { it.isNotEmpty() }.map { McpTool(it) }
+    }
+
+    fun encode(tools: List<McpTool>): String = json.encodeToString(toolList, tools)
+
+    fun disabled(server: McpServerEntity): Set<String> =
+        runCatching { json.decodeFromString(nameList, server.disabledToolsJson) }
+            .getOrDefault(emptyList())
+            .toSet()
+
+    fun encodeDisabled(names: Set<String>): String = json.encodeToString(nameList, names.sorted())
+}
+
+/**
+ * Builds the live provider list. Rebuilt per turn rather than cached, so pausing
+ * a server or switching off one of its tools takes effect on the next message
+ * rather than the next process start.
  */
 class ToolProviderFactory(
     private val db: OnDeviceDatabase,
@@ -238,11 +311,19 @@ class ToolProviderFactory(
 ) {
     private val http = McpToolProvider.httpClient()
 
-    suspend fun registry(): ToolRegistry {
+    /**
+     * Only providers that are actually switched on are constructed, so a paused
+     * server has no representative in the registry at all — rather than one that
+     * is present and filtered out somewhere further down, which is how it came
+     * to be filtered in two places by two different flags that disagreed.
+     */
+    suspend fun registry(builtInEnabled: Boolean): ToolRegistry {
         val servers = db.mcpServers().getAll().filter { it.enabled }
         return ToolRegistry(
-            listOf(BuiltInToolProvider(db, capabilities)) +
-                servers.map { McpToolProvider(it, http) },
+            buildList {
+                if (builtInEnabled) add(BuiltInToolProvider(db, capabilities))
+                addAll(servers.map { McpToolProvider(it, http) })
+            },
         )
     }
 

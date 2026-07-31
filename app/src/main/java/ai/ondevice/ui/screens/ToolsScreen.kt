@@ -14,13 +14,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import ai.ondevice.tools.BuiltInToolProvider
-import ai.ondevice.tools.McpToolProvider
+import ai.ondevice.data.db.McpServerEntity
+import ai.ondevice.tools.McpTools
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NCard
@@ -61,7 +62,13 @@ fun ToolsScreen(
         toolbar = {
             PushToolbar(
                 title = "Tools",
-                subtitle = "What the model is allowed to do",
+                // The live count, not the installed one: a paused server's
+                // tools are not offered however many it has.
+                subtitle = if (state.enabled) {
+                    "${state.liveToolCount} offered to the model"
+                } else {
+                    "off — the model is not told any exist"
+                },
                 subtitleMono = false,
                 onBack = onBack,
             )
@@ -89,7 +96,7 @@ fun ToolsScreen(
 
             // — built-ins —
             SectionKicker("On this device", Modifier.padding(top = 20.dp, bottom = 8.dp))
-            val builtInOn = BuiltInToolProvider.ID in state.enabledProviders
+            val builtInOn = state.builtInEnabled
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -98,7 +105,7 @@ fun ToolsScreen(
                         Radius.Md,
                     )
                     .ring(if (builtInOn) NocturneColors.Accent else NocturneColors.Divider, Radius.Md)
-                    .nClickableFlat { viewModel.toggleProvider(BuiltInToolProvider.ID) }
+                    .nClickableFlat { viewModel.toggleBuiltIn() }
                     .padding(horizontal = 12.dp, vertical = 11.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -122,52 +129,23 @@ fun ToolsScreen(
             // — MCP —
             SectionKicker("MCP servers", Modifier.padding(top = 20.dp, bottom = 8.dp))
 
+            if (state.servers.isEmpty()) {
+                NHelp("None added. Everything below this point stays on the device until you add one.")
+            }
+
             state.servers.forEach { server ->
-                val id = "${McpToolProvider.ID_PREFIX}${server.id}"
-                val on = id in state.enabledProviders
-                NCard(Modifier.padding(bottom = 8.dp), ring = if (on) NocturneColors.Accent700 else NocturneColors.Divider) {
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(server.name, style = NocturneType.CardTitleSm)
-                            Text(
-                                server.url,
-                                style = NocturneType.MonoXs,
-                                color = NocturneColors.TextMuted,
-                                maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                            )
-                        }
-                        NSwitch(checked = on, onCheckedChange = { viewModel.toggleProvider(id) })
-                    }
-                    server.lastToolsJson?.takeIf { it.isNotBlank() }?.let { tools ->
-                        Text(
-                            tools.split(",").joinToString(" · "),
-                            style = NocturneType.MonoXs,
-                            color = NocturneColors.Accent300,
-                        )
-                    }
-                    server.lastError?.let {
-                        Text(it, style = NocturneType.Help, color = NocturneColors.Neutral300)
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                        NButton(
-                            "Refresh",
-                            onClick = { viewModel.refresh(server) },
-                            modifier = Modifier.weight(1f),
-                            minHeight = 40.dp,
-                        )
-                        NButton(
-                            "Remove",
-                            onClick = { viewModel.removeServer(server.id) },
-                            modifier = Modifier.weight(1f),
-                            minHeight = 40.dp,
-                        )
-                    }
-                }
+                ServerCard(
+                    server = server,
+                    expanded = state.expandedServerId == server.id,
+                    busy = state.testing,
+                    onPause = { viewModel.pauseServer(server, it) },
+                    onExpand = {
+                        viewModel.expandServer(if (state.expandedServerId == server.id) null else server.id)
+                    },
+                    onToggleTool = { viewModel.toggleTool(server, it) },
+                    onRefresh = { viewModel.refresh(server) },
+                    onRemove = { viewModel.removeServer(server.id) },
+                )
             }
 
             NCard(gap = 8.dp) {
@@ -216,15 +194,158 @@ fun ToolsScreen(
             }
 
             NHelp(
-                "HTTP only. MCP's other transport launches a process, which Android's W^X rules make " +
-                    "either impossible or a way to get executable code onto the device — so this app " +
-                    "does not offer it. A server is added only once it has answered and listed its tools.",
+                "HTTP transport only. MCP's other transport launches a process, which Android's W^X " +
+                    "rules make either impossible or a way to get executable code onto the device — so " +
+                    "this app does not offer it. A server is added only once it has answered and " +
+                    "listed its tools.",
                 Modifier.padding(top = 12.dp),
+            )
+            NHelp(
+                "https:// everywhere except this device: plain http:// is allowed to localhost and " +
+                    "127.0.0.1, because a server you run yourself is the common case and that traffic " +
+                    "never leaves the handset. A LAN address is not — an MCP request carries whatever " +
+                    "the model decided to send.",
+                Modifier.padding(top = 8.dp),
             )
             NHelp(
                 "A tool result is data, not instruction. Nothing in this app treats what a server " +
                     "returns as a command.",
                 Modifier.padding(top = 8.dp),
+            )
+        }
+    }
+}
+
+/**
+ * One server: paused or not, and — when opened — every tool it offers with its
+ * own switch.
+ *
+ * Pause and remove are deliberately separate. A paused row keeps its URL, its
+ * auth header and the tool list it last reported, so turning it back on costs
+ * nothing and needs no network; removing it throws all of that away. Presenting
+ * one control for both would make the cheap action carry the expensive one's
+ * risk.
+ */
+@Composable
+private fun ServerCard(
+    server: McpServerEntity,
+    expanded: Boolean,
+    busy: Boolean,
+    onPause: (Boolean) -> Unit,
+    onExpand: () -> Unit,
+    onToggleTool: (String) -> Unit,
+    onRefresh: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    val tools = remember(server.lastToolsJson) { McpTools.parse(server.lastToolsJson) }
+    val disabled = remember(server.disabledToolsJson) { McpTools.disabled(server) }
+    val live = tools.count { it.name !in disabled }
+
+    NCard(
+        Modifier.padding(bottom = 8.dp),
+        ring = if (server.enabled) NocturneColors.Accent700 else NocturneColors.Divider,
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(server.name, style = NocturneType.CardTitleSm)
+                Text(
+                    server.url,
+                    style = NocturneType.MonoXs,
+                    color = NocturneColors.TextMuted,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+            }
+            NSwitch(checked = server.enabled, onCheckedChange = onPause)
+        }
+
+        // The count is of what is *offered*, and says so when that is fewer
+        // than the server has — a switched-off tool is the kind of thing you
+        // forget you did.
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .nClickableFlat(onClick = onExpand)
+                .padding(vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                when {
+                    tools.isEmpty() -> "No tools listed — refresh to ask again"
+                    !server.enabled -> "$live of ${tools.size} tools, paused"
+                    live == tools.size -> "$live tools"
+                    else -> "$live of ${tools.size} tools"
+                },
+                style = NocturneType.Help,
+                color = if (server.enabled) NocturneColors.Accent300 else NocturneColors.TextMuted,
+                modifier = Modifier.weight(1f),
+            )
+            if (tools.isNotEmpty()) {
+                Text(
+                    if (expanded) "⌃" else "⌄",
+                    style = NocturneType.Row,
+                    color = NocturneColors.Accent300,
+                )
+            }
+        }
+
+        if (expanded) {
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                tools.forEach { tool ->
+                    val on = tool.name !in disabled
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(
+                                if (on) NocturneColors.Accent900 else NocturneColors.Neutral900,
+                                Radius.Sm,
+                            )
+                            .nClickableFlat { onToggleTool(tool.name) }
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                tool.name,
+                                style = NocturneType.MonoCode,
+                                color = if (on) NocturneColors.Accent200 else NocturneColors.TextMuted,
+                            )
+                            if (tool.description.isNotBlank()) {
+                                Text(
+                                    tool.description,
+                                    style = NocturneType.Help,
+                                    color = NocturneColors.Text.copy(alpha = if (on) 0.75f else 0.4f),
+                                )
+                            }
+                        }
+                        NSwitch(checked = on, onCheckedChange = { onToggleTool(tool.name) })
+                    }
+                }
+                NHelp("A tool switched off here is never mentioned to the model, so it cannot be called.")
+            }
+        }
+
+        server.lastError?.let {
+            Text(it, style = NocturneType.Help, color = NocturneColors.Neutral300)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            NButton(
+                if (busy) "Asking…" else "Refresh",
+                onClick = onRefresh,
+                modifier = Modifier.weight(1f),
+                minHeight = 40.dp,
+            )
+            NButton(
+                "Remove",
+                onClick = onRemove,
+                modifier = Modifier.weight(1f),
+                minHeight = 40.dp,
             )
         }
     }

@@ -257,8 +257,29 @@ data class McpServerEntity(
     val url: String,
     /** Sent verbatim as `Authorization`. Stored here, not in the URL. */
     val authHeader: String?,
+    /**
+     * Paused or not, and the only switch there is.
+     *
+     * This used to be one of two: the column was written `true` at creation and
+     * never changed, while the screen's toggle edited a set in the preferences.
+     * The column was the one the provider list filtered on, so the dead switch
+     * was the one that mattered — a server "paused" in the UI was still filtered
+     * in by a flag nobody could see.
+     */
     val enabled: Boolean,
+    /**
+     * What the server said it offers, as a JSON array of `{name, description}`.
+     * Kept so the tool list can be read — and switched off one by one — without
+     * the server being reachable at that moment.
+     */
     val lastToolsJson: String?,
+    /**
+     * Tool names the user switched off on this server, as a JSON array.
+     *
+     * Per-server rather than global: two servers may legitimately offer a tool
+     * of the same name, and turning one off must not silence the other.
+     */
+    val disabledToolsJson: String,
     val lastCheckedAt: Long?,
     val lastError: String?,
     val createdAt: Long,

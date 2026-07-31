@@ -59,11 +59,43 @@ class ToolsViewModel @Inject constructor(
         viewModelScope.launch { prefs.setToolsEnabled(value) }
     }
 
-    fun toggleProvider(id: String) {
+    /** The built-in set only. A server's switch is [pauseServer]. */
+    fun toggleBuiltIn() {
         viewModelScope.launch {
             val current = _state.value.enabledProviders
+            val id = ai.ondevice.tools.BuiltInToolProvider.ID
             prefs.setEnabledToolProviders(if (id in current) current - id else current + id)
         }
+    }
+
+    /**
+     * Pause without forgetting. The row keeps its URL, its auth header and the
+     * tool list it last reported, so switching it back on costs nothing and
+     * needs no network — which is the difference between a pause and a delete,
+     * and the reason both exist.
+     */
+    fun pauseServer(server: McpServerEntity, enabled: Boolean) {
+        viewModelScope.launch { db.mcpServers().upsert(server.copy(enabled = enabled)) }
+    }
+
+    /**
+     * Switch one tool off on one server.
+     *
+     * Per-server, because two servers may offer the same name — both dummy
+     * servers offer `echo` — and silencing one must not silence the other.
+     */
+    fun toggleTool(server: McpServerEntity, toolName: String) {
+        viewModelScope.launch {
+            val disabled = ai.ondevice.tools.McpTools.disabled(server)
+            val next = if (toolName in disabled) disabled - toolName else disabled + toolName
+            db.mcpServers().upsert(
+                server.copy(disabledToolsJson = ai.ondevice.tools.McpTools.encodeDisabled(next)),
+            )
+        }
+    }
+
+    fun expandServer(id: String?) {
+        _state.value = _state.value.copy(expandedServerId = id)
     }
 
     fun setDraft(name: String? = null, url: String? = null, auth: String? = null) {
@@ -99,6 +131,7 @@ class ToolsViewModel @Inject constructor(
                 authHeader = _state.value.draftAuth.takeIf { it.isNotBlank() },
                 enabled = true,
                 lastToolsJson = null,
+                disabledToolsJson = "[]",
                 lastCheckedAt = System.currentTimeMillis(),
                 lastError = null,
                 createdAt = System.currentTimeMillis(),
@@ -114,11 +147,8 @@ class ToolsViewModel @Inject constructor(
             db.mcpServers().upsert(
                 candidate.copy(
                     name = _state.value.draftName.ifBlank { probe.serverName },
-                    lastToolsJson = probe.toolNames.joinToString(","),
+                    lastToolsJson = ai.ondevice.tools.McpTools.encode(probe.tools),
                 ),
-            )
-            prefs.setEnabledToolProviders(
-                _state.value.enabledProviders + "${ai.ondevice.tools.McpToolProvider.ID_PREFIX}${candidate.id}",
             )
             _state.value = _state.value.copy(
                 testing = false,
@@ -126,6 +156,7 @@ class ToolsViewModel @Inject constructor(
                 draftUrl = "",
                 draftAuth = "",
                 draftError = null,
+                expandedServerId = candidate.id,
             )
         }
     }
@@ -134,6 +165,13 @@ class ToolsViewModel @Inject constructor(
         viewModelScope.launch { db.mcpServers().deleteById(id) }
     }
 
+    /**
+     * Ask the server what it offers now.
+     *
+     * The user's exclusions survive a refresh even when the tool has gone away:
+     * a server that drops a tool and brings it back should not bring it back
+     * switched on. Nothing prunes `disabledToolsJson` for that reason.
+     */
     fun refresh(server: McpServerEntity) {
         viewModelScope.launch {
             _state.value = _state.value.copy(testing = true)
@@ -141,7 +179,14 @@ class ToolsViewModel @Inject constructor(
             db.mcpServers().upsert(
                 server.copy(
                     lastCheckedAt = System.currentTimeMillis(),
-                    lastToolsJson = probe.toolNames.joinToString(","),
+                    // A failed probe leaves the last known list alone. Emptying
+                    // it would lose the picker for a server that is merely
+                    // unreachable right now.
+                    lastToolsJson = if (probe.ok) {
+                        ai.ondevice.tools.McpTools.encode(probe.tools)
+                    } else {
+                        server.lastToolsJson
+                    },
                     lastError = probe.error,
                 ),
             )
@@ -155,12 +200,29 @@ data class ToolsState(
     val enabledProviders: Set<String> = emptySet(),
     val servers: List<McpServerEntity> = emptyList(),
     val builtInTools: List<String> = listOf("get_current_time", "calculate", "device_status"),
+    /** Only one server's tool list is open at a time; the rest stay one line. */
+    val expandedServerId: String? = null,
     val draftName: String = "",
     val draftUrl: String = "",
     val draftAuth: String = "",
     val draftError: String? = null,
     val testing: Boolean = false,
-)
+) {
+    val builtInEnabled: Boolean
+        get() = ai.ondevice.tools.BuiltInToolProvider.ID in enabledProviders
+
+    /**
+     * How many tools are actually reaching the model. What the screen should
+     * report, since a paused server's tools are not offered however many it
+     * has, and a switched-off tool is not offered either.
+     */
+    val liveToolCount: Int
+        get() = (if (builtInEnabled) builtInTools.size else 0) +
+            servers.filter { it.enabled }.sumOf { server ->
+                val disabled = ai.ondevice.tools.McpTools.disabled(server)
+                ai.ondevice.tools.McpTools.parse(server.lastToolsJson).count { it.name !in disabled }
+            }
+}
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(

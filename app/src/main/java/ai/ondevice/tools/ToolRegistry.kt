@@ -37,19 +37,28 @@ data class ToolResult(
     val providerId: String = "",
 )
 
+/**
+ * The providers in play, and nothing else.
+ *
+ * There is no enabled-id filter here on purpose. It used to take one, so a
+ * provider could be in the list and switched off at the same time — and since
+ * the factory filtered separately on a different flag, "switched off" meant two
+ * incompatible things depending on which code you read. A provider that should
+ * not run is now simply not constructed.
+ */
 class ToolRegistry(
     private val providers: List<ToolProvider>,
 ) {
     /**
-     * Every tool currently available, with its provider prefix stripped. Two
-     * providers offering the same name is resolved first-wins in provider
-     * order, and the loser is dropped rather than silently shadowing — the
-     * model cannot disambiguate names it cannot see.
+     * Every tool currently available. Two providers offering the same name is
+     * resolved first-wins in provider order, and the loser is dropped rather
+     * than silently shadowing — the model cannot disambiguate names it cannot
+     * see. Built-ins come first, so a server cannot displace `calculate`.
      */
-    suspend fun specs(enabledProviderIds: Set<String>): List<ToolSpec> {
+    suspend fun specs(): List<ToolSpec> {
         val seen = mutableSetOf<String>()
         val out = mutableListOf<ToolSpec>()
-        providers.filter { it.id in enabledProviderIds }.forEach { provider ->
+        providers.forEach { provider ->
             runCatching { provider.specs() }.getOrDefault(emptyList()).forEach { spec ->
                 if (seen.add(spec.name)) out += spec
             }
@@ -57,8 +66,8 @@ class ToolRegistry(
         return out
     }
 
-    suspend fun call(name: String, argumentsJson: String, enabledProviderIds: Set<String>): ToolResult {
-        providers.filter { it.id in enabledProviderIds }.forEach { provider ->
+    suspend fun call(name: String, argumentsJson: String): ToolResult {
+        providers.forEach { provider ->
             val owns = runCatching { provider.specs() }.getOrDefault(emptyList()).any { it.name == name }
             if (!owns) return@forEach
             // A hung server must not hang the conversation. The model gets a
