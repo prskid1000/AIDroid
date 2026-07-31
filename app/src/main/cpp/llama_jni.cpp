@@ -41,6 +41,29 @@
 
 using json = nlohmann::ordered_json;
 
+/**
+ * JSON on its way out to Kotlin, with invalid UTF-8 replaced rather than thrown at.
+ *
+ * `dump()` defaults to `error_handler_t::strict`, which throws on a byte
+ * sequence that is not valid UTF-8 — and across a JNI boundary an uncaught C++
+ * exception is not an error, it is SIGABRT. The whole process dies with no
+ * message anything in Kotlin can catch.
+ *
+ * Which is reachable from ordinary use, because every one of these runtimes
+ * emits text a *piece* at a time: whisper's segments and llama's tokens are
+ * byte-level, so a multi-byte character routinely arrives split across two of
+ * them and each half is invalid on its own. Observed as exactly that — whisper
+ * transcribing a noisy recording, `invalid UTF-8 byte at index 0: 0xA2`, and
+ * the app gone.
+ *
+ * `replace` substitutes U+FFFD for the bad bytes. A replacement character in a
+ * transcript is a cosmetic flaw in one word; the alternative is losing the
+ * conversation, the recording and the run.
+ */
+static std::string dump_json(const json & value) {
+    return value.dump(-1, ' ', false, json::error_handler_t::replace);
+}
+
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "ondevice.llama", __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "ondevice.llama", __VA_ARGS__)
 
@@ -145,7 +168,7 @@ float as_float(const json & v, float fallback) {
 }
 
 std::string as_string(const json & v) {
-    return v.is_string() ? v.get<std::string>() : v.dump();
+    return v.is_string() ? v.get<std::string>() : dump_json(v);
 }
 
 std::vector<std::string> as_string_list(const json & v) {
@@ -560,7 +583,7 @@ Java_ai_ondevice_engine_LlamaBridge_nativeSystemInfo(JNIEnv * env, jobject) {
     }
     info["devices"] = devices;
 
-    return jni_from_string(env, info.dump());
+    return jni_from_string(env, dump_json(info));
 }
 
 /**
@@ -597,7 +620,7 @@ Java_ai_ondevice_engine_LlamaBridge_nativeSupportedParams(JNIEnv * env, jobject)
         }
         out[entry.first] = row;
     }
-    return jni_from_string(env, out.dump());
+    return jni_from_string(env, dump_json(out));
 }
 
 /**
@@ -719,7 +742,7 @@ Java_ai_ondevice_engine_LlamaBridge_nativeInfo(JNIEnv * env, jobject, jlong hand
     }
     info["eogTokens"] = eog;
 
-    return jni_from_string(env, info.dump());
+    return jni_from_string(env, dump_json(info));
 }
 
 JNIEXPORT jstring JNICALL
@@ -733,13 +756,13 @@ Java_ai_ondevice_engine_LlamaBridge_nativeApplyParams(JNIEnv * env, jobject, jlo
     try {
         report = apply_params(*e, json::parse(jni_to_string(env, jparams)), &needs_reload);
     } catch (const std::exception & ex) {
-        return jni_from_string(env, json{ { "applied", json::array() },
+        return jni_from_string(env, dump_json(json{ { "applied", json::array() },
                                           { "rejected", json::array() },
-                                          { "error", ex.what() } }.dump());
+                                          { "error", ex.what() } }));
     }
     report["needsReload"] = needs_reload;
     rebuild_sampler(*e);
-    return jni_from_string(env, report.dump());
+    return jni_from_string(env, dump_json(report));
 }
 
 /**
@@ -777,7 +800,7 @@ Java_ai_ondevice_engine_LlamaBridge_nativeFormatPrompt(
                 common_chat_tool t;
                 t.name        = tool.value("name", "");
                 t.description = tool.value("description", "");
-                t.parameters  = tool.contains("parameters") ? tool["parameters"].dump() : "{}";
+                t.parameters  = tool.contains("parameters") ? dump_json(tool["parameters"]) : "{}";
                 inputs.tools.push_back(t);
             }
         }
@@ -810,7 +833,7 @@ Java_ai_ondevice_engine_LlamaBridge_nativeFormatPrompt(
         out["thinkingStart"]    = params.thinking_start_tag;
         out["additionalStops"]  = params.additional_stops;
         out["templateSource"]   = common_chat_templates_source(e->templates.get());
-        return jni_from_string(env, out.dump());
+        return jni_from_string(env, dump_json(out));
     } catch (const std::exception & ex) {
         jni_throw(env, std::string("The chat template could not be rendered: ") + ex.what());
         return jni_from_string(env, "{}");
@@ -834,7 +857,7 @@ Java_ai_ondevice_engine_LlamaBridge_nativeTokenize(JNIEnv * env, jobject, jlong 
             { "special", llama_vocab_is_eog(e->vocab, token) || llama_vocab_get_attr(e->vocab, token) & LLAMA_TOKEN_ATTR_CONTROL },
         });
     }
-    return jni_from_string(env, out.dump());
+    return jni_from_string(env, dump_json(out));
 }
 
 JNIEXPORT jint JNICALL
@@ -865,11 +888,11 @@ Java_ai_ondevice_engine_LlamaBridge_nativeStartGeneration(
 
     const uint32_t n_ctx = llama_n_ctx(e->ctx);
     if (tokens.size() >= n_ctx) {
-        return jni_from_string(env, json{
+        return jni_from_string(env, dump_json(json{
             { "error", "The prompt is " + std::to_string(tokens.size()) +
                        " tokens and the context is " + std::to_string(n_ctx) + "." },
             { "suggestion", "Raise n_ctx and reload, or start a new conversation." },
-        }.dump());
+        }));
     }
 
     // How much of the KV we can keep. Stopping one short of the shared prefix
@@ -887,10 +910,10 @@ Java_ai_ondevice_engine_LlamaBridge_nativeStartGeneration(
 
     const int64_t t0 = ggml_time_us();
     if (!decode_tokens(*e, tokens, n_common)) {
-        return jni_from_string(env, json{
+        return jni_from_string(env, dump_json(json{
             { "error", "llama_decode failed while processing the prompt." },
             { "suggestion", "This is usually memory. Lower n_ctx or n_batch and try again." },
-        }.dump());
+        }));
     }
     e->t_prompt_us = ggml_time_us() - t0;
 
@@ -918,12 +941,12 @@ Java_ai_ondevice_engine_LlamaBridge_nativeStartGeneration(
         ? static_cast<float>(tokens.size() - n_common) * 1e6f / static_cast<float>(e->t_prompt_us)
         : 0.0f;
 
-    return jni_from_string(env, json{
+    return jni_from_string(env, dump_json(json{
         { "promptTokens",  e->n_prompt },
         { "cachedTokens",  e->n_cache_hit },
         { "promptPerSecond", prompt_per_second },
         { "contextLimit",  static_cast<int32_t>(n_ctx) },
-    }.dump());
+    }));
 }
 
 /**
@@ -1074,7 +1097,7 @@ Java_ai_ondevice_engine_LlamaBridge_nativeNextToken(JNIEnv * env, jobject, jlong
         }
     }
 
-    return jni_from_string(env, out.dump());
+    return jni_from_string(env, dump_json(out));
 }
 
 JNIEXPORT void JNICALL

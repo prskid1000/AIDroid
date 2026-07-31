@@ -46,6 +46,29 @@ static int od_default_threads() {
 
 using json = nlohmann::ordered_json;
 
+/**
+ * JSON on its way out to Kotlin, with invalid UTF-8 replaced rather than thrown at.
+ *
+ * `dump()` defaults to `error_handler_t::strict`, which throws on a byte
+ * sequence that is not valid UTF-8 — and across a JNI boundary an uncaught C++
+ * exception is not an error, it is SIGABRT. The whole process dies with no
+ * message anything in Kotlin can catch.
+ *
+ * Which is reachable from ordinary use, because every one of these runtimes
+ * emits text a *piece* at a time: whisper's segments and llama's tokens are
+ * byte-level, so a multi-byte character routinely arrives split across two of
+ * them and each half is invalid on its own. Observed as exactly that — whisper
+ * transcribing a noisy recording, `invalid UTF-8 byte at index 0: 0xA2`, and
+ * the app gone.
+ *
+ * `replace` substitutes U+FFFD for the bad bytes. A replacement character in a
+ * transcript is a cosmetic flaw in one word; the alternative is losing the
+ * conversation, the recording and the run.
+ */
+static std::string dump_json(const json & value) {
+    return value.dump(-1, ' ', false, json::error_handler_t::replace);
+}
+
 #define SLOGI(...) __android_log_print(ANDROID_LOG_INFO, "ondevice.sd", __VA_ARGS__)
 #define SLOGE(...) __android_log_print(ANDROID_LOG_ERROR, "ondevice.sd", __VA_ARGS__)
 
@@ -178,7 +201,7 @@ float as_float(const json & v, float fallback) {
 }
 
 std::string as_string(const json & v) {
-    return v.is_string() ? v.get<std::string>() : v.dump();
+    return v.is_string() ? v.get<std::string>() : dump_json(v);
 }
 
 struct row { void (*apply)(od_sd &, const json &); };
@@ -333,7 +356,7 @@ Java_ai_ondevice_engine_SdBridge_nativeSupportedParams(JNIEnv * env, jobject) {
         }
         out[entry.first] = row;
     }
-    return jni_from_string(env, out.dump());
+    return jni_from_string(env, dump_json(out));
 }
 
 JNIEXPORT jstring JNICALL
@@ -341,7 +364,7 @@ Java_ai_ondevice_engine_SdBridge_nativeSystemInfo(JNIEnv * env, jobject) {
     json info;
     info["system"] = std::string(sd_get_system_info());
     info["cores"]  = sd_get_num_physical_cores();
-    return jni_from_string(env, info.dump());
+    return jni_from_string(env, dump_json(info));
 }
 
 JNIEXPORT jlong JNICALL
@@ -504,10 +527,10 @@ Java_ai_ondevice_engine_SdBridge_nativeApplyParams(JNIEnv * env, jobject, jlong 
             applied.push_back(it.key());
         }
     } catch (const std::exception & ex) {
-        return jni_from_string(env, json{ { "applied", applied }, { "rejected", rejected },
-                                          { "error", ex.what() } }.dump());
+        return jni_from_string(env, dump_json(json{ { "applied", applied }, { "rejected", rejected },
+                                          { "error", ex.what() } }));
     }
-    return jni_from_string(env, json{ { "applied", applied }, { "rejected", rejected } }.dump());
+    return jni_from_string(env, dump_json(json{ { "applied", applied }, { "rejected", rejected } }));
 }
 
 /** Step, total and s/it, for the polling coroutine that drives the readout. */
@@ -516,7 +539,7 @@ Java_ai_ondevice_engine_SdBridge_nativeProgress(JNIEnv * env, jobject, jlong han
     auto * e = as_sd(handle);
     if (e == nullptr) return jni_from_string(env, "{}");
     const int phase = e->phase.load();
-    return jni_from_string(env, json{
+    return jni_from_string(env, dump_json(json{
         { "step",           e->step.load() },
         { "steps",          e->total_steps.load() },
         { "secondsPerStep", e->seconds_per_step.load() },
@@ -524,7 +547,7 @@ Java_ai_ondevice_engine_SdBridge_nativeProgress(JNIEnv * env, jobject, jlong han
         { "previewSerial",  e->preview_serial.load() },
         { "phase",          phase == PHASE_SAMPLING ? "sampling"
                             : phase == PHASE_DECODING ? "decoding" : "preparing" },
-    }.dump());
+    }));
 }
 
 /** The latest intermediate latent, decoded, as packed RGB. */

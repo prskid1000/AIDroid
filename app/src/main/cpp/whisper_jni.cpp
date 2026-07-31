@@ -27,6 +27,29 @@
 
 using json = nlohmann::ordered_json;
 
+/**
+ * JSON on its way out to Kotlin, with invalid UTF-8 replaced rather than thrown at.
+ *
+ * `dump()` defaults to `error_handler_t::strict`, which throws on a byte
+ * sequence that is not valid UTF-8 — and across a JNI boundary an uncaught C++
+ * exception is not an error, it is SIGABRT. The whole process dies with no
+ * message anything in Kotlin can catch.
+ *
+ * Which is reachable from ordinary use, because every one of these runtimes
+ * emits text a *piece* at a time: whisper's segments and llama's tokens are
+ * byte-level, so a multi-byte character routinely arrives split across two of
+ * them and each half is invalid on its own. Observed as exactly that — whisper
+ * transcribing a noisy recording, `invalid UTF-8 byte at index 0: 0xA2`, and
+ * the app gone.
+ *
+ * `replace` substitutes U+FFFD for the bad bytes. A replacement character in a
+ * transcript is a cosmetic flaw in one word; the alternative is losing the
+ * conversation, the recording and the run.
+ */
+static std::string dump_json(const json & value) {
+    return value.dump(-1, ' ', false, json::error_handler_t::replace);
+}
+
 #define WLOGE(...) __android_log_print(ANDROID_LOG_ERROR, "ondevice.whisper", __VA_ARGS__)
 #define WLOGI(...) __android_log_print(ANDROID_LOG_INFO,  "ondevice.whisper", __VA_ARGS__)
 
@@ -100,7 +123,7 @@ float as_float(const json & v, float fallback) {
 }
 
 std::string as_string(const json & v) {
-    return v.is_string() ? v.get<std::string>() : v.dump();
+    return v.is_string() ? v.get<std::string>() : dump_json(v);
 }
 
 /**
@@ -247,7 +270,7 @@ Java_ai_ondevice_engine_WhisperBridge_nativeSupportedParams(JNIEnv * env, jobjec
         }
         out[entry.first] = row;
     }
-    return jni_from_string(env, out.dump());
+    return jni_from_string(env, dump_json(out));
 }
 
 /**
@@ -264,7 +287,7 @@ Java_ai_ondevice_engine_WhisperBridge_nativeSystemInfo(JNIEnv * env, jobject) {
     for (size_t i = 0; i < ggml_backend_reg_count(); ++i) {
         backends.push_back(ggml_backend_reg_name(ggml_backend_reg_get(i)));
     }
-    return jni_from_string(env, json{ { "backends", backends } }.dump());
+    return jni_from_string(env, dump_json(json{ { "backends", backends } }));
 }
 
 JNIEXPORT jlong JNICALL
@@ -344,10 +367,10 @@ Java_ai_ondevice_engine_WhisperBridge_nativeApplyParams(JNIEnv * env, jobject, j
             applied.push_back(it.key());
         }
     } catch (const std::exception & ex) {
-        return jni_from_string(env, json{ { "applied", applied }, { "rejected", rejected },
-                                          { "error", ex.what() } }.dump());
+        return jni_from_string(env, dump_json(json{ { "applied", applied }, { "rejected", rejected },
+                                          { "error", ex.what() } }));
     }
-    return jni_from_string(env, json{ { "applied", applied }, { "rejected", rejected } }.dump());
+    return jni_from_string(env, dump_json(json{ { "applied", applied }, { "rejected", rejected } }));
 }
 
 JNIEXPORT jstring JNICALL
@@ -361,7 +384,7 @@ Java_ai_ondevice_engine_WhisperBridge_nativeInfo(JNIEnv * env, jobject, jlong ha
     info["textLayers"]   = whisper_model_n_text_layer(e->ctx);
     info["type"]         = whisper_model_type_readable(e->ctx);
     info["threads"]      = e->threads;
-    return jni_from_string(env, info.dump());
+    return jni_from_string(env, dump_json(info));
 }
 
 /**
@@ -389,7 +412,7 @@ Java_ai_ondevice_engine_WhisperBridge_nativeTranscribe(
 
     const int64_t t0 = whisper_full(e->ctx, params, samples.data(), (int) samples.size());
     if (t0 != 0) {
-        return jni_from_string(env, json{ { "error", "whisper_full failed" } }.dump());
+        return jni_from_string(env, dump_json(json{ { "error", "whisper_full failed" } }));
     }
 
     json segments = json::array();
@@ -421,7 +444,7 @@ Java_ai_ondevice_engine_WhisperBridge_nativeTranscribe(
     json out;
     out["segments"] = segments;
     out["language"] = whisper_lang_str(whisper_full_lang_id(e->ctx));
-    return jni_from_string(env, out.dump());
+    return jni_from_string(env, dump_json(out));
 }
 
 } // extern "C"
