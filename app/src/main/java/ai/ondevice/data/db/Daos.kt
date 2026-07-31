@@ -268,6 +268,14 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY createdAt ASC")
     suspend fun getFor(conversationId: String): List<MessageEntity>
 
+    /**
+     * Every message, oldest first, for the library's per-thread counts and
+     * previews. Ordered ascending so "the first line of the thread" is the first
+     * match rather than the last.
+     */
+    @Query("SELECT * FROM messages ORDER BY createdAt ASC")
+    fun observeAllOrdered(): Flow<List<MessageEntity>>
+
     @Query("SELECT * FROM messages WHERE id = :id")
     suspend fun get(id: String): MessageEntity?
 
@@ -311,6 +319,21 @@ interface TranscriptDao {
     suspend fun upsert(transcript: TranscriptEntity)
 
     @Query("DELETE FROM transcripts WHERE id = :id")
+    suspend fun deleteById(id: String)
+}
+
+@Dao
+interface SynthesisDao {
+    @Query("SELECT * FROM syntheses ORDER BY createdAt DESC")
+    fun observeAll(): Flow<List<SynthesisEntity>>
+
+    @Query("SELECT * FROM syntheses WHERE id = :id")
+    suspend fun get(id: String): SynthesisEntity?
+
+    @Upsert
+    suspend fun upsert(synthesis: SynthesisEntity)
+
+    @Query("DELETE FROM syntheses WHERE id = :id")
     suspend fun deleteById(id: String)
 }
 

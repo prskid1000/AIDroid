@@ -51,6 +51,7 @@ class Converters {
         MessageEntity::class,
         GeneratedImageEntity::class,
         TranscriptEntity::class,
+        SynthesisEntity::class,
         DownloadJobEntity::class,
         RuntimeBundleEntity::class,
         ParamManifestEntity::class,
@@ -69,13 +70,14 @@ abstract class OnDeviceDatabase : RoomDatabase() {
     abstract fun messages(): MessageDao
     abstract fun images(): GeneratedImageDao
     abstract fun transcripts(): TranscriptDao
+    abstract fun syntheses(): SynthesisDao
     abstract fun downloads(): DownloadDao
     abstract fun runtimes(): RuntimeDao
     abstract fun manifests(): ParamManifestDao
     abstract fun mcpServers(): McpServerDao
 
     /**
-     * One version, no migrations — and a guard so that stays deliberate.
+     * Versions, with a guard so a bump stays deliberate.
      *
      * The schema had reached v4 through three migrations, each written to carry
      * an installed base that does not exist: this app has never shipped, and the
@@ -83,7 +85,7 @@ abstract class OnDeviceDatabase : RoomDatabase() {
      * whenever the model set changes anyway. Three migration scripts, three
      * exported schema files and a backfill whose correctness nobody could check
      * against real data — all of it maintenance for a population of zero. So the
-     * schema is stated once, at v1.
+     * schema was restated once, at v1, and grows from there.
      *
      * The danger was never v1. It was v2: a destructive fallback that is correct
      * today reads exactly the same on the day someone's conversations are in
@@ -104,7 +106,38 @@ abstract class OnDeviceDatabase : RoomDatabase() {
          * consults this list, and anything it cannot find a path for is a
          * refusal on release builds.
          */
-        val MIGRATIONS: Array<androidx.room.migration.Migration> = emptyArray()
+        val MIGRATIONS: Array<androidx.room.migration.Migration> = arrayOf(MIGRATION_1_2)
+    }
+}
+
+/**
+ * v2 — `syntheses`.
+ *
+ * Speak already wrote its WAV to disk; nothing recorded that it had. A new table
+ * only, so there is no data to carry and nothing to get wrong: the migration
+ * creates it and the index Room expects, and every existing row in every other
+ * table is untouched.
+ */
+private val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `syntheses` (
+                `id` TEXT NOT NULL,
+                `path` TEXT NOT NULL,
+                `text` TEXT NOT NULL,
+                `engineId` TEXT NOT NULL,
+                `modelId` TEXT,
+                `voice` TEXT,
+                `paramsJson` TEXT NOT NULL,
+                `durationMillis` INTEGER NOT NULL,
+                `sampleRate` INTEGER NOT NULL,
+                `createdAt` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_syntheses_createdAt` ON `syntheses` (`createdAt`)")
     }
 }
 
@@ -114,4 +147,4 @@ abstract class OnDeviceDatabase : RoomDatabase() {
  * runtime, and the pair only means anything when they are checked against each
  * other.
  */
-internal const val DATABASE_VERSION = 1
+internal const val DATABASE_VERSION = 2

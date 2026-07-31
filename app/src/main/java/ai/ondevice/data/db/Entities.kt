@@ -178,6 +178,29 @@ data class TranscriptEntity(
     val createdAt: Long,
 )
 
+/**
+ * A saved synthesis.
+ *
+ * Speak wrote its WAV to disk and then forgot it — the path lived in memory
+ * until the process died, which meant every rendered take was unreachable the
+ * moment the user left the screen. Recording it alongside the script and the
+ * parameters makes a synthesis as reproducible as a generated image already is,
+ * and gives the library something to list.
+ */
+@Entity(tableName = "syntheses", indices = [Index("createdAt")])
+data class SynthesisEntity(
+    @PrimaryKey val id: String,
+    val path: String,
+    val text: String,
+    val engineId: String,
+    val modelId: String?,
+    val voice: String?,
+    val paramsJson: String,
+    val durationMillis: Long,
+    val sampleRate: Int,
+    val createdAt: Long,
+)
+
 @Entity(tableName = "download_jobs", indices = [Index("state")])
 data class DownloadJobEntity(
     @PrimaryKey val id: String,

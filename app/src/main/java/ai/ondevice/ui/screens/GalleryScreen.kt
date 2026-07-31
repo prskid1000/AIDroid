@@ -230,7 +230,7 @@ private fun shareImage(context: android.content.Context, image: GeneratedImageEn
  * which keeps the gallery honest about identity even before pixels exist.
  */
 @Composable
-private fun GeneratedField(seed: Long) {
+internal fun GeneratedField(seed: Long) {
     val rng = kotlin.random.Random(seed)
     val cx = 0.25f + rng.nextFloat() * 0.5f
     val cy = 0.2f + rng.nextFloat() * 0.55f

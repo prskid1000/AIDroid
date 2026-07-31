@@ -28,6 +28,13 @@ class ModelStorage(private val context: Context, private val db: OnDeviceDatabas
     fun transcriptsDir(): File = File(root(), "transcripts").apply { mkdirs() }
 
     /**
+     * Rendered speech. Its own folder rather than sharing `transcripts/`, which
+     * held the opposite direction of the same feature — audio in, text out —
+     * and made the exported WAVs read as inputs.
+     */
+    fun speechDir(): File = File(root(), "speech").apply { mkdirs() }
+
+    /**
      * Images, audio and documents attached to a conversation.
      *
      * They are *copied* here rather than referenced by content URI: a picker

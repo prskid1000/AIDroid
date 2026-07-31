@@ -34,6 +34,69 @@ object WavFile {
         return destination
     }
 
+    /** What is actually in a WAV, for a file this app may not have written. */
+    data class Info(val sampleRate: Int, val frames: Long, val millis: Long)
+
+    /**
+     * Read the rate and length back off disk.
+     *
+     * The alternative was to assume 24 kHz because that is what the two neural
+     * engines produce — but the system engine writes its own file at whatever
+     * rate it likes, and a duration derived from the wrong rate is a number that
+     * looks right and is not. Walks the chunk list rather than trusting the
+     * 44-byte layout, because only files this object wrote are guaranteed to
+     * have it.
+     */
+    fun describe(file: File): Info? = runCatching {
+        file.inputStream().buffered().use { input ->
+            val header = ByteArray(12)
+            if (input.read(header) != 12) return null
+            if (String(header, 0, 4, Charsets.US_ASCII) != "RIFF" ||
+                String(header, 8, 4, Charsets.US_ASCII) != "WAVE"
+            ) {
+                return null
+            }
+
+            var sampleRate = 0
+            var bitsPerSample = 16
+            var channels = 1
+            val chunk = ByteArray(8)
+            while (input.read(chunk) == 8) {
+                val id = String(chunk, 0, 4, Charsets.US_ASCII)
+                val size = le32(chunk, 4)
+                if (size < 0) return null
+                when (id) {
+                    "fmt " -> {
+                        val fmt = ByteArray(size)
+                        if (input.read(fmt) != size) return null
+                        channels = le16(fmt, 2).coerceAtLeast(1)
+                        sampleRate = le32(fmt, 4)
+                        bitsPerSample = le16(fmt, 14).coerceAtLeast(8)
+                    }
+                    "data" -> {
+                        if (sampleRate <= 0) return null
+                        val bytesPerFrame = (bitsPerSample / 8) * channels
+                        val frames = size.toLong() / bytesPerFrame.coerceAtLeast(1)
+                        return Info(sampleRate, frames, frames * 1000L / sampleRate)
+                    }
+                    else -> if (input.skip(size.toLong()) != size.toLong()) return null
+                }
+                // Chunks are word-aligned; an odd size carries a pad byte.
+                if (size % 2 == 1) input.read()
+            }
+            null
+        }
+    }.getOrNull()
+
+    private fun le16(bytes: ByteArray, offset: Int): Int =
+        (bytes[offset].toInt() and 0xFF) or ((bytes[offset + 1].toInt() and 0xFF) shl 8)
+
+    private fun le32(bytes: ByteArray, offset: Int): Int =
+        (bytes[offset].toInt() and 0xFF) or
+            ((bytes[offset + 1].toInt() and 0xFF) shl 8) or
+            ((bytes[offset + 2].toInt() and 0xFF) shl 16) or
+            ((bytes[offset + 3].toInt() and 0xFF) shl 24)
+
     private fun writeHeader(out: OutputStream, sampleCount: Int, sampleRate: Int) {
         val dataBytes = sampleCount * 2
         val byteRate = sampleRate * 2

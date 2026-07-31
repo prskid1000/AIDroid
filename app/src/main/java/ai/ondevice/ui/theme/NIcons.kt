@@ -63,7 +63,7 @@ object NIcons {
         return b.build()
     }
 
-    // — bottom bar, five destinations —
+    // — bottom bar, six destinations —
 
     /** Chat: a speech bubble with a flat tail. */
     val Chat: ImageVector by lazy { icon(1.7f, stroked = listOf("M4 5.5h16v11H9l-5 4z")) }
@@ -83,6 +83,22 @@ object NIcons {
     /** Voice: a five-bar waveform. */
     val Voice: ImageVector by lazy {
         icon(1.8f, cap = StrokeCap.Round, stroked = listOf("M4 11v2M8 8v8M12 4.5v15M16 8v8M20 11v2"))
+    }
+
+    /**
+     * Library: three spines on a shelf. Deliberately not the Models stack — one
+     * is what the device can do, the other is what it has done, and the two
+     * being adjacent in the bar makes telling them apart the icon's job.
+     */
+    val Library: ImageVector by lazy {
+        icon(
+            1.7f,
+            stroked = listOf(
+                rrect(4f, 5f, 4f, 15f, 1f),
+                rrect(10f, 5f, 4f, 15f, 1f),
+                "M16.5 6.2l3.4 1 -3 13.4 -3.4-1z",
+            ),
+        )
     }
 
     /** Models: stacked layers — also the launcher mark. */

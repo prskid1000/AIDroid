@@ -17,6 +17,7 @@ import ai.ondevice.ui.screens.ChatScreen
 import ai.ondevice.ui.screens.DownloadQueueScreen
 import ai.ondevice.ui.screens.GalleryScreen
 import ai.ondevice.ui.screens.ImageScreen
+import ai.ondevice.ui.screens.LibraryScreen
 import ai.ondevice.ui.screens.MaskEditorScreen
 import ai.ondevice.ui.screens.ModelDetailScreen
 import ai.ondevice.ui.screens.ModelsScreen
@@ -32,15 +33,16 @@ import ai.ondevice.ui.theme.NIcons
 /**
  * Routes.
  *
- * The canvas' own framing: SPEC §12's ten screens collapse into four modalities
- * plus system config, so there are five bottom destinations — Chat, Image,
- * Voice, Models, Settings — and everything else is a push or a sheet inside
- * one of them.
+ * The canvas' own framing: SPEC §12's ten screens collapse into three modalities
+ * plus history and system config, so there are six bottom destinations — Chat,
+ * Image, Voice, Library, Models, Settings — and everything else is a push or a
+ * sheet inside one of them.
  */
 object Routes {
     const val CHAT = "chat"
     const val IMAGE = "image"
     const val VOICE = "voice"
+    const val LIBRARY = "library"
     const val MODELS = "models"
     const val SETTINGS = "settings"
 
@@ -67,7 +69,13 @@ object Routes {
     ) = "params/all?tier=${tier.name}&runtime=${android.net.Uri.encode(runtime)}"
     const val PROMPT_INSPECTOR = "chat/prompt"
     const val MASK_EDITOR = "image/mask"
-    const val GALLERY = "image/gallery"
+
+    /**
+     * Under Library, not Image. `NBottomBar` highlights by route prefix, so the
+     * old `image/gallery` lit the Image tab while the user was standing in a
+     * screen they reached from the library.
+     */
+    const val GALLERY = "library/gallery"
     const val RUNTIMES = "settings/runtimes"
     const val TOOLS = "settings/tools"
 
@@ -79,10 +87,15 @@ object Routes {
     fun modelDetail(modelId: String) = "models/detail/${android.net.Uri.encode(modelId)}"
 }
 
+/**
+ * Three things this device makes, then the two that describe it: what it has
+ * made, and what it can make things with.
+ */
 val BottomDestinations = listOf(
     NavDestination("Chat", NIcons.Chat, Routes.CHAT),
     NavDestination("Image", NIcons.Image, Routes.IMAGE),
     NavDestination("Voice", NIcons.Voice, Routes.VOICE),
+    NavDestination("Library", NIcons.Library, Routes.LIBRARY),
     NavDestination("Models", NIcons.Models, Routes.MODELS),
     NavDestination("Settings", NIcons.Settings, Routes.SETTINGS),
 )
@@ -123,7 +136,6 @@ fun OnDeviceApp(
                 currentRoute = currentRoute,
                 onNavigate = { navController.navigateToRoot(it) },
                 onOpenMask = { navController.navigate(Routes.MASK_EDITOR) },
-                onOpenGallery = { navController.navigate(Routes.GALLERY) },
                 onOpenRuntimes = { navController.navigate(Routes.RUNTIMES) },
                 onAddModel = { navController.navigate(Routes.ADD_MODEL) },
                 onOpenAdvanced = {
@@ -148,6 +160,17 @@ fun OnDeviceApp(
                         Routes.parameters(tier = ai.ondevice.core.Tier.ADVANCED, runtime = runtime),
                     )
                 },
+            )
+        }
+        composable(Routes.LIBRARY) {
+            LibraryScreen(
+                currentRoute = currentRoute,
+                onNavigate = { navController.navigateToRoot(it) },
+                // Opening a thread switches the shared chat view model and then
+                // moves to Chat, so the tab the user lands on is already showing
+                // what they picked.
+                onOpenConversation = { navController.navigateToRoot(Routes.CHAT) },
+                onOpenGallery = { navController.navigate(Routes.GALLERY) },
             )
         }
         composable(Routes.MODELS) {

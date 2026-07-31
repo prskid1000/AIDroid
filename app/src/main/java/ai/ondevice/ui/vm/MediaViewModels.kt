@@ -311,6 +311,34 @@ class ImageViewModel @Inject constructor(
         generationJob = null
     }
 
+    /**
+     * Clear the composition and start again.
+     *
+     * The prompts, the attached images and the last result — not the model, the
+     * size or the sampler. Those are how this device is set up rather than what
+     * this picture is, and resetting them would make the button a factory reset
+     * dressed as a new page. The previous image is already in the library.
+     */
+    fun reset() {
+        cancel()
+        update {
+            copy(
+                prompt = "",
+                negativePrompt = "",
+                sourceImageUri = null,
+                controlImageUri = null,
+                maskPath = null,
+                lastImage = null,
+                usedSeed = null,
+                error = null,
+                errorHint = null,
+                step = 0,
+                progressSteps = 0,
+                previewBitmap = null,
+            )
+        }
+    }
+
     // — attachments (SPEC §5, generically) —
 
     /**
@@ -1002,6 +1030,37 @@ class VoiceViewModel @Inject constructor(
     }
 
     /**
+     * Clear the work in progress, keep the setup.
+     *
+     * The script, the reference clip and the last transcript go; the engine, the
+     * voice and the dials stay, for the same reason the Image screen's reset
+     * leaves the model alone — they are how this device is configured, not what
+     * this take is. Anything already rendered is in the library.
+     */
+    fun reset() {
+        stopSpeaking()
+        if (_state.value.recording) stopRecording()
+        _state.value = _state.value.copy(
+            script = "",
+            scriptSource = null,
+            speakError = null,
+            lastAudioPath = null,
+            spokenRange = null,
+            referenceSamples = null,
+            referenceTranscript = "",
+            referenceSeconds = 0f,
+            referenceName = "",
+            transcribingReference = false,
+            segments = emptyList(),
+            partial = emptyList(),
+            title = "",
+            error = null,
+            errorHint = null,
+            elapsedMillis = 0,
+        )
+    }
+
+    /**
      * Render to a WAV the user can keep or send. §7 asks for export, and a
      * passage you can only hear once is not an artifact.
      */
@@ -1013,14 +1072,43 @@ class VoiceViewModel @Inject constructor(
         }
         _state.value = _state.value.copy(rendering = true, speakError = null)
         viewModelScope.launch {
-            val name = (_state.value.scriptSource ?: "read-aloud")
+            val stem = (_state.value.scriptSource ?: "read-aloud")
                 .substringBeforeLast('.')
                 .lowercase()
                 .replace(Regex("[^a-z0-9]+"), "-")
                 .trim('-')
                 .ifBlank { "read-aloud" }
-            val destination = java.io.File(storage.transcriptsDir(), "$name.wav")
-            val result = synthesizer.synthesizeToFile(currentRequest(text), destination)
+            // Uniquified. The name came from the script's source, so rendering
+            // the same passage twice — at a different speed, or in a different
+            // voice, which is the entire reason to render it twice — silently
+            // overwrote the first take.
+            val destination = java.io.File(
+                storage.speechDir(),
+                "$stem-${System.currentTimeMillis()}.wav",
+            )
+            val request = currentRequest(text)
+            val result = synthesizer.synthesizeToFile(request, destination)
+            result.getOrNull()?.let { file ->
+                val info = ai.ondevice.speech.WavFile.describe(file)
+                db.syntheses().upsert(
+                    ai.ondevice.data.db.SynthesisEntity(
+                        id = java.util.UUID.randomUUID().toString(),
+                        path = file.absolutePath,
+                        text = text,
+                        engineId = request.provider.name.lowercase(),
+                        modelId = _state.value.ttsModel?.id,
+                        voice = request.voiceId,
+                        paramsJson = ai.ondevice.core.SparseParams.of(
+                            "speed" to _state.value.speed,
+                            "pitch" to _state.value.pitch,
+                            "volume" to _state.value.volume,
+                        ).toJsonString(),
+                        durationMillis = info?.millis ?: 0L,
+                        sampleRate = info?.sampleRate ?: 0,
+                        createdAt = System.currentTimeMillis(),
+                    ),
+                )
+            }
             _state.value = _state.value.copy(
                 rendering = false,
                 speakError = result.exceptionOrNull()?.message,

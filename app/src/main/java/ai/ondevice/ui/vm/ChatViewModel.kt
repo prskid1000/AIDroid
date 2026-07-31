@@ -168,6 +168,10 @@ class ChatViewModel @Inject constructor(
      */
     fun startNewConversation() {
         if (_state.value.generating) stop()
+        // Already on an empty one. Writing a second row would leave the first
+        // behind for good — nothing ever deletes it — so pressing this a few
+        // times filled the library with threads that had never held anything.
+        if (_state.value.messages.isEmpty() && _state.value.conversation != null) return
         viewModelScope.launch {
             // Dropping the KV is llama-specific, so it is asked for by type
             // rather than added to the engine interface — no other runtime has
@@ -187,6 +191,57 @@ class ChatViewModel @Inject constructor(
                 lastExport = null,
                 importSummary = null,
             )
+        }
+    }
+
+    /**
+     * Switch to a thread the user picked out of the library.
+     *
+     * The KV goes with it for the same reason [startNewConversation] drops it:
+     * the cache holds the *previous* thread's tokens, and llama.cpp would happily
+     * treat them as a shared prefix of a conversation that never contained them.
+     */
+    fun openConversation(id: String) {
+        if (_state.value.conversation?.id == id) return
+        if (_state.value.generating) stop()
+        viewModelScope.launch {
+            val conversation = db.conversations().get(id) ?: return@launch
+            (engines.llama as? ai.ondevice.engine.LlamaEngine)?.clearCache()
+            prefs.setLastConversationId(conversation.id)
+            _state.value = _state.value.copy(
+                conversation = conversation,
+                streaming = null,
+                input = "",
+                pendingAttachments = emptyList(),
+                contextUsed = 0,
+                cachedTokens = 0,
+                error = null,
+                errorSuggestion = null,
+                lastExport = null,
+                importSummary = null,
+                selectedPresetId = conversation.presetId ?: _state.value.selectedPresetId,
+                selectedPersonaId = conversation.personaId,
+                systemPrompt = conversation.systemPrompt ?: "",
+                model = conversation.modelId?.let { db.models().get(it) } ?: _state.value.model,
+                messages = db.messages().getFor(conversation.id),
+            )
+        }
+    }
+
+    fun deleteConversation(id: String) {
+        viewModelScope.launch {
+            db.messages().clearFor(id)
+            db.conversations().deleteById(id)
+            if (_state.value.conversation?.id == id) {
+                (engines.llama as? ai.ondevice.engine.LlamaEngine)?.clearCache()
+                val next = db.conversations().mostRecent() ?: newConversation()
+                prefs.setLastConversationId(next.id)
+                _state.value = _state.value.copy(
+                    conversation = next,
+                    messages = db.messages().getFor(next.id),
+                    streaming = null,
+                )
+            }
         }
     }
 
