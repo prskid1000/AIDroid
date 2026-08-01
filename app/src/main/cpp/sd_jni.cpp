@@ -487,6 +487,7 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
         jbyteArray jinit, jint initW, jint initH,
         jbyteArray jmask, jint maskW, jint maskH,
         jbyteArray jcontrol, jint controlW, jint controlH,
+        jbyteArray jref, jint refW, jint refH,
         jstring jattachments) {
     auto * e = as_sd(handle);
     if (e == nullptr || e->ctx == nullptr) {
@@ -509,6 +510,10 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
     owned_image init    = take_image(env, jinit, initW, initH);
     owned_image mask    = take_image(env, jmask, maskW, maskH);
     owned_image control = take_image(env, jcontrol, controlW, controlH);
+    // The picture an edit model is *shown*, as distinct from the one an
+    // img2img run starts from. Kontext and FLUX.2 read this one; it is `-r` on
+    // upstream's command line and it does not go through denoising strength.
+    owned_image reference = take_image(env, jref, refW, refH);
 
     // Attachments arrive as a role-tagged list, not as named arguments.
     std::vector<sd_lora_t>   loras;
@@ -580,6 +585,14 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
 
     params.vae_tiling_params.enabled = e->vae_tiling;
 
+    if (reference.image.data != nullptr) {
+        params.ref_images       = &reference.image;
+        params.ref_images_count = 1;
+        // An edit model is told what to change, not how far to travel from
+        // where it started, so the strength dial has nothing to act on.
+        params.width  = (int) reference.image.width;
+        params.height = (int) reference.image.height;
+    }
     if (init.image.data != nullptr) {
         params.init_image = init.image;
         // Only the source's true size is meaningful for img2img; generating at

@@ -226,7 +226,6 @@ fun ModelsScreen(
                                 )
                                 loaded -> NTag("loaded", style = NTagStyle.Accent)
                                 model.modality == Modality.VISION -> NTag("vision", style = NTagStyle.Outline)
-                                model.modality == Modality.DIFFUSION -> NTag("CPU only", style = NTagStyle.Neutral)
                                 else -> Unit
                             }
                         }

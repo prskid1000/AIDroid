@@ -134,6 +134,7 @@ class DiffusionEngine(
         )
 
         val init = request.initImageUri?.let { decodeRgb(it) }
+        val reference = request.referenceImageUri?.let { decodeRgb(it) }
         val control = request.controlImageUri?.let { decodeRgb(it) }
         val mask = request.maskPngPath?.let { decodeRgbFromFile(it) }
 
@@ -175,6 +176,7 @@ class DiffusionEngine(
                     init?.pixels, init?.width ?: 0, init?.height ?: 0,
                     mask?.pixels, mask?.width ?: 0, mask?.height ?: 0,
                     control?.pixels, control?.width ?: 0, control?.height ?: 0,
+                    reference?.pixels, reference?.width ?: 0, reference?.height ?: 0,
                     attachmentsJson,
                 )
                 if (bytes == null) {
@@ -328,7 +330,14 @@ class DiffusionEngine(
 
 data class DiffusionRequest(
     val params: SparseParams,
+    /** Where an img2img run starts from, travelled away from by `strength`. */
     val initImageUri: String? = null,
+    /**
+     * The picture an edit model is *shown*. Kontext and FLUX.2 read this and
+     * change what the prompt asks for, leaving the rest alone; it is a
+     * different thing from [initImageUri] and the two do not mix.
+     */
+    val referenceImageUri: String? = null,
     val controlImageUri: String? = null,
     val maskPngPath: String? = null,
     val attachments: List<ModelAttachment> = emptyList(),

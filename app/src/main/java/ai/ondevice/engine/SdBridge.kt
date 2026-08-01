@@ -64,6 +64,8 @@ object SdBridge {
         init: ByteArray?, initWidth: Int, initHeight: Int,
         mask: ByteArray?, maskWidth: Int, maskHeight: Int,
         control: ByteArray?, controlWidth: Int, controlHeight: Int,
+        /** The picture an edit model is shown — `-r` upstream, not img2img. */
+        reference: ByteArray?, referenceWidth: Int, referenceHeight: Int,
         attachmentsJson: String,
     ): ByteArray?
 }

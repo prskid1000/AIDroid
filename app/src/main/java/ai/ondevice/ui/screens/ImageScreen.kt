@@ -71,7 +71,7 @@ import ai.ondevice.ui.theme.Radius
 import ai.ondevice.ui.theme.bottomScrim
 import ai.ondevice.ui.theme.ring
 import ai.ondevice.ui.vm.ImageAction
-import ai.ondevice.ui.vm.ImageMode
+import ai.ondevice.ui.vm.ImageUse
 import ai.ondevice.ui.vm.ImageState
 import ai.ondevice.ui.vm.ImageViewModel
 
@@ -99,18 +99,6 @@ fun ImageScreen(
         toolbar = {
             // The same pair Chat and Voice carry.
             RootToolbar("Image") {
-                ImageMode.entries.forEach { mode ->
-                    ToolbarToggle(
-                        when (mode) {
-                            ImageMode.GENERATE -> NIcons.Image
-                            ImageMode.INPAINT -> NIcons.Brush
-                            ImageMode.OUTPAINT -> NIcons.Expand
-                        },
-                        mode.label,
-                        selected = state.mode == mode,
-                        onClick = { viewModel.setMode(mode) },
-                    )
-                }
                 ToolbarAction(NIcons.Plus, "New image", viewModel::reset)
                 ToolbarAction(NIcons.Settings, "Image settings", { settingsOpen = true })
             }
@@ -231,7 +219,21 @@ fun ImageScreen(
                 )
             }
 
-            if (state.mode == ImageMode.OUTPAINT) {
+            // What the attached picture is for. Four screens once, and they
+            // were one screen: a prompt in, a picture out, and a picture
+            // optionally in. With nothing attached there is nothing to decide.
+            if (state.sourceImageUri != null) {
+                SectionKicker("This picture is to", Modifier.padding(top = 14.dp, bottom = 8.dp))
+                val uses = ImageUse.entries
+                NSeg(
+                    options = uses.map { it.label },
+                    selectedIndex = uses.indexOf(state.use).coerceAtLeast(0),
+                    onSelect = { viewModel.setUse(uses[it]) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            if (state.use == ImageUse.EXTEND && state.sourceImageUri != null) {
                 ExtendField(state, viewModel)
             }
 
@@ -271,7 +273,7 @@ fun ImageScreen(
                         color = NocturneColors.Accent300,
                     )
                 }
-                if (state.mode == ImageMode.INPAINT) {
+                if (state.use == ImageUse.REPAINT) {
                     NButton(
                         "Edit mask",
                         onClick = onOpenMask,
@@ -303,8 +305,7 @@ fun ImageScreen(
                         )
                     }
                     Text(
-                        "Turn on vae_tiling or drop to 768. sd.cpp on Adreno 829 is unproven — this " +
-                            "runs on CPU.",
+                        "Turn on vae_tiling or drop to 768.",
                         style = NocturneType.CardBody,
                         color = NocturneColors.Text.copy(alpha = 0.8f),
                     )
@@ -710,9 +711,11 @@ private fun TaesdPreview(state: ImageState) {
             .ring(NocturneColors.Divider, Radius.Md),
         contentAlignment = Alignment.Center,
     ) {
-        // The real thing, in priority order: the decoded latent while sampling, then the finished image, then the source it will act on.
+        // This frame is the output and only ever the output: the decoded
+        // latent while sampling, then the finished picture. It used to fall
+        // back to the source image, which has its own field below with its own
+        // thumbnail — the same picture in the result frame reads as a result.
         val preview = state.previewBitmap
-        val showingSource = preview == null && state.sourceImageUri != null
         if (preview != null) {
             androidx.compose.foundation.Image(
                 bitmap = preview.asImageBitmap(),
@@ -720,18 +723,11 @@ private fun TaesdPreview(state: ImageState) {
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize(),
             )
-        } else if (showingSource) {
-            AsyncImage(
-                model = state.sourceImageUri,
-                contentDescription = "Source image",
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
         }
 
         // The latent field only blooms while sampling.
         val bloom = when {
-            preview != null || showingSource -> 0f
+            preview != null -> 0f
             state.generating -> 1f
             else -> 0.12f
         }
@@ -764,7 +760,7 @@ private fun TaesdPreview(state: ImageState) {
         }
 
         // "Warming up" is only true before the first step.
-        if (!showingSource && preview == null) {
+        if (preview == null) {
             Text(
                 // Driven by the phase, because the phase is the thing that knows.
                 when {
@@ -811,16 +807,15 @@ private fun TaesdPreview(state: ImageState) {
                         style = NocturneType.MonoSm,
                         color = NocturneColors.Accent200,
                     )
-                    Text("·", style = NocturneType.MonoSm, color = Color.White.copy(alpha = 0.7f))
-                    Text(
-                        if (state.secondsPerStep > 0f) {
-                            "CPU · ${String.format("%.1f", state.secondsPerStep)} s/it"
-                        } else {
-                            "CPU"
-                        },
-                        style = NocturneType.MonoSm,
-                        color = Color.White.copy(alpha = 0.7f),
-                    )
+                    if (state.secondsPerStep > 0f) {
+                        Text("·", style = NocturneType.MonoSm, color = Color.White.copy(alpha = 0.7f))
+                        // The rate, not the device: there is one device.
+                        Text(
+                            "${String.format("%.1f", state.secondsPerStep)} s/it",
+                            style = NocturneType.MonoSm,
+                            color = Color.White.copy(alpha = 0.7f),
+                        )
+                    }
                     Box(Modifier.weight(1f))
                     // An ETA computed from a rate we do not have yet is a
                     // guess dressed as a number. Better to show nothing.

@@ -287,8 +287,8 @@ fun AddModelScreen(
                 }
 
                 NHelp(
-                    "Everything runs on the CPU, so size is the whole story: a smaller quant is " +
-                        "faster and leaves more room, and pays for it in quality.",
+                    "Size is the whole story: a smaller quant is faster and leaves more room, " +
+                        "and pays for it in quality.",
                     Modifier.padding(top = 8.dp),
                 )
 

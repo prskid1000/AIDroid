@@ -91,8 +91,8 @@ class ImageViewModel @Inject constructor(
         viewModelScope.launch { db.models().touch(model.id, System.currentTimeMillis()) }
     }
 
-    fun setMode(mode: ImageMode) {
-        _state.value = _state.value.copy(mode = mode)
+    fun setUse(use: ImageUse) {
+        _state.value = _state.value.copy(use = use)
     }
 
     fun setPrompt(value: String) = update { copy(prompt = value) }
@@ -206,9 +206,16 @@ class ImageViewModel @Inject constructor(
                 diffusion.generate(
                     ai.ondevice.engine.DiffusionRequest(
                         params = params,
-                        initImageUri = _state.value.sourceImageUri,
+                        // The same picked file, down one of two roads: an
+                        // edit model is shown it, everything else starts from
+                        // it. Sending both would be asking for two things.
+                        initImageUri = _state.value.sourceImageUri
+                            .takeIf { _state.value.use != ImageUse.EDIT },
+                        referenceImageUri = _state.value.sourceImageUri
+                            .takeIf { _state.value.use == ImageUse.EDIT },
                         controlImageUri = _state.value.controlImageUri,
-                        maskPngPath = _state.value.maskPath,
+                        maskPngPath = _state.value.maskPath
+                            ?.takeIf { _state.value.use == ImageUse.REPAINT },
                         attachments = _state.value.attachments,
                     ),
                 ).collect { event ->
@@ -447,15 +454,19 @@ class ImageViewModel @Inject constructor(
             "schedule" to s.schedule,
             "clip_skip" to s.clipSkip,
             "vae_tiling" to s.vaeTiling,
-            "mode" to s.mode.name.lowercase(),
+            // Recorded so a picture in the library says what was done to it,
+            // not only what was asked for.
+            "use" to s.use.name.lowercase().takeIf { s.sourceImageUri != null },
             // Strength only means something when there is a source to denoise,
             // and that is now a property of the picture rather than the mode.
-            "strength" to s.strength.takeIf { s.sourceImageUri != null },
+            "strength" to s.strength.takeIf {
+                s.sourceImageUri != null && s.use != ImageUse.EDIT
+            },
             "init_img" to s.sourceImageUri,
             "control_image" to s.controlImageUri,
             "control_strength" to s.controlStrength.takeIf { s.controlImageUri != null },
             "extend" to listOf(s.extendLeft, s.extendTop, s.extendRight, s.extendBottom)
-                .takeIf { s.mode == ImageMode.OUTPAINT && it.any { px -> px > 0 } },
+                .takeIf { s.use == ImageUse.EXTEND && it.any { px -> px > 0 } },
         )
     }
 
@@ -487,16 +498,37 @@ class ImageViewModel @Inject constructor(
 /** What the Image screen's primary action should say and do right now. */
 enum class ImageAction { INSTALL_RUNTIME, ADD_MODEL, PICK_SOURCE, GENERATE, CANCEL }
 
-enum class ImageMode(val label: String) {
-    /** Prompt in, picture out — with an *optional* source image. */
-    GENERATE("Generate"),
-    INPAINT("Inpaint"),
+/**
+ * What the attached picture is *for*.
+ *
+ * These were four screens for one act: a prompt, optionally a picture, and a
+ * picture out. With no picture attached none of this applies and the screen is
+ * plain text-to-image, which is why it is a property of the attachment rather
+ * than a mode of the screen.
+ */
+enum class ImageUse(val label: String) {
+    /**
+     * Show the model the picture and say what to change.
+     *
+     * The reference-image path — `-r` upstream — which an edit model reads
+     * directly rather than travelling away from by a denoising strength.
+     * sd.cpp picks the behaviour from the loaded model itself, so a model
+     * without one simply answers from the prompt.
+     */
+    EDIT("Edit it"),
 
-    OUTPAINT("Extend"),
+    /** img2img: begin at this picture and move away from it by `strength`. */
+    START_FROM("Start from it"),
+
+    /** Repaint inside a mask you paint. */
+    REPAINT("Repaint part"),
+
+    /** Grow the canvas and fill the new border. */
+    EXTEND("Extend it"),
 }
 
 data class ImageState(
-    val mode: ImageMode = ImageMode.GENERATE,
+    val use: ImageUse = ImageUse.EDIT,
     val model: ModelEntity? = null,
     val prompt: String = "low-key studio portrait of a lynx, black backdrop, rim light <lora:filmgrain:0.6>",
     val negativePrompt: String = "blurry, oversaturated",
@@ -556,10 +588,13 @@ data class ImageState(
     val progress: Float
         get() = if (progressSteps > 0) (step.toFloat() / progressSteps).coerceIn(0f, 1f) else 0f
     /** The denoise dial appears when, and only when, there is a source. */
-    val showStrength: Boolean get() = sourceImageUri != null
+    /** The denoise dial belongs to the two uses that denoise from a start. */
+    val showStrength: Boolean
+        get() = sourceImageUri != null && use != ImageUse.EDIT
 
     /** Inpaint and Extend cannot proceed without one; Generate can. */
-    val requiresSource: Boolean get() = mode != ImageMode.GENERATE
+    /** Every use of an attached picture needs one; nothing else does. */
+    val requiresSource: Boolean get() = false
 
     val outputWidth: Int get() = width + extendLeft + extendRight
     val outputHeight: Int get() = height + extendTop + extendBottom
@@ -588,11 +623,10 @@ data class ImageState(
             ImageAction.INSTALL_RUNTIME ->
                 "Diffusion is optional and ships separately. Settings → Runtimes installs it."
             ImageAction.ADD_MODEL ->
-                "stable-diffusion.cpp is installed, but no diffusion model is. Paste an SD or " +
-                    "SDXL repo on the Add model screen."
+                "stable-diffusion.cpp is installed, but no diffusion model is. The Add model " +
+                    "screen lists the ones this build runs."
             ImageAction.PICK_SOURCE ->
-                "${mode.label} starts from an image. Denoise strength has nothing to act on until " +
-                    "you pick one."
+                "\"${use.label}\" needs a picture to act on."
             else -> null
         }
 }

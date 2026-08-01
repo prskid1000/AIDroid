@@ -250,6 +250,23 @@ object NIcons {
     }
     val Erase: ImageVector by lazy { icon(1.7f, stroked = listOf("M9 19H5l-1.5-4 11-11 4 4-11 11z", "M13 21h8")) }
 
+    /**
+     * Edit by instruction: a wand, not a brush.
+     *
+     * Erase and Brush are both a diagonal stroke and are indistinguishable at
+     * toolbar size, and this is a different act anyway — you say what to change
+     * rather than painting where.
+     */
+    val Wand: ImageVector by lazy {
+        icon(
+            1.7f,
+            stroked = listOf(
+                "M4 20l9-9",
+                "M17 3l1.1 2.6L20.7 6.7l-2.6 1.1L17 10.4l-1.1-2.6L13.3 6.7l2.6-1.1z",
+            ),
+        )
+    }
+
     /** Invert: a circle with one half filled. */
     val Invert: ImageVector by lazy {
         icon(

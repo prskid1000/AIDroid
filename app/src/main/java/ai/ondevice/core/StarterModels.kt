@@ -84,10 +84,24 @@ object StarterModels {
                 "Needs the Qwen3 4B encoder and the FLUX.2 VAE below — 5.4 GB in all.",
             sizeHint = "~2.5 GB at Q4",
         ),
+
+        // Stable Diffusion's current generation. Like Klein it keeps its text
+        // encoders outside the checkpoint, so it also costs more than its own
+        // size — three of them, listed below as required.
+        StarterModel(
+            repoId = "city96/stable-diffusion-3.5-medium-gguf",
+            modality = Modality.DIFFUSION,
+            summary = "SD 3.5 medium. Reads a prompt closely and writes legible text. " +
+                "Needs all three encoders below — about 5 GB together.",
+            sizeHint = "~1.8 GB at Q4",
+        ),
     )
 
     /** The text encoder FLUX.2 Klein 4B reads its prompt with. */
     const val FLUX_ENCODER = "unsloth/Qwen3-4B-GGUF"
+
+    /** SD 3.5's three, which live together in one repo. */
+    const val SD35_ENCODERS = "Comfy-Org/stable-diffusion-3.5-fp8"
 
     /** The things that attach to a diffusion model. */
     val ADDONS: List<StarterModel> = listOf(
@@ -109,11 +123,38 @@ object StarterModels {
             sizeHint = "~336 MB",
         ),
 
-        // Nothing for SD 1.5 is listed any more, and neither is SD 1.5: a
-        // ControlNet, an IP-Adapter and a LoRA that only fit a model the app no
-        // longer offers are five downloads that cannot be used. The upscaler
-        // below is the exception — it enlarges a finished PNG and does not care
-        // which model made it.
+        // — the three SD 3.5 cannot run without, all from one repo —
+        StarterModel(
+            repoId = SD35_ENCODERS,
+            modality = Modality.DIFFUSION,
+            role = AttachmentRole.CLIP_L,
+            summary = "SD 3.5's first text encoder — split_files/text_encoders/clip_l.",
+            sizeHint = "~246 MB",
+        ),
+        StarterModel(
+            repoId = SD35_ENCODERS,
+            modality = Modality.DIFFUSION,
+            role = AttachmentRole.CLIP_G,
+            summary = "SD 3.5's second — split_files/text_encoders/clip_g.",
+            sizeHint = "~1.4 GB",
+        ),
+        StarterModel(
+            repoId = SD35_ENCODERS,
+            modality = Modality.DIFFUSION,
+            role = AttachmentRole.T5XXL,
+            summary = "SD 3.5's third, and the one that reads a long prompt as a sentence " +
+                "rather than as keywords — split_files/text_encoders/t5xxl.",
+            sizeHint = "~4.9 GB fp8",
+        ),
+
+        // No ControlNet and no IP-Adapter, and it is not an omission.
+        // sd.cpp's are UNet-shaped — control.hpp branches on SD1/SD2/SDXL, and
+        // the IP-Adapter injects into a UNet's attn2 layers. SD 3.5 and FLUX.2
+        // are both DiTs with no UNet to inject into, so either would attach to
+        // nothing. They come back the day this build carries a DiT ControlNet.
+        //
+        // The upscaler is model-agnostic: it enlarges a finished PNG and does
+        // not care what made it.
         StarterModel(
             repoId = "ai-forever/Real-ESRGAN",
             modality = Modality.DIFFUSION,
