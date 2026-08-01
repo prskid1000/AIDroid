@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -496,11 +497,16 @@ private fun StarterRows(
                     )
                 }
                 // Stated before the tap, because the download is the part that
-                // costs something.
+                // costs something. Capped, because it is a figure beside a
+                // name and not a second description: an over-long one used to
+                // take the row and leave the repo id wrapping four characters
+                // at a time.
                 Text(
                     entry.sizeHint,
                     style = NocturneType.MonoXs,
                     color = NocturneColors.TextMuted,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                    modifier = Modifier.widthIn(max = 118.dp),
                 )
             }
         }

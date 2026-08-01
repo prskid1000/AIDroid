@@ -80,16 +80,9 @@ object StarterModels {
         StarterModel(
             repoId = "leejet/FLUX.2-klein-4B-GGUF",
             modality = Modality.DIFFUSION,
-            summary = "Follows instructions and edits a picture you give it. " +
-                "Four steps. Needs the Qwen3 4B encoder and the FLUX.2 VAE below.",
-            sizeHint = "~2.5 GB at Q4, ~5.4 GB with its two required parts",
-        ),
-        StarterModel(
-            repoId = "second-state/stable-diffusion-v1-5-GGUF",
-            modality = Modality.DIFFUSION,
-            summary = "SD 1.5. The smallest thing that makes a real picture, and " +
-                "the only one here that needs nothing beside it.",
-            sizeHint = "~2.0 GB at Q4",
+            summary = "Follows instructions and edits a picture you give it, in four steps. " +
+                "Needs the Qwen3 4B encoder and the FLUX.2 VAE below — 5.4 GB in all.",
+            sizeHint = "~2.5 GB at Q4",
         ),
     )
 
@@ -105,54 +98,22 @@ object StarterModels {
             role = AttachmentRole.LLM_ENCODER,
             summary = "FLUX.2 Klein 4B reads its prompt with this. Required, and the " +
                 "reason a 4B image model costs 5 GB. Pick Q4_K_M.",
-            sizeHint = "~2.5 GB at Q4_K_M",
+            sizeHint = "~2.5 GB at Q4",
         ),
         StarterModel(
             repoId = "Comfy-Org/flux2-klein-4B",
             modality = Modality.DIFFUSION,
             role = AttachmentRole.VAE,
-            summary = "FLUX.2's decoder — split_files/vae/flux2-vae.safetensors. " +
+            summary = "FLUX.2's decoder, at split_files/vae/flux2-vae.safetensors. " +
                 "Required: Klein produces latents and nothing else can read them.",
             sizeHint = "~336 MB",
         ),
 
-        // — the rest, which are choices rather than requirements —
-        StarterModel(
-            repoId = "comfyanonymous/ControlNet-v1-1_fp16_safetensors",
-            modality = Modality.DIFFUSION,
-            role = AttachmentRole.CONTROLNET,
-            summary = "Canny, depth, openpose and eleven more, for SD 1.5. Pick one file.",
-            sizeHint = "~723 MB each",
-        ),
-        StarterModel(
-            repoId = "h94/IP-Adapter",
-            modality = Modality.DIFFUSION,
-            role = AttachmentRole.IP_ADAPTER,
-            summary = "Style from a reference picture instead of from words. SD 1.5.",
-            sizeHint = "~44 MB for sd15",
-        ),
-        StarterModel(
-            repoId = "latent-consistency/lcm-lora-sdv1-5",
-            modality = Modality.DIFFUSION,
-            role = AttachmentRole.LORA,
-            summary = "The useful first LoRA: usable pictures in 4–8 steps instead of 28. " +
-                "SD 1.5 — Klein is already a four-step model.",
-            sizeHint = "~135 MB",
-        ),
-        StarterModel(
-            repoId = "madebyollin/taesd",
-            modality = Modality.DIFFUSION,
-            role = AttachmentRole.TAESD,
-            summary = "The tiny decoder behind the live preview. Cheap, and worth it. SD 1.5.",
-            sizeHint = "~5 MB",
-        ),
-        StarterModel(
-            repoId = "stabilityai/sd-vae-ft-mse-original",
-            modality = Modality.DIFFUSION,
-            role = AttachmentRole.VAE,
-            summary = "A better decoder for SD 1.5 — fixes washed-out colour.",
-            sizeHint = "~335 MB",
-        ),
+        // Nothing for SD 1.5 is listed any more, and neither is SD 1.5: a
+        // ControlNet, an IP-Adapter and a LoRA that only fit a model the app no
+        // longer offers are five downloads that cannot be used. The upscaler
+        // below is the exception — it enlarges a finished PNG and does not care
+        // which model made it.
         StarterModel(
             repoId = "ai-forever/Real-ESRGAN",
             modality = Modality.DIFFUSION,
