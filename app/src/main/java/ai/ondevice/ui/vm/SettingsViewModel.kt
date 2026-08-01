@@ -13,6 +13,7 @@ import ai.ondevice.data.prefs.AppPrefs
 import ai.ondevice.data.secure.TokenStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -200,7 +201,21 @@ class SettingsViewModel @Inject constructor(
     private val storage: ModelStorage,
 ) : ViewModel() {
 
-    val settings: StateFlow<SettingsState> = prefs.wifiOnly.map { wifiOnly ->
+    /**
+     * The stored token, as something that emits.
+     *
+     * The keystore is a plain getter and setter with nothing to observe, and
+     * the state below used to read it inside the map over `wifiOnly`. That made
+     * the token visible only when the Wi-Fi switch happened to move: saving one
+     * and removing one both changed the store and left the screen showing what
+     * it had shown before, which reads as neither button working.
+     */
+    private val tokenRevision = MutableStateFlow(tokens.hfToken)
+
+    val settings: StateFlow<SettingsState> = combine(
+        prefs.wifiOnly,
+        tokenRevision,
+    ) { wifiOnly, _ ->
         SettingsState(
             wifiOnly = wifiOnly,
             hasToken = tokens.hasToken,
@@ -224,6 +239,9 @@ class SettingsViewModel @Inject constructor(
 
     fun setToken(value: String?) {
         tokens.hfToken = value
+        // Read back rather than echoing the argument: the store treats blank
+        // as absent, so what it kept is the only honest thing to publish.
+        tokenRevision.value = tokens.hfToken
     }
 }
 
