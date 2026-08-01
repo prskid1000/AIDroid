@@ -22,14 +22,35 @@ class RoleFromPathTest {
     }
 
     @Test
-    fun `so are the encoders that use the same layout`() {
-        assertEquals(
-            AttachmentRole.CLIP_L,
-            AttachmentRole.classify("text_encoder/clip_l/model.safetensors"),
-        )
+    fun `an encoder names itself in the file, so the file is what is read`() {
         assertEquals(
             AttachmentRole.T5XXL,
             AttachmentRole.classify("split_files/text_encoders/t5xxl_fp16.safetensors"),
+        )
+        assertEquals(
+            AttachmentRole.CLIP_G,
+            AttachmentRole.classify("text_encoders/clip_g.safetensors"),
+        )
+    }
+
+    // A folder declares the role; a repo name mentioning one does not.
+
+    @Test
+    fun `a UNet in a repo whose name says vae is still a UNet`() {
+        assertNull(AttachmentRole.classify("sd-vae-ft-mse/unet/diffusion_pytorch_model.safetensors"))
+    }
+
+    @Test
+    fun `the folder has to be the whole segment, not part of a longer word`() {
+        assertNull(AttachmentRole.classify("vaeless/diffusion_pytorch_model.safetensors"))
+        assertNull(AttachmentRole.classify("transformer/diffusion_pytorch_model.safetensors"))
+    }
+
+    @Test
+    fun `a diffusers split VAE is still a VAE`() {
+        assertEquals(
+            AttachmentRole.VAE,
+            AttachmentRole.classify("vae_decoder/model.safetensors"),
         )
     }
 

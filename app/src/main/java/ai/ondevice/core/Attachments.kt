@@ -106,9 +106,30 @@ enum class AttachmentRole(
             val path = filename.lowercase()
             val tagSet = tags.map { it.lowercase() }.toSet()
 
+            /**
+             * Whether a *folder* on the way to this file declares the role.
+             *
+             * The diffusers layout names the component in the directory and
+             * calls the weights `diffusion_pytorch_model.safetensors` in every
+             * one of them — `vae/`, `unet/`, `text_encoder/`, `transformer/` —
+             * so the folder is the only thing that says what the file is.
+             *
+             * Whole segments, not a substring of the path: `contains("vae")`
+             * would read `sd-vae-ft-mse/unet/model.safetensors` as a VAE when
+             * the folder plainly says UNet, and a repo's own name is not a
+             * claim about the file inside it.
+             */
+            fun inFolder(vararg names: String): Boolean =
+                path.split('/').dropLast(1).any { segment ->
+                    // `vae` exactly, or `vae_decoder` and `vae_encoder`, which
+                    // are the same component split in two — but never
+                    // `vaeless`, where the word merely starts the same way.
+                    names.any { segment == it || segment.startsWith(it + "_") }
+                }
+
             return when {
                 // Read from the *directory*, because the file is called `model.safetensors` and says nothing about itself.
-                path.contains("image_encoder") -> CLIP_VISION
+                inFolder("image_encoder") -> CLIP_VISION
                 // ControlNet is tested *before* LoRA on purpose.
                 "controlnet" in tagSet || name.contains("control") && !name.contains("uncond") -> CONTROLNET
                 "lora" in tagSet || name.contains("lora") -> LORA
@@ -120,10 +141,10 @@ enum class AttachmentRole(
                 // way came back unclassified while the resolver, which reads the
                 // path, had already filed it correctly. Two classifiers, two
                 // answers, for the same file.
-                path.contains("vae") -> VAE
-                path.contains("clip_l") || path.contains("clip-l") -> CLIP_L
-                path.contains("clip_g") || path.contains("clip-g") -> CLIP_G
-                path.contains("t5xxl") || path.contains("t5-xxl") -> T5XXL
+                name.contains("vae") || inFolder("vae") -> VAE
+                name.contains("clip_l") || name.contains("clip-l") -> CLIP_L
+                name.contains("clip_g") || name.contains("clip-g") -> CLIP_G
+                name.contains("t5xxl") || name.contains("t5-xxl") -> T5XXL
                 name.contains("esrgan") || name.contains("upscal") -> UPSCALER
                 "textual_inversion" in tagSet -> EMBEDDING
                 else -> null
