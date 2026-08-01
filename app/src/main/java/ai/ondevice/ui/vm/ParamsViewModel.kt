@@ -136,10 +136,20 @@ class ParamsViewModel @Inject constructor(
     /** A value edit. */
     fun setValue(key: String, value: Any?) {
         val spec = _state.value.allSpecs.firstOrNull { it.key == key }
-        val updated = if (value == null) {
-            _state.value.values.without(key)
-        } else {
-            _state.value.values.overlaidWith(SparseParams.of(key to value))
+        val updated = when {
+            value != null -> _state.value.values.overlaidWith(SparseParams.of(key to value))
+            // Clearing a file is an answer, and dropping the key threw it away.
+            //
+            // The Image tab fills an empty role slot when exactly one installed
+            // file fits, which is what makes a bare diffusion model usable
+            // without a scavenger hunt. It can only do that by looking for a
+            // slot with nothing in it — so removing the key here put the slot
+            // straight back into the state that invites filling, and the VAE
+            // you had just cleared reappeared on the next refresh. An empty
+            // string says "asked and answered: none".
+            spec?.type == ai.ondevice.params.ParamType.PATH ->
+                _state.value.values.overlaidWith(SparseParams.of(key to ""))
+            else -> _state.value.values.without(key)
         }
         _state.value = _state.value.copy(
             values = updated,

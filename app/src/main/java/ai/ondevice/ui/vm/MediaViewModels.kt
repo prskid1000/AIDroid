@@ -263,27 +263,28 @@ class ImageViewModel @Inject constructor(
                         applyArchitectureDefaults(diffusion.detectedVersion)
                     }
                     if (loaded.isFailure) {
-                        // The hint used to assert one cause — over-long tensor
-                        // names — whatever had actually gone wrong. Now that a
-                        // component is filled in for you where only one fits,
-                        // the likelier cause is a file from another family: the
-                        // library holds one VAE and it belongs to a different
-                        // model. Name the suspects rather than a diagnosis.
+                        // The runtime's own message, and nothing invented on
+                        // top of it.
+                        //
+                        // This used to append a diagnosis — "some converters
+                        // emit tensor names past ggml's 64-character limit" —
+                        // whatever had actually failed. It read as the
+                        // runtime's finding, so a load that failed for an
+                        // unrelated reason sent someone looking for a limit
+                        // their file was nowhere near. A guess dressed as a
+                        // cause is worse than no hint: it spends the reader's
+                        // time and points away from the evidence. What follows
+                        // is only what is known — which components were passed,
+                        // because that is a fact about this run and narrows the
+                        // search without claiming to end it.
                         val armed = _state.value.attachments
                         _state.value = _state.value.copy(
                             generating = false,
                             error = loaded.exceptionOrNull()?.message ?: "The diffusion model could not be loaded.",
-                            errorHint = if (armed.isNotEmpty()) {
-                                "Loaded with " + armed.joinToString(", ") { it.role.label } +
-                                    ". A component belonging to another architecture is refused here — " +
-                                    "switch them off one at a time under Components to find which. " +
-                                    "Failing that, some GGUF converters emit tensor names past ggml's " +
-                                    "64-character limit; another quantisation of the same model would " +
-                                    "avoid it."
-                            } else {
-                                "Some GGUF converters emit tensor names past ggml's 64-character limit. " +
-                                    "Try another quantisation of the same model, or a repo published " +
-                                    "for stable-diffusion.cpp."
+                            errorHint = armed.takeIf { it.isNotEmpty() }?.let { components ->
+                                "Passed " + components.joinToString(", ") { it.role.label } +
+                                    ". Switching them off one at a time under Components narrows " +
+                                    "it down when one of them is the problem."
                             },
                         )
                         return@launch
@@ -515,7 +516,12 @@ class ImageViewModel @Inject constructor(
             if (role.family !in ADOPTABLE_FAMILIES) continue
             if (role.multiple) continue
             if (role.paramKey !in offered) continue
-            if (!chosen.string(role.paramKey).isNullOrBlank()) continue
+            // Presence of the key is the question having been answered, and an
+            // empty answer is still an answer. Testing the *value* for blank
+            // meant "I want no VAE" and "nobody has said" looked identical, so
+            // a cleared slot was refilled on the next refresh and the choice
+            // could not be made to stick.
+            if (role.paramKey in chosen) continue
             val candidates = installed.filter {
                 it.attachmentRole == role && java.io.File(it.localPath).isFile
             }

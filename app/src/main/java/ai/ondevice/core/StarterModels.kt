@@ -159,6 +159,27 @@ object StarterModels {
             summary = "SD 3.5's second — split_files/text_encoders/clip_g.",
             sizeHint = "~1.4 GB",
         ),
+        // SD 3.5's decoder, which is the one component with no ungated source.
+        //
+        // Comfy-Org's repo carries the three encoders and no VAE; city96's
+        // GGUFs are the denoiser alone. The only all-in-one is
+        // sd3.5_medium_incl_clips_t5xxlfp8scaled at 11.64 GB, which is more
+        // than this class of device has to spare. That leaves Stability's own
+        // repo, which is gated: accept the licence on the model page and paste
+        // a read token under Settings, and it resolves like anything else.
+        //
+        // A 16-channel decoder, and the reason SDXL's cannot stand in: sd.cpp
+        // checks the shape and refuses, "expected [3,3,16,512]".
+        StarterModel(
+            repoId = "stabilityai/stable-diffusion-3.5-medium",
+            modality = Modality.DIFFUSION,
+            role = AttachmentRole.VAE,
+            summary = "SD 3.5's decoder — 16-channel, so neither the SDXL nor the FLUX VAE can " +
+                "stand in. Gated: accept the licence on Hugging Face and add a token under " +
+                "Settings.",
+            sizeHint = "~170 MB",
+        ),
+
         StarterModel(
             repoId = SD35_ENCODERS,
             modality = Modality.DIFFUSION,
