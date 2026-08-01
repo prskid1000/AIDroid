@@ -219,7 +219,10 @@ class ImageViewModel @Inject constructor(
                     _state.value = _state.value.copy(liveTrace = trace)
                 }
             }
-            db.models().touch(model.id, started)
+            // Everything this run actually loads, not only the base model. A
+            // VAE that decoded every picture you have made read "never used"
+            // on the Models screen, because only the checkpoint was stamped.
+            touchAll(model.id, _state.value.attachments.map { it.modelId }, started)
             try {
                 if (!diffusion.isCurrent(model.id)) {
                     _state.value = _state.value.copy(loadingModel = true)
@@ -534,6 +537,13 @@ class ImageViewModel @Inject constructor(
         )
     }
 
+    /** Stamp the base model and every component a run loads, so none of them reads "never used" after doing the work. */
+    private suspend fun touchAll(baseModelId: String?, componentIds: List<String>, at: Long) {
+        (listOfNotNull(baseModelId) + componentIds).distinct().forEach {
+            db.models().touch(it, at)
+        }
+    }
+
     /** What the manifest offers this model, keyed the way roles are. */
     private suspend fun applicableKeys(model: ModelEntity?): Set<String> = params.applicableKeys(
         RUNTIME_ID,
@@ -575,6 +585,14 @@ class ImageViewModel @Inject constructor(
 
         generationJob = viewModelScope.launch {
             _state.value = _state.value.copy(generating = true, error = null, errorHint = null)
+            // The upscaler is the one model this run uses, so it is the one to stamp.
+            touchAll(
+                null,
+                _state.value.availableAttachments
+                    .filter { it.role == ai.ondevice.core.AttachmentRole.UPSCALER }
+                    .map { it.modelId },
+                System.currentTimeMillis(),
+            )
             try {
                 val decoded = withContext(Dispatchers.IO) {
                     android.graphics.BitmapFactory.decodeFile(source.path)

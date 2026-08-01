@@ -288,7 +288,7 @@ class DiffusionEngine(
         esrganPath: String,
         factor: Int = 0,
         threads: Int = capabilities.inferenceThreads,
-        tileSize: Int = 0,
+        tileSize: Int = UPSCALE_TILE,
     ): Result<DiffusionImage> = withContext(Dispatchers.Default) {
         runCatching {
             check(SdBridge.available) {
@@ -297,6 +297,15 @@ class DiffusionEngine(
             check(esrganPath.isNotBlank()) {
                 "No upscaler is attached. Install an ESRGAN model and tick it under Attachments."
             }
+
+            // The upscaler is its own context and shares nothing with the
+            // denoiser, so holding both is holding one for no reason — and the
+            // one being held is the larger. A 4B checkpoint plus its text
+            // encoder is over 4 GB resident; asking for an ESRGAN graph on top
+            // of that is what the kernel kills the app for, with no Java
+            // exception and nothing in the crash buffer to explain it.
+            // Generating again reloads on its own.
+            unload()
             val rgb = ByteArray(image.width * image.height * 3)
             var at = 0
             image.pixels.forEach { pixel ->
@@ -340,6 +349,17 @@ class DiffusionEngine(
 
         /** Fast enough to look live, slow enough not to spin a core polling. */
         const val POLL_MILLIS = 250L
+
+        /**
+         * Side of the square the upscaler works on at a time.
+         *
+         * Zero means "no tiling", which is what this used to pass: a 512-square
+         * input then runs 23 RRDB blocks over the whole frame at once, and the
+         * 4x stages carry 64-channel tensors at 1024 and 2048 square —
+         * gigabytes of intermediates for a picture that fits in 12 MB. Tiles
+         * cost seams at worst; the alternative costs the process.
+         */
+        const val UPSCALE_TILE = 128
     }
 }
 
@@ -395,4 +415,5 @@ sealed interface DiffusionEvent {
     data class Preview(val image: DiffusionImage) : DiffusionEvent
     data class Completed(val image: DiffusionImage) : DiffusionEvent
     data class Failed(val message: String, val suggestion: String?) : DiffusionEvent
+
 }
