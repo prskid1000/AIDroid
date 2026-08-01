@@ -32,6 +32,8 @@ class OnDeviceApp : Application() {
 
     @Inject lateinit var downloader: ai.ondevice.data.download.Downloader
 
+    @Inject lateinit var computeDeviceSwitch: ai.ondevice.engine.ComputeDeviceSwitch
+
     override fun onCreate() {
         super.onCreate()
         // Before anything can touch ggml. Its backend registry builds itself
@@ -40,6 +42,10 @@ class OnDeviceApp : Application() {
         // DSP's own code has to already be set by then. Synchronous for the
         // same reason: a coroutine would race the first Chat screen.
         HexagonSkels.stage(this)
+        // A context is built for one device and cannot move, so changing the
+        // Compute device has to drop what is loaded rather than leave it
+        // resident on the device the user just stopped using.
+        computeDeviceSwitch.start(scope)
         scope.launch {
             seed()
             // A download interrupted by a crash, a force-stop or a reinstall
@@ -157,14 +163,14 @@ class OnDeviceApp : Application() {
             id = "speech-accurate",
             modality = Modality.SPEECH_TO_TEXT,
             name = "Accurate",
-            paramsJson = SparseParams.of("beam_size" to 5, "audio_ctx" to 0, "vad" to true).toJsonString(),
+            paramsJson = SparseParams.of("beam_size" to 5, "audio_ctx" to 0).toJsonString(),
             isBuiltIn = true,
         ),
         PresetEntity(
             id = "speech-fast",
             modality = Modality.SPEECH_TO_TEXT,
             name = "Fast",
-            paramsJson = SparseParams.of("beam_size" to -1, "audio_ctx" to 512, "vad" to true).toJsonString(),
+            paramsJson = SparseParams.of("beam_size" to -1, "audio_ctx" to 512).toJsonString(),
             isBuiltIn = true,
         ),
     )

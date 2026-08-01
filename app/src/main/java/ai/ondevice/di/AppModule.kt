@@ -205,4 +205,14 @@ object AppModule {
         capabilities: DeviceCapabilities,
         computeDevice: ai.ondevice.engine.ComputeDevice,
     ) = ai.ondevice.engine.DiffusionEngine(context, capabilities, computeDevice)
+
+    @Provides
+    @Singleton
+    fun provideComputeDeviceSwitch(
+        prefs: AppPrefs,
+        engines: EngineManager,
+        transcriber: ai.ondevice.engine.Transcriber,
+        diffusion: ai.ondevice.engine.DiffusionEngine,
+        synthesizer: ai.ondevice.speech.SpeechSynthesizer,
+    ) = ai.ondevice.engine.ComputeDeviceSwitch(prefs, engines, transcriber, diffusion, synthesizer)
 }

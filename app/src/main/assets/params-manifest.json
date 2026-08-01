@@ -1119,17 +1119,6 @@
           "cliFlag": "-t"
         },
         {
-          "key": "vad",
-          "group": "vad",
-          "type": "bool",
-          "default": false,
-          "tier": "ADVANCED",
-          "label": "Voice activity detection",
-          "help": "Skip silence before transcription. Needs a Silero VAD model.",
-          "requiresReload": false,
-          "cliFlag": "--vad"
-        },
-        {
           "key": "detect_language",
           "group": "transcribe",
           "type": "bool",
@@ -1356,20 +1345,6 @@
           "help": "Suppress non-speech tokens such as sound annotations.",
           "requiresReload": false,
           "cliFlag": "-sns"
-        },
-        {
-          "key": "step_ms",
-          "group": "streaming",
-          "type": "int",
-          "default": 3000,
-          "min": 500,
-          "max": 10000,
-          "step": 250,
-          "tier": "ADVANCED",
-          "label": "Step (ms)",
-          "help": "Audio consumed per inference pass in live mode.",
-          "requiresReload": false,
-          "cliFlag": "--step"
         }
       ]
     },

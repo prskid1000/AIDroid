@@ -400,7 +400,7 @@ private fun TranscribePanel(
             color = if (state.recording) NocturneColors.Accent else NocturneColors.TextMuted,
         )
         Text(
-            "VAD ${if (state.vadEnabled) "on" else "off"} · step ${Fmt.grouped(state.stepMs)} ms",
+            "transcribes on stop",
             style = NocturneType.MonoSm,
             color = NocturneColors.TextMuted,
         )
@@ -446,31 +446,14 @@ private fun TranscribePanel(
         )
     }
 
-    // What the live pass is hearing. Only while it is hearing something — an
-    // empty transcript panel above an idle microphone explained a feature that
-    // was not running.
-    if (state.recording || state.partial.isNotEmpty()) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .padding(top = 12.dp)
-                .background(NocturneColors.Surface, Radius.Md)
-                .padding(12.dp),
-        ) {
-            if (state.partial.isEmpty()) {
-                Text(
-                    "Listening. Partials appear here, shaded by confidence.",
-                    style = NocturneType.Message,
-                    color = NocturneColors.TextMuted,
-                )
-            } else {
-                Text(buildAnnotatedTranscript(state.partial), style = NocturneType.Message)
-            }
-        }
+    // No live transcript panel. There is nothing to put in it: recording
+    // decodes nothing now, and a panel saying "listening" over a decoder that
+    // is not running is the kind of claim this screen keeps having to retract.
+    if (state.recording) {
         NHelp(
-            "Opacity tracks per-token confidence. Faded text may still change as the " +
-                "window slides.",
-            Modifier.padding(top = 8.dp),
+            "Recording. The take is transcribed in one pass when you stop, which is what " +
+                "gives the segments their timings.",
+            Modifier.padding(top = 12.dp),
         )
     }
 
@@ -911,20 +894,6 @@ private fun SpeakSlider(
  */
 private const val VOICE_ROWS = 5
 
-/** Per-token confidence expressed as opacity — value, not hue. */
-private fun buildAnnotatedTranscript(
-    partials: List<ai.ondevice.ui.vm.PartialSegment>,
-): AnnotatedString = buildAnnotatedString {
-    partials.forEachIndexed { index, segment ->
-        withStyle(
-            SpanStyle(color = NocturneColors.Text.copy(alpha = segment.confidence.coerceIn(0.25f, 1f))),
-        ) {
-            append(segment.text)
-            if (index != partials.lastIndex) append(" ")
-        }
-    }
-}
-
 private fun voiceDescription(voice: String, speed: Float): String {
     val region = when (voice.take(1)) {
         "a" -> "US"
@@ -1208,7 +1177,7 @@ private fun TranscribeSettings(
         },
     )
     NHelp(
-        "VAD ${if (state.vadEnabled) "on" else "off"} · step ${Fmt.grouped(state.stepMs)} ms",
+        "Recording decodes nothing — the take is transcribed once, when you stop.",
         Modifier.padding(top = 8.dp),
     )
 }

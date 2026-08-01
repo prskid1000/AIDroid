@@ -730,16 +730,6 @@ class VoiceViewModel @Inject constructor(
     private var recordingJob: Job? = null
     private var speakJob: Job? = null
 
-    /**
-     * A live capture's sampler, held here rather than in a local.
-     *
-     * Recording starts in one call and its transcript is written in another, so
-     * unlike every other run in the app there is no single scope that spans it.
-     */
-    private var captureRecording: ai.ondevice.engine.ResourceRecorder.Handle? = null
-    private var captureLiveJob: Job? = null
-    private var captureStartedAt: Long = 0
-
     /** Where the take in progress is being written; null when not recording. */
     private var captureFile: java.io.File? = null
 
@@ -977,12 +967,6 @@ class VoiceViewModel @Inject constructor(
                 // The capture readout used to print these from hardcoded
                 // defaults, so setting them in Advanced changed neither the
                 // capture nor the line claiming to describe it.
-                stepMs = stt.int("step_ms") ?: _state.value.stepMs,
-                // Not `stt.bool("vad")`. That is the request; this is whether a
-                // detector is loaded and will run. They differ whenever no
-                // Silero model came down with the weights, which is the usual
-                // case — and the badge read "VAD on" throughout.
-                vadEnabled = transcriber.vadActive,
             )
             // A blend written as "af_heart:bm_george:0.4" in Advanced and one
             // set with the Blend control are the same setting, so they share
@@ -1020,7 +1004,6 @@ class VoiceViewModel @Inject constructor(
         _state.value = _state.value.copy(
             sttModel = model,
             segments = emptyList(),
-            partial = emptyList(),
             error = null,
             errorHint = null,
         )
@@ -1211,7 +1194,6 @@ class VoiceViewModel @Inject constructor(
             referenceName = "",
             transcribingReference = false,
             segments = emptyList(),
-            partial = emptyList(),
             title = "",
             sourcePath = null,
             sourceName = null,
@@ -1325,7 +1307,6 @@ class VoiceViewModel @Inject constructor(
                     speech.id,
                     speech.localPath,
                     SparseParams.parse(speech.paramOverridesJson),
-                    SparseParams.parse(speech.companionPathsJson),
                 ).getOrThrow()
             }
             // The engine wants 24 kHz and whisper wants 16, so this is decoded
@@ -1359,12 +1340,14 @@ class VoiceViewModel @Inject constructor(
     }
 
     /**
-     * SPEC §6.2 — live transcription.
+     * SPEC §6.2 — record, then transcribe.
      *
-     * Whisper has no incremental decode, so every partial is a fresh pass over
-     * a sliding window. That is why earlier words keep changing and why the
-     * screen fades them by the decoder's own confidence rather than presenting
-     * them as settled.
+     * Recording decodes nothing. It used to re-transcribe a ten-second trailing
+     * window every three seconds to show partial text, which cost about half of
+     * eight cores for the length of the recording — measured in a silent room —
+     * and every word it showed was provisional, because whisper has no
+     * incremental decode. [stopRecording] runs the take through [process],
+     * which is one decode of each word and gives real segment boundaries.
      */
     fun startRecording() {
         val model = _state.value.sttModel
@@ -1383,62 +1366,28 @@ class VoiceViewModel @Inject constructor(
             sourceIsRecording = false,
             segments = emptyList(),
             elapsedMillis = 0,
-            partial = emptyList(),
             error = null,
             errorHint = null,
         )
 
-        // Every take is kept. The decoder only ever sees a ten-second window,
-        // so without this the audio is gone the moment it has been read — and
-        // a recording you cannot play back or re-run is a transcript with no
-        // source.
+        // The take is the whole point now: it is what gets transcribed, not
+        // just what can be replayed afterwards.
         captureFile = java.io.File(
             storage.speechDir(),
             "recording-${System.currentTimeMillis()}.wav",
         )
-        captureStartedAt = System.currentTimeMillis()
-        captureRecording = recorder.start(viewModelScope)
-        captureLiveJob = viewModelScope.launch {
-            captureRecording?.live?.collect { trace ->
-                _state.value = _state.value.copy(liveTrace = trace)
-            }
-        }
 
+        // No resource trace over the recording. It measured a capture loop that
+        // now runs no model, so the graph was a flat line and the row was
+        // discarded at Stop either way. `process` traces the decode, which is
+        // where the work moved to.
+        // No model is loaded here any more. Capture needs none — it writes a WAV
+        // and reports input levels — and loading whisper at Record put a
+        // multi-second pause between the button and the microphone opening, for
+        // a decoder nothing was going to call until Stop.
         recordingJob = viewModelScope.launch {
-            if (!transcriber.isCurrent(model.id)) {
-                _state.value = _state.value.copy(loading = true)
-                val loaded = transcriber.load(
-                    model.id,
-                    model.localPath,
-                    SparseParams.parse(model.paramOverridesJson),
-                    SparseParams.parse(model.companionPathsJson),
-                )
-                _state.value = _state.value.copy(loading = false)
-                if (loaded.isFailure) {
-                    _state.value = _state.value.copy(
-                        recording = false,
-                        error = loaded.exceptionOrNull()?.message ?: "The speech model could not be loaded.",
-                    )
-                    return@launch
-                }
-            }
-
             val levels = ArrayDeque<Float>()
-            // From the model's overrides via refreshFromOverrides, so the
-            // "step N ms" readout above the waveform describes the capture that
-            // is actually running rather than a constant.
-            val overrides = SparseParams.parse(model.paramOverridesJson)
-            val stepMs = overrides.int("step_ms") ?: _state.value.stepMs
-            _state.value = _state.value.copy(
-                stepMs = stepMs,
-                // The runtime's answer, not the setting's. `vad` has been in the
-                // manifest and on this badge since before whisper's parameter
-                // table had the key, so it read "VAD on" over a detector that
-                // had never been loaded. It only runs when a Silero model came
-                // down with the weights, and only whisper knows whether it did.
-                vadEnabled = transcriber.vadActive,
-            )
-            transcriber.listen(stepMillis = stepMs, captureTo = captureFile).collect { event ->
+            transcriber.listen(captureTo = captureFile).collect { event ->
                 when (event) {
                     is CaptureEvent.Level -> {
                         levels.addLast(event.peak)
@@ -1446,12 +1395,6 @@ class VoiceViewModel @Inject constructor(
                         _state.value = _state.value.copy(
                             elapsedMillis = event.elapsedMillis,
                             waveform = List(WAVEFORM_BARS - levels.size) { 0.05f } + levels.toList(),
-                        )
-                    }
-                    is CaptureEvent.Partial -> {
-                        _state.value = _state.value.copy(
-                            elapsedMillis = event.elapsedMillis,
-                            partial = event.segments.map { PartialSegment(it.text, it.confidence) },
                         )
                     }
                     is CaptureEvent.Failed -> {
@@ -1483,84 +1426,27 @@ class VoiceViewModel @Inject constructor(
         val capture = recordingJob
         recordingJob = null
         capture?.cancel()
-        captureLiveJob?.cancel()
-        captureLiveJob = null
-        val trace = captureRecording?.stop()
-        val startedAt = captureStartedAt
-        captureRecording = null
-        val segments = _state.value.partial
         // The take is closed here, not left to the capture's teardown.
-        // `cancel()` only asks the loop to stop, and the loop may be inside a
-        // native decode of its last window — tens of seconds with a large
-        // model. Waiting for that would leave Stop reading "Stop" and the clip
-        // absent; not waiting, but publishing anyway, handed the player a file
-        // whose header still said zero samples, which is why a three-second
-        // take showed as 00:00. Closing it directly does neither.
+        // `cancel()` only asks the loop to stop, and not waiting for it but
+        // publishing anyway handed the player a file whose header still said
+        // zero samples — which is why a three-second take showed as 00:00.
+        // Closing it directly settles the header before anything reads it.
         transcriber.finishCapture()
         val take = captureFile?.takeIf { it.isFile && it.length() > 44 }
         _state.value = _state.value.copy(
             recording = false,
             paused = false,
             liveTrace = null,
-            // Kept so the take can be played back and run again properly: the
-            // live pass only ever saw a sliding window, and a decode of the
-            // whole file gets real segment boundaries the window could never
-            // produce.
             sourcePath = take?.absolutePath,
             sourceName = take?.name,
             sourceIsRecording = take != null,
         )
-        viewModelScope.launch {
-            if (segments.isNotEmpty()) {
-                val transcriptId = UUID.randomUUID().toString()
-                db.transcripts().upsert(
-                    TranscriptEntity(
-                        id = transcriptId,
-                        sourcePath = captureFile?.takeIf { it.isFile }?.absolutePath,
-                        title = "Live capture",
-                        // A sliding window has no segment boundaries to report,
-                        // so the timings are genuinely zero here rather than
-                        // discarded. The confidence is real and is kept.
-                        segmentsJson = ai.ondevice.core.TranscriptSegments.encode(
-                            segments.map {
-                                TranscriptSegment(
-                                    startMillis = 0,
-                                    endMillis = 0,
-                                    text = it.text,
-                                    confidence = it.confidence,
-                                )
-                            },
-                        ),
-                        modelId = _state.value.sttModel?.id,
-                        paramsJson = SparseParams.of(
-                            "vad" to _state.value.vadEnabled,
-                            "step_ms" to _state.value.stepMs,
-                        ).toJsonString(),
-                        durationMillis = _state.value.elapsedMillis,
-                        createdAt = System.currentTimeMillis(),
-                    ),
-                )
-                trace?.let {
-                    db.predictionRuns().record(
-                        kind = ai.ondevice.core.PredictionKind.TRANSCRIBE,
-                        artifactId = transcriptId,
-                        modelId = _state.value.sttModel?.id,
-                        backend = null,
-                        startedAt = startedAt,
-                        trace = it,
-                        // A live capture transcribes as fast as it is spoken by
-                        // definition, so a realtime factor would say nothing.
-                        // What it cost to keep up is the interesting number.
-                        stats = SparseParams.of("audio_millis" to _state.value.elapsedMillis),
-                    )
-                }
-            }
-            val transcripts = db.transcripts().observeAll().first()
-            _state.value = _state.value.copy(
-                lastTrace = trace ?: _state.value.lastTrace,
-                transcripts = transcripts,
-            )
-        }
+        // Transcribe now, over the whole take, through the same path a picked
+        // file takes. Nothing was decoded while recording, so this is the only
+        // pass — and it is the better one: real segment boundaries, which a
+        // sliding window could never produce, and one decode of each word
+        // instead of one per window it appeared in.
+        if (take != null) process()
     }
 
     /**
@@ -1585,7 +1471,6 @@ class VoiceViewModel @Inject constructor(
                 sourceName = attachment.displayName,
                 sourceIsRecording = false,
                 segments = emptyList(),
-                partial = emptyList(),
                 fileProgress = 0f,
                 error = null,
                 errorHint = null,
@@ -1600,7 +1485,6 @@ class VoiceViewModel @Inject constructor(
             sourceName = null,
             sourceIsRecording = false,
             segments = emptyList(),
-            partial = emptyList(),
             fileProgress = 0f,
         )
     }
@@ -1632,7 +1516,6 @@ class VoiceViewModel @Inject constructor(
                     model.id,
                     model.localPath,
                     SparseParams.parse(model.paramOverridesJson),
-                    SparseParams.parse(model.companionPathsJson),
                 )
                 if (loaded.isFailure) {
                     _state.value = _state.value.copy(
@@ -1752,7 +1635,6 @@ class VoiceViewModel @Inject constructor(
             sourceName = transcript.title,
             sourceIsRecording = false,
             segments = ai.ondevice.core.TranscriptSegments.parse(transcript.segmentsJson),
-            partial = emptyList(),
             fileProgress = 1f,
             error = null,
             errorHint = null,
@@ -1828,7 +1710,6 @@ private const val WAVEFORM_BARS = 40
  */
 private const val REFERENCE_SAMPLE_RATE = ai.ondevice.speech.OmniVoiceEngine.SAMPLE_RATE
 
-data class PartialSegment(val text: String, val confidence: Float)
 
 data class VoiceState(
     val mode: VoiceMode = VoiceMode.TRANSCRIBE,
@@ -1888,7 +1769,6 @@ data class VoiceState(
     val recording: Boolean = false,
     val elapsedMillis: Long = 0,
     val waveform: List<Float> = List(40) { 0.15f },
-    val partial: List<PartialSegment> = emptyList(),
     val transcripts: List<TranscriptEntity> = emptyList(),
     val title: String = "standup-recording",
     /**
@@ -1898,8 +1778,6 @@ data class VoiceState(
      */
     val segments: List<TranscriptSegment> = emptyList(),
     val fileProgress: Float = 0.74f,
-    val vadEnabled: Boolean = true,
-    val stepMs: Int = 3000,
 
     /**
      * One pair for the whole screen, not one per mode.

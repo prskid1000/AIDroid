@@ -10,7 +10,6 @@
 #include <jni.h>
 
 #include <algorithm>
-#include <cfloat>
 #include <cmath>
 #include <map>
 #include <mutex>
@@ -56,21 +55,6 @@ static std::string dump_json(const json & value) {
 
 namespace {
 
-/**
- * whisper's own VAD defaults, with one substitution.
- *
- * `max_speech_duration_s` is FLT_MAX upstream, which is the right value and the
- * wrong thing to report: the parameter screen shows a runtime's defaults, and
- * "3.4e38 seconds" is not a number anyone can act on or type a smaller one
- * beside. Zero carries the same meaning here — no limit — and [build_params]
- * puts FLT_MAX back before whisper ever sees it.
- */
-whisper_vad_params default_vad_params() {
-    whisper_vad_params p = whisper_vad_default_params();
-    p.max_speech_duration_s = 0.0f;
-    return p;
-}
-
 struct od_whisper {
     whisper_context * ctx = nullptr;
     std::mutex        mutex;
@@ -103,29 +87,6 @@ struct od_whisper {
     float   logprob_thold   = -1.0f;
     float   no_speech_thold = 0.6f;
     float   word_thold      = 0.01f;
-
-    /**
-     * Voice activity detection, off unless both halves are present.
-     *
-     * The capture loop re-decodes its trailing window every `step_ms` whatever
-     * is in it, so a quiet room costs the same as a spoken sentence — measured
-     * at ~48 % of eight cores with nobody talking. whisper has had real VAD
-     * since the Silero port: `whisper_full` runs the detector first and skips
-     * the encoder for the stretches with no speech in them.
-     *
-     * It stays opt-in, and [vad_active] is what decides. With no Silero model
-     * beside the weights this build behaves exactly as it always has — every
-     * window decoded, silence included — so nothing has to be configured for
-     * transcription to work, and there is no half-state where the flag is set
-     * and the detector's weights never arrived.
-     *
-     * The tuning lives in whisper's own struct rather than in six fields here,
-     * so upstream's defaults are upstream's — this file does not get to hold a
-     * second opinion about what `threshold` should be.
-     */
-    bool               vad = false;
-    std::string        vad_model;
-    whisper_vad_params vad_params = default_vad_params();
 
     ~od_whisper() {
         if (ctx) {
@@ -199,17 +160,6 @@ const std::map<std::string, row> & table() {
         { "suppress_nst",     { [](od_whisper & e, const json & v) { e.suppress_nst = as_bool(v, false); } } },
         { "single_segment",   { [](od_whisper & e, const json & v) { e.single_segment = as_bool(v, false); } } },
 
-        { "vad",              { [](od_whisper & e, const json & v) { e.vad = as_bool(v, false); } } },
-        // A path, supplied by the app from the model's companions rather than
-        // typed by anyone — but a key like the rest, so the parameter screen
-        // shows what the detector is reading and an empty one is visible.
-        { "vad_model",        { [](od_whisper & e, const json & v) { e.vad_model = as_string(v); } } },
-        { "vad_threshold",    { [](od_whisper & e, const json & v) { e.vad_params.threshold = as_float(v, e.vad_params.threshold); } } },
-        { "vad_min_speech_duration_ms",  { [](od_whisper & e, const json & v) { e.vad_params.min_speech_duration_ms = as_int(v, e.vad_params.min_speech_duration_ms); } } },
-        { "vad_min_silence_duration_ms", { [](od_whisper & e, const json & v) { e.vad_params.min_silence_duration_ms = as_int(v, e.vad_params.min_silence_duration_ms); } } },
-        { "vad_max_speech_duration_s",   { [](od_whisper & e, const json & v) { e.vad_params.max_speech_duration_s = as_float(v, e.vad_params.max_speech_duration_s); } } },
-        { "vad_speech_pad_ms",           { [](od_whisper & e, const json & v) { e.vad_params.speech_pad_ms = as_int(v, e.vad_params.speech_pad_ms); } } },
-        { "vad_samples_overlap",         { [](od_whisper & e, const json & v) { e.vad_params.samples_overlap = as_float(v, e.vad_params.samples_overlap); } } },
     };
     return t;
 }
@@ -248,30 +198,8 @@ const std::map<std::string, json (*)(const od_whisper &)> & default_table() {
         { "suppress_nst",     [](const od_whisper & e) { return json(e.suppress_nst); } },
         { "single_segment",   [](const od_whisper & e) { return json(e.single_segment); } },
 
-        { "vad",              [](const od_whisper & e) { return json(e.vad); } },
-        { "vad_model",        [](const od_whisper & e) { return json(e.vad_model); } },
-        { "vad_threshold",    [](const od_whisper & e) { return json(e.vad_params.threshold); } },
-        { "vad_min_speech_duration_ms",  [](const od_whisper & e) { return json(e.vad_params.min_speech_duration_ms); } },
-        { "vad_min_silence_duration_ms", [](const od_whisper & e) { return json(e.vad_params.min_silence_duration_ms); } },
-        { "vad_max_speech_duration_s",   [](const od_whisper & e) { return json(e.vad_params.max_speech_duration_s); } },
-        { "vad_speech_pad_ms",           [](const od_whisper & e) { return json(e.vad_params.speech_pad_ms); } },
-        { "vad_samples_overlap",         [](const od_whisper & e) { return json(e.vad_params.samples_overlap); } },
     };
     return t;
-}
-
-/**
- * Whether VAD will actually run, which is not the same as whether it was asked
- * for.
- *
- * `whisper_full` fails outright when `vad` is set with no model behind it, and
- * a transcription that refuses to start is a worse answer than one that decodes
- * the silence too. So the detector needs both halves, and the screen is told
- * this answer rather than the request — a badge reading "VAD on" over a
- * detector that never loaded is the bug this exists to close.
- */
-bool vad_active(const od_whisper & e) {
-    return e.vad && !e.vad_model.empty();
 }
 
 whisper_full_params build_params(od_whisper & e) {
@@ -318,13 +246,6 @@ whisper_full_params build_params(od_whisper & e) {
         p.greedy.best_of = e.best_of;
     }
 
-    p.vad            = vad_active(e);
-    p.vad_model_path = p.vad ? e.vad_model.c_str() : nullptr;
-    p.vad_params     = e.vad_params;
-    // Zero is this file's spelling of "no limit"; FLT_MAX is whisper's.
-    if (p.vad_params.max_speech_duration_s <= 0.0f) {
-        p.vad_params.max_speech_duration_s = FLT_MAX;
-    }
     return p;
 }
 
@@ -519,11 +440,6 @@ Java_ai_ondevice_engine_WhisperBridge_nativeInfo(JNIEnv * env, jobject, jlong ha
     info["textLayers"]   = whisper_model_n_text_layer(e->ctx);
     info["type"]         = whisper_model_type_readable(e->ctx);
     info["threads"]      = e->threads;
-    // Both halves, because they answer different questions: `vadRequested` is
-    // the setting, `vad` is whether a detector will run. The screen shows the
-    // second one — see [vad_active].
-    info["vadRequested"] = e->vad;
-    info["vad"]          = vad_active(*e);
     return jni_from_string(env, dump_json(info));
 }
 
@@ -553,8 +469,7 @@ Java_ai_ondevice_engine_WhisperBridge_nativeTranscribe(
     // A decode that throws is a failed transcription, not a dead app. ggml
     // allocates inside this call and reports failure by throwing, and an
     // uncaught C++ exception crossing JNI is SIGABRT — the app disappears with
-    // nothing in the log but a signal. The VAD path adds a second way in: a
-    // Silero file that is truncated, or not a VAD model at all, fails here.
+    // nothing in the log but a signal.
     int64_t t0 = 0;
     try {
         t0 = whisper_full(e->ctx, params, samples.data(), (int) samples.size());

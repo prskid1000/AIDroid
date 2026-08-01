@@ -77,10 +77,6 @@ fun ModelDetailScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val model = state.model
 
-    // The ⋮ was an Icon and nothing else — no click handler, no menu, drawn at
-    // the one position on the screen where a toolbar icon means "there is more
-    // here". It now holds the action that should never have been a button.
-    var menuOpen by rememberSaveable { mutableStateOf(false) }
     var confirmingDelete by rememberSaveable { mutableStateOf(false) }
 
     PhoneScaffold(
@@ -128,38 +124,19 @@ fun ModelDetailScreen(
                             iconSize = 15.dp,
                         )
                     }
-                    Box {
-                        Icon(
-                            NIcons.MoreVertical,
-                            contentDescription = "More",
-                            tint = NocturneColors.Text,
-                            modifier = Modifier
-                                .size(20.dp)
-                                .nClickableFlat { menuOpen = true },
-                        )
-                        androidx.compose.material3.DropdownMenu(
-                            expanded = menuOpen,
-                            onDismissRequest = { menuOpen = false },
-                            // Its own surface, outside the app's, so it has to
-                            // be handed the palette or it arrives in Material's
-                            // default light grey.
-                            containerColor = NocturneColors.Neutral900,
-                        ) {
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        "Delete model",
-                                        style = NocturneType.MonoSm,
-                                        color = NocturneColors.Text,
-                                    )
-                                },
-                                onClick = {
-                                    menuOpen = false
-                                    confirmingDelete = true
-                                },
-                            )
-                        }
-                    }
+                    // Delete is its own icon rather than a ⋮ menu. The overflow
+                    // held exactly one item, which is a menu that exists to
+                    // hide a button — and as a bare 20 dp Icon it was a smaller
+                    // tap target than everything beside it, so it read as
+                    // decoration whether or not it worked. The confirmation is
+                    // what actually protects the action; the indirection did not.
+                    NIconButton(
+                        NIcons.Trash,
+                        "Delete model",
+                        onClick = { confirmingDelete = true },
+                        size = 34.dp,
+                        iconSize = 15.dp,
+                    )
                 },
             )
         },

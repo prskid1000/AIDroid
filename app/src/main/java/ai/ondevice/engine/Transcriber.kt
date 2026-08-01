@@ -34,15 +34,20 @@ import kotlin.math.min
 /**
  * Speech to text, for real (SPEC §6).
  *
- * Two modes, one decoder:
+ * Recording and transcribing are separate things here, and they used not to be.
+ * [listen] captures: microphone in, WAV out, input levels for the waveform, and
+ * no decoding at all. [transcribeFile] decodes any container Android can demux,
+ * resampled to the 16 kHz mono float whisper requires. The screen records, then
+ * transcribes the take.
  *
- *  - **Live** re-decodes a sliding window every `step_ms`. Whisper has no
- *    incremental decode, so a "partial" is genuinely a fresh transcription of
- *    overlapping audio — which is exactly why the UI fades text by confidence
- *    and says it may still change. The alternative, pretending each partial is
- *    final, would be a lie the model itself contradicts a second later.
- *  - **File** decodes any container Android can demux, resampled to the 16 kHz
- *    mono float whisper requires.
+ * The capture loop used to re-decode a ten-second trailing window every three
+ * seconds, whether or not anyone had spoken, to show partial text. It cost about
+ * half of eight cores for the whole recording — measured in a silent room — and
+ * every word it showed was provisional, because whisper has no incremental
+ * decode: each pass was a fresh transcription of overlapping audio, so earlier
+ * words kept changing under the reader. Transcribing once, at the end, is
+ * cheaper and produces the better transcript: real segment boundaries, which a
+ * sliding window can never give.
  *
  * The microphone is opened inside the flow and released in `onCompletion`, so
  * cancelling the recording actually frees the device rather than leaving it hot.
@@ -62,8 +67,8 @@ class Transcriber(
      * Stop, on a model switch — could free the context in the window before the
      * native call used the value already read. That is a use-after-free on a
      * pointer, which is a SIGSEGV rather than an exception: the app vanishes.
-     * Reachable by switching speech model, or reloading, while a window is
-     * still being decoded, which the capture loop is doing every few seconds.
+     * Reachable by switching speech model, or reloading, while a take is still
+     * being transcribed.
      *
      * A free therefore waits for the decode in flight. With a large model that
      * is a real pause on the caller's thread, and it is the right trade: the
@@ -91,18 +96,6 @@ class Transcriber(
     var loadedBackend: BackendId? = null
         private set
 
-    /**
-     * Whether voice activity detection is running, as opposed to switched on.
-     *
-     * The two differ whenever the `vad` parameter is set without a Silero model
-     * beside the weights, which is the ordinary case: the parameter has been in
-     * the manifest and on the badge since long before anything read it. The
-     * screen shows this one, so "VAD on" means a detector exists.
-     */
-    @Volatile
-    var vadActive: Boolean = false
-        private set
-
     val available: Boolean get() = WhisperBridge.available
     val isLoaded: Boolean get() = handle != 0L
 
@@ -116,16 +109,10 @@ class Transcriber(
         isLoaded && loadedModelId == modelId &&
             loadedBackend == computeDevice.chosen(RuntimeRegistry.WHISPER)
 
-    /**
-     * @param companions the model's `companionPathsJson`, which is where the
-     *   Silero VAD file's path lives. Passed in rather than looked up because
-     *   this class has no database and should not grow one to read one string.
-     */
     suspend fun load(
         modelId: String,
         path: String,
         params: SparseParams = SparseParams.EMPTY,
-        companions: SparseParams = SparseParams.EMPTY,
     ): Result<String> =
         withContext(Dispatchers.IO) {
             runCatching {
@@ -139,17 +126,6 @@ class Transcriber(
                 // silent choice now that the NPU registers alongside it.
                 val device = computeDevice.chosen(RuntimeRegistry.WHISPER)
                 val backend = device.registryNames.first()
-                // The detector's own model, if one came down with the weights.
-                // Without it whisper decodes every window including the silent
-                // ones, which is what this build has always done — the key
-                // existed in the manifest, nothing read it, and the badge said
-                // otherwise.
-                val vadModel = companions.string(VAD_COMPANION_ROLE).orEmpty()
-                val effective = if (vadModel.isBlank()) {
-                    params
-                } else {
-                    params.overlaidWith(SparseParams.of("vad_model" to vadModel))
-                }
 
                 nativeLock.withLock {
                     unload()
@@ -159,16 +135,11 @@ class Transcriber(
                     handle = newHandle
                     loadedModelId = modelId
                     loadedBackend = device
-                    if (!effective.isEmpty) {
-                        WhisperBridge.nativeApplyParams(handle, effective.toJsonString())
+                    if (!params.isEmpty) {
+                        WhisperBridge.nativeApplyParams(handle, params.toJsonString())
                     }
-                    val info = WhisperBridge.nativeInfo(handle)
-                    vadActive = runCatching {
-                        json.parseToJsonElement(info).jsonObject["vad"]
-                            ?.jsonPrimitive?.content == "true"
-                    }.getOrDefault(false)
-                    android.util.Log.i(TAG, "loaded ${File(path).name} backend=$backend vad=$vadActive")
-                    info
+                    android.util.Log.i(TAG, "loaded ${File(path).name} backend=$backend")
+                    WhisperBridge.nativeInfo(handle)
                 }
                 // A half-loaded context is worse than none: it reports a model
                 // id the callers will trust and skip the reload for.
@@ -182,7 +153,6 @@ class Transcriber(
         }
         loadedModelId = null
         loadedBackend = null
-        vadActive = false
     }
 
     fun applyParams(params: SparseParams): ParamReport = nativeLock.withLock {
@@ -196,34 +166,17 @@ class Transcriber(
         )
     }
 
-    // — live —
+    // — capture —
 
     /**
-     * Record and transcribe until cancelled.
+     * Record until cancelled, writing the take to [captureTo].
      *
-     * @param stepMillis how often to re-decode. Below about a second whisper
-     *   spends more time on mel spectrograms than on new audio, so the manifest
-     *   defaults this to 3 s and the screen says what it is.
-     * @param windowMillis how much trailing audio each pass sees. Longer gives
-     *   the decoder more context to correct itself with — which is why earlier
-     *   words in a partial keep changing.
+     * Capture only: no model is needed and none is touched. What comes back is
+     * input level, for the waveform and the clock. The transcription happens
+     * once, afterwards, over the finished file.
      */
     @SuppressLint("MissingPermission")
-    /**
-     * [captureTo] keeps the take. Without it the samples are read, decoded and
-     * dropped, so a recording could never be replayed, re-run at another
-     * setting, or exported — the transcript was the only thing that survived
-     * the words being said.
-     */
-    fun listen(
-        stepMillis: Int = 3_000,
-        windowMillis: Int = 10_000,
-        captureTo: java.io.File? = null,
-    ): Flow<CaptureEvent> = flow {
-        if (handle == 0L) {
-            emit(CaptureEvent.Failed("No speech model is loaded."))
-            return@flow
-        }
+    fun listen(captureTo: java.io.File? = null): Flow<CaptureEvent> = flow {
         if (!hasMicPermission()) {
             emit(CaptureEvent.Failed("Recording needs the microphone permission."))
             return@flow
@@ -250,11 +203,7 @@ class Transcriber(
         activeRecord = record
         record.startRecording()
 
-        val window = ArrayDeque<Float>()
-        val windowSamples = windowMillis * SAMPLE_RATE / 1000
-        val stepSamples = stepMillis * SAMPLE_RATE / 1000
         val buffer = ShortArray(minBuffer / 2)
-        var sinceLastDecode = 0
         var totalSamples = 0L
         val writer = captureTo?.let {
             runCatching { ai.ondevice.speech.WavWriter(it, SAMPLE_RATE) }.getOrNull()
@@ -276,12 +225,9 @@ class Transcriber(
 
                 var peak = 0f
                 for (i in 0 until read) {
-                    val sample = buffer[i] / 32768f
-                    window.addLast(sample)
-                    if (abs(sample) > peak) peak = abs(sample)
+                    val sample = abs(buffer[i] / 32768f)
+                    if (sample > peak) peak = sample
                 }
-                while (window.size > windowSamples) window.removeFirst()
-                sinceLastDecode += read
                 totalSamples += read
 
                 emit(
@@ -290,13 +236,6 @@ class Transcriber(
                         elapsedMillis = totalSamples * 1000 / SAMPLE_RATE,
                     ),
                 )
-
-                if (sinceLastDecode >= stepSamples) {
-                    sinceLastDecode = 0
-                    val samples = window.toFloatArray()
-                    val segments = withContext(Dispatchers.Default) { decode(samples) }
-                    emit(CaptureEvent.Partial(segments, totalSamples * 1000 / SAMPLE_RATE))
-                }
             }
         } finally {
             // The microphone is a shared, exclusive device. Releasing it here —
@@ -553,18 +492,12 @@ class Transcriber(
 
         /** An hour. Past that the whole-file decode stops being a sane shape. */
         const val MAX_FILE_SECONDS = 3600
-
-        /** The key `companionPathsJson` files the Silero detector under. */
-        const val VAD_COMPANION_ROLE = "VAD"
     }
 }
 
 sealed interface CaptureEvent {
     /** Waveform input level, emitted per read so the bars move with the voice. */
     data class Level(val peak: Float, val elapsedMillis: Long) : CaptureEvent
-
-    /** A fresh decode of the trailing window. Earlier words may still change. */
-    data class Partial(val segments: List<TranscriptSegment>, val elapsedMillis: Long) : CaptureEvent
 
     data class Failed(val message: String) : CaptureEvent
 }
