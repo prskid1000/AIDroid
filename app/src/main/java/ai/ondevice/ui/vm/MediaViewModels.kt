@@ -593,6 +593,15 @@ class ImageViewModel @Inject constructor(
                     .map { it.modelId },
                 System.currentTimeMillis(),
             )
+            // Upscaling is a prediction like any other, and it was the one that
+            // ran with no graph: 23 RRDB blocks over a 512-square frame is the
+            // heaviest thing the tab does per second, and it was invisible.
+            val recording = recorder.start(viewModelScope)
+            val liveJob = viewModelScope.launch {
+                recording.live.collect { trace ->
+                    _state.value = _state.value.copy(liveTrace = trace)
+                }
+            }
             try {
                 val decoded = withContext(Dispatchers.IO) {
                     android.graphics.BitmapFactory.decodeFile(source.path)
@@ -645,7 +654,12 @@ class ImageViewModel @Inject constructor(
             } catch (failure: Throwable) {
                 _state.value = _state.value.copy(error = failure.message ?: "Upscaling failed.")
             } finally {
-                _state.value = _state.value.copy(generating = false)
+                liveJob.cancel()
+                _state.value = _state.value.copy(
+                    generating = false,
+                    liveTrace = null,
+                    lastTrace = recording.stop(),
+                )
             }
         }
     }
@@ -748,7 +762,15 @@ enum class ImageUse(val label: String) {
 data class ImageState(
     val use: ImageUse = ImageUse.EDIT,
     val model: ModelEntity? = null,
-    val prompt: String = "low-key studio portrait of a lynx, black backdrop, rim light <lora:filmgrain:0.6>",
+    /**
+     * Landscape, and no `<lora:…>` tag.
+     *
+     * A face is the hardest thing a small model draws and the first thing a
+     * person spots as wrong, so a portrait made every early run look like a
+     * broken app. The tag was worse: it named a LoRA nobody has installed, so
+     * the default prompt asked for a file that was never going to be found.
+     */
+    val prompt: String = "a wide mountain valley at sunrise, mist over the pines, distant snow peaks",
     val negativePrompt: String = "blurry, oversaturated",
     val steps: Int = 28,
     val cfgScale: Float = 7.0f,
