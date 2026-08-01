@@ -47,6 +47,15 @@ class AddModelViewModel @Inject constructor(
     private val _state = MutableStateFlow(AddModelState(totalRamBytes = capabilities.totalRamBytes))
     val state: StateFlow<AddModelState> = _state.asStateFlow()
 
+    /**
+     * The resolution before any role narrowing.
+     *
+     * Narrowing throws files away, so answering Role a second time has to start
+     * from what the repo actually holds rather than from what the last answer
+     * left behind.
+     */
+    private var unnarrowed: ResolvedModel? = null
+
     fun onQueryChange(value: String) {
         // Typed by hand, so any role the last starter card implied is stale.
         _state.value = _state.value.copy(query = value, intendedRole = null, roleWasSuggested = false)
@@ -99,7 +108,14 @@ class AddModelViewModel @Inject constructor(
                     // ourselves rather than guessing at the KV term.
                     val first = outcome.model.quants.firstOrNull()
                     val enriched = if (first != null) resolver.enrichFromHeader(outcome.model, first) else outcome.model
-                    val narrowed = narrowToRole(enriched, _state.value.intendedRole)
+                    unnarrowed = enriched
+                    // The card's role if it came from one, otherwise whatever
+                    // Role says — a person who has answered "VAE" has stated
+                    // the same intent the card would have.
+                    val narrowed = narrowToRole(
+                        enriched,
+                        _state.value.intendedRole ?: _state.value.selectedRole,
+                    )
                     val forRole = narrowed.model
                     val defaultQuant = pickDefaultQuant(forRole)
                     _state.value = _state.value.copy(
@@ -333,6 +349,22 @@ class AddModelViewModel @Inject constructor(
     /** Null is a real answer — "no role, this is a base model" — hence the flag. */
     fun setRole(role: AttachmentRole?) {
         _state.value = _state.value.copy(selectedRole = role, roleAnswered = true)
+
+        // Answering Role is the clearest statement of what this download is
+        // for, and it used to change nothing about what was offered: choosing
+        // VAE still left a text encoder selected and added the VAE beside it,
+        // so "just the VAE" downloaded 414 MB of which 246 MB was an encoder
+        // nobody asked for.
+        val base = unnarrowed ?: return
+        val narrowed = narrowToRole(base, role)
+        val defaultQuant = pickDefaultQuant(narrowed.model)
+        _state.value = _state.value.copy(
+            resolved = narrowed.model,
+            selectedQuant = defaultQuant?.name,
+            roleWasSuggested = narrowed.applied,
+            companionChoice = narrowed.model.companions.associate { it.role to it.selected },
+        )
+        recomputeVerdict()
     }
 
     fun download() {
