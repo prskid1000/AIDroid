@@ -153,9 +153,13 @@ object EngineParams {
     private val SD_APP_KEYS = setOf("threads", "upscale_model")
 
     /**
-     * Read by the voice screen's recorder, not by whisper.cpp: `step_ms` is how
-     * often the capture loop hands a window over, and `vad` is whether it drops
-     * silent ones before it does.
+     * Read by the voice screen's recorder, not by whisper.cpp: how often the
+     * capture loop hands a window over.
+     *
+     * `vad` used to be listed here too, on the belief that the capture loop
+     * dropped silent windows. It never did — nothing read the key on either
+     * side. whisper's own parameter table now owns it, so listing it here as an
+     * app key would take it back off the runtime that finally implements it.
      */
-    private val CAPTURE_KEYS = setOf("step_ms", "vad")
+    private val CAPTURE_KEYS = setOf("step_ms")
 }

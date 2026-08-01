@@ -74,7 +74,18 @@ class EngineManager(
                 IllegalStateException("No llama.cpp runtime is installed."),
             )
 
-            if (engine.loadedModelId == model.id) {
+            val backend = resolveBackend(model)
+
+            // Already loaded, and on the device the settings now ask for.
+            //
+            // The backend half of that test is new and is the whole of what
+            // made Settings → Compute device look broken: the model id matched,
+            // this returned early, and the context stayed on whatever device it
+            // was built for. Switching from GPU to NPU changed a stored string
+            // and nothing else until the process died — the setting only ever
+            // appeared to work because the first load after a cold start
+            // happened to read it.
+            if (engine.loadedModelId == model.id && _state.value.backend == backend) {
                 return _state.value.loaded?.let { Result.success(it) }
                     ?: Result.failure(IllegalStateException("Inconsistent load state"))
             }
@@ -84,7 +95,6 @@ class EngineManager(
             // Warm-swap — never hold both.
             if (engine.isLoaded) engine.unload()
 
-            val backend = resolveBackend(model)
             // The device choice, turned into the one number llama.cpp acts on.
             //
             // Registering a GPU backend does nothing by itself: llama.cpp puts

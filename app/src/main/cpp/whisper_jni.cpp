@@ -10,6 +10,7 @@
 #include <jni.h>
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <map>
 #include <mutex>
@@ -55,6 +56,21 @@ static std::string dump_json(const json & value) {
 
 namespace {
 
+/**
+ * whisper's own VAD defaults, with one substitution.
+ *
+ * `max_speech_duration_s` is FLT_MAX upstream, which is the right value and the
+ * wrong thing to report: the parameter screen shows a runtime's defaults, and
+ * "3.4e38 seconds" is not a number anyone can act on or type a smaller one
+ * beside. Zero carries the same meaning here — no limit — and [build_params]
+ * puts FLT_MAX back before whisper ever sees it.
+ */
+whisper_vad_params default_vad_params() {
+    whisper_vad_params p = whisper_vad_default_params();
+    p.max_speech_duration_s = 0.0f;
+    return p;
+}
+
 struct od_whisper {
     whisper_context * ctx = nullptr;
     std::mutex        mutex;
@@ -87,6 +103,29 @@ struct od_whisper {
     float   logprob_thold   = -1.0f;
     float   no_speech_thold = 0.6f;
     float   word_thold      = 0.01f;
+
+    /**
+     * Voice activity detection, off unless both halves are present.
+     *
+     * The capture loop re-decodes its trailing window every `step_ms` whatever
+     * is in it, so a quiet room costs the same as a spoken sentence — measured
+     * at ~48 % of eight cores with nobody talking. whisper has had real VAD
+     * since the Silero port: `whisper_full` runs the detector first and skips
+     * the encoder for the stretches with no speech in them.
+     *
+     * It stays opt-in, and [vad_active] is what decides. With no Silero model
+     * beside the weights this build behaves exactly as it always has — every
+     * window decoded, silence included — so nothing has to be configured for
+     * transcription to work, and there is no half-state where the flag is set
+     * and the detector's weights never arrived.
+     *
+     * The tuning lives in whisper's own struct rather than in six fields here,
+     * so upstream's defaults are upstream's — this file does not get to hold a
+     * second opinion about what `threshold` should be.
+     */
+    bool               vad = false;
+    std::string        vad_model;
+    whisper_vad_params vad_params = default_vad_params();
 
     ~od_whisper() {
         if (ctx) {
@@ -159,6 +198,18 @@ const std::map<std::string, row> & table() {
         { "suppress_blank",   { [](od_whisper & e, const json & v) { e.suppress_blank = as_bool(v, true); } } },
         { "suppress_nst",     { [](od_whisper & e, const json & v) { e.suppress_nst = as_bool(v, false); } } },
         { "single_segment",   { [](od_whisper & e, const json & v) { e.single_segment = as_bool(v, false); } } },
+
+        { "vad",              { [](od_whisper & e, const json & v) { e.vad = as_bool(v, false); } } },
+        // A path, supplied by the app from the model's companions rather than
+        // typed by anyone — but a key like the rest, so the parameter screen
+        // shows what the detector is reading and an empty one is visible.
+        { "vad_model",        { [](od_whisper & e, const json & v) { e.vad_model = as_string(v); } } },
+        { "vad_threshold",    { [](od_whisper & e, const json & v) { e.vad_params.threshold = as_float(v, e.vad_params.threshold); } } },
+        { "vad_min_speech_duration_ms",  { [](od_whisper & e, const json & v) { e.vad_params.min_speech_duration_ms = as_int(v, e.vad_params.min_speech_duration_ms); } } },
+        { "vad_min_silence_duration_ms", { [](od_whisper & e, const json & v) { e.vad_params.min_silence_duration_ms = as_int(v, e.vad_params.min_silence_duration_ms); } } },
+        { "vad_max_speech_duration_s",   { [](od_whisper & e, const json & v) { e.vad_params.max_speech_duration_s = as_float(v, e.vad_params.max_speech_duration_s); } } },
+        { "vad_speech_pad_ms",           { [](od_whisper & e, const json & v) { e.vad_params.speech_pad_ms = as_int(v, e.vad_params.speech_pad_ms); } } },
+        { "vad_samples_overlap",         { [](od_whisper & e, const json & v) { e.vad_params.samples_overlap = as_float(v, e.vad_params.samples_overlap); } } },
     };
     return t;
 }
@@ -196,8 +247,31 @@ const std::map<std::string, json (*)(const od_whisper &)> & default_table() {
         { "suppress_blank",   [](const od_whisper & e) { return json(e.suppress_blank); } },
         { "suppress_nst",     [](const od_whisper & e) { return json(e.suppress_nst); } },
         { "single_segment",   [](const od_whisper & e) { return json(e.single_segment); } },
+
+        { "vad",              [](const od_whisper & e) { return json(e.vad); } },
+        { "vad_model",        [](const od_whisper & e) { return json(e.vad_model); } },
+        { "vad_threshold",    [](const od_whisper & e) { return json(e.vad_params.threshold); } },
+        { "vad_min_speech_duration_ms",  [](const od_whisper & e) { return json(e.vad_params.min_speech_duration_ms); } },
+        { "vad_min_silence_duration_ms", [](const od_whisper & e) { return json(e.vad_params.min_silence_duration_ms); } },
+        { "vad_max_speech_duration_s",   [](const od_whisper & e) { return json(e.vad_params.max_speech_duration_s); } },
+        { "vad_speech_pad_ms",           [](const od_whisper & e) { return json(e.vad_params.speech_pad_ms); } },
+        { "vad_samples_overlap",         [](const od_whisper & e) { return json(e.vad_params.samples_overlap); } },
     };
     return t;
+}
+
+/**
+ * Whether VAD will actually run, which is not the same as whether it was asked
+ * for.
+ *
+ * `whisper_full` fails outright when `vad` is set with no model behind it, and
+ * a transcription that refuses to start is a worse answer than one that decodes
+ * the silence too. So the detector needs both halves, and the screen is told
+ * this answer rather than the request — a badge reading "VAD on" over a
+ * detector that never loaded is the bug this exists to close.
+ */
+bool vad_active(const od_whisper & e) {
+    return e.vad && !e.vad_model.empty();
 }
 
 whisper_full_params build_params(od_whisper & e) {
@@ -243,7 +317,46 @@ whisper_full_params build_params(od_whisper & e) {
     } else {
         p.greedy.best_of = e.best_of;
     }
+
+    p.vad            = vad_active(e);
+    p.vad_model_path = p.vad ? e.vad_model.c_str() : nullptr;
+    p.vad_params     = e.vad_params;
+    // Zero is this file's spelling of "no limit"; FLT_MAX is whisper's.
+    if (p.vad_params.max_speech_duration_s <= 0.0f) {
+        p.vad_params.max_speech_duration_s = FLT_MAX;
+    }
     return p;
+}
+
+/**
+ * whisper's log, forwarded to logcat — which llama has had and whisper has not.
+ *
+ * The line worth having is ggml's placement report: how many of the encoder's
+ * layers a backend took and how many came back to the CPU. Without it,
+ * "transcribe on the NPU" is a setting whose effect can only be inferred from a
+ * stopwatch, and a backend that quietly declined every layer looks exactly like
+ * one that took them.
+ *
+ * DEBUG is dropped rather than forwarded. whisper logs per-decode detail at that
+ * level and the capture loop decodes every few seconds, so passing it through
+ * would bury the load-time lines this exists for. CONT is a continuation of the
+ * line before it, so it keeps that line's level rather than being discarded.
+ */
+void forward_log(ggml_log_level level, const char * text, void *) {
+    if (text == nullptr) return;
+    const char * trimmed = text;
+    while (*trimmed == ' ' || *trimmed == '\t' || *trimmed == '\n') ++trimmed;
+    if (*trimmed == '\0') return;
+
+    int priority;
+    switch (level) {
+        case GGML_LOG_LEVEL_ERROR: priority = ANDROID_LOG_ERROR; break;
+        case GGML_LOG_LEVEL_WARN:  priority = ANDROID_LOG_WARN;  break;
+        case GGML_LOG_LEVEL_INFO:
+        case GGML_LOG_LEVEL_CONT:  priority = ANDROID_LOG_INFO;  break;
+        default: return;
+    }
+    __android_log_write(priority, "ondevice.whisper", trimmed);
 }
 
 } // namespace
@@ -295,6 +408,11 @@ Java_ai_ondevice_engine_WhisperBridge_nativeLoad(JNIEnv * env, jobject, jstring 
     const auto path    = jni_to_string(env, jpath);
     const auto backend = jni_to_string(env, jbackend);
 
+    // Before the first model, so the load's own placement lines are the first
+    // thing it says rather than the first thing it misses.
+    static std::once_flag logging_once;
+    std::call_once(logging_once, [] { whisper_log_set(forward_log, nullptr); });
+
     whisper_context_params cparams = whisper_context_default_params();
     // The Compute device setting, in the two fields whisper offers.
     //
@@ -330,8 +448,22 @@ Java_ai_ondevice_engine_WhisperBridge_nativeLoad(JNIEnv * env, jobject, jstring 
     WLOGI("load %s on %s", path.c_str(),
           cparams.use_gpu ? backend.c_str() : "CPU");
 
+    // A failed load is an exception on the Kotlin side, never an abort. ggml
+    // throws on a truncated or malformed file rather than returning null, and
+    // an uncaught C++ exception crossing JNI is SIGABRT — the whole process,
+    // with no message anything in Kotlin can catch.
     auto * engine = new od_whisper();
-    engine->ctx = whisper_init_from_file_with_params(path.c_str(), cparams);
+    try {
+        engine->ctx = whisper_init_from_file_with_params(path.c_str(), cparams);
+    } catch (const std::exception & ex) {
+        delete engine;
+        jni_throw(env, "whisper.cpp could not load " + path + " — " + ex.what());
+        return 0;
+    } catch (...) {
+        delete engine;
+        jni_throw(env, "whisper.cpp could not load " + path + ".");
+        return 0;
+    }
     if (engine->ctx == nullptr) {
         delete engine;
         jni_throw(env, "whisper.cpp could not load " + path +
@@ -369,6 +501,9 @@ Java_ai_ondevice_engine_WhisperBridge_nativeApplyParams(JNIEnv * env, jobject, j
     } catch (const std::exception & ex) {
         return jni_from_string(env, dump_json(json{ { "applied", applied }, { "rejected", rejected },
                                           { "error", ex.what() } }));
+    } catch (...) {
+        return jni_from_string(env, dump_json(json{ { "applied", applied }, { "rejected", rejected },
+                                          { "error", "the runtime rejected these parameters" } }));
     }
     return jni_from_string(env, dump_json(json{ { "applied", applied }, { "rejected", rejected } }));
 }
@@ -384,6 +519,11 @@ Java_ai_ondevice_engine_WhisperBridge_nativeInfo(JNIEnv * env, jobject, jlong ha
     info["textLayers"]   = whisper_model_n_text_layer(e->ctx);
     info["type"]         = whisper_model_type_readable(e->ctx);
     info["threads"]      = e->threads;
+    // Both halves, because they answer different questions: `vadRequested` is
+    // the setting, `vad` is whether a detector will run. The screen shows the
+    // second one — see [vad_active].
+    info["vadRequested"] = e->vad;
+    info["vad"]          = vad_active(*e);
     return jni_from_string(env, dump_json(info));
 }
 
@@ -410,7 +550,21 @@ Java_ai_ondevice_engine_WhisperBridge_nativeTranscribe(
     std::lock_guard<std::mutex> lock(e->mutex);
     whisper_full_params params = build_params(*e);
 
-    const int64_t t0 = whisper_full(e->ctx, params, samples.data(), (int) samples.size());
+    // A decode that throws is a failed transcription, not a dead app. ggml
+    // allocates inside this call and reports failure by throwing, and an
+    // uncaught C++ exception crossing JNI is SIGABRT — the app disappears with
+    // nothing in the log but a signal. The VAD path adds a second way in: a
+    // Silero file that is truncated, or not a VAD model at all, fails here.
+    int64_t t0 = 0;
+    try {
+        t0 = whisper_full(e->ctx, params, samples.data(), (int) samples.size());
+    } catch (const std::exception & ex) {
+        WLOGE("whisper_full threw: %s", ex.what());
+        return jni_from_string(env, dump_json(json{ { "error", std::string(ex.what()) } }));
+    } catch (...) {
+        WLOGE("whisper_full threw");
+        return jni_from_string(env, dump_json(json{ { "error", "the decode failed" } }));
+    }
     if (t0 != 0) {
         return jni_from_string(env, dump_json(json{ { "error", "whisper_full failed" } }));
     }

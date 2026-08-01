@@ -9,6 +9,7 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaRecorder
+import ai.ondevice.core.BackendId
 import ai.ondevice.core.SparseParams
 import ai.ondevice.core.TranscriptSegment
 import kotlinx.coroutines.Dispatchers
@@ -26,6 +27,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.concurrent.withLock
 import kotlin.math.abs
 import kotlin.math.min
 
@@ -51,6 +53,24 @@ class Transcriber(
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
+    /**
+     * Held across every native call, so nothing frees the context while a
+     * decode is inside it.
+     *
+     * `handle` being `@Volatile` made each read current without making the pair
+     * of them atomic: [decode] checked it, and `unload` — on the load path, on
+     * Stop, on a model switch — could free the context in the window before the
+     * native call used the value already read. That is a use-after-free on a
+     * pointer, which is a SIGSEGV rather than an exception: the app vanishes.
+     * Reachable by switching speech model, or reloading, while a window is
+     * still being decoded, which the capture loop is doing every few seconds.
+     *
+     * A free therefore waits for the decode in flight. With a large model that
+     * is a real pause on the caller's thread, and it is the right trade: the
+     * alternative is not a faster unload, it is a crash.
+     */
+    private val nativeLock = java.util.concurrent.locks.ReentrantLock()
+
     @Volatile
     private var handle: Long = 0L
 
@@ -58,41 +78,114 @@ class Transcriber(
     var loadedModelId: String? = null
         private set
 
+    /**
+     * The device the loaded model is actually on, so a changed setting is a
+     * reason to reload rather than a badge nobody acts on.
+     *
+     * Settings → Compute device was read at load and never again, and every
+     * caller skipped the load when the model id had not changed — so switching
+     * from GPU to NPU did nothing at all until the process died. The model id
+     * alone was never the whole question.
+     */
+    @Volatile
+    var loadedBackend: BackendId? = null
+        private set
+
+    /**
+     * Whether voice activity detection is running, as opposed to switched on.
+     *
+     * The two differ whenever the `vad` parameter is set without a Silero model
+     * beside the weights, which is the ordinary case: the parameter has been in
+     * the manifest and on the badge since long before anything read it. The
+     * screen shows this one, so "VAD on" means a detector exists.
+     */
+    @Volatile
+    var vadActive: Boolean = false
+        private set
+
     val available: Boolean get() = WhisperBridge.available
     val isLoaded: Boolean get() = handle != 0L
 
-    suspend fun load(modelId: String, path: String, params: SparseParams = SparseParams.EMPTY): Result<String> =
+    /**
+     * Whether the loaded model is the one asked for, *on the device asked for*.
+     *
+     * Callers use this rather than comparing ids, which is the check that let a
+     * changed Compute device go unnoticed.
+     */
+    suspend fun isCurrent(modelId: String): Boolean =
+        isLoaded && loadedModelId == modelId &&
+            loadedBackend == computeDevice.chosen(RuntimeRegistry.WHISPER)
+
+    /**
+     * @param companions the model's `companionPathsJson`, which is where the
+     *   Silero VAD file's path lives. Passed in rather than looked up because
+     *   this class has no database and should not grow one to read one string.
+     */
+    suspend fun load(
+        modelId: String,
+        path: String,
+        params: SparseParams = SparseParams.EMPTY,
+        companions: SparseParams = SparseParams.EMPTY,
+    ): Result<String> =
         withContext(Dispatchers.IO) {
             runCatching {
                 check(WhisperBridge.available) {
                     WhisperBridge.loadError ?: "The whisper.cpp runtime is not installed in this build."
                 }
-                unload()
                 // Settings → Compute device, asked of whisper's own binary.
                 // whisper offered exactly one way to say this and it was a
                 // hardcoded `true`, which meant "whichever accelerator ggml
                 // registered first" — fine while that was only ever OpenCL, a
                 // silent choice now that the NPU registers alongside it.
-                val backend = computeDevice.registryName(RuntimeRegistry.WHISPER)
-                android.util.Log.i(TAG, "loading ${java.io.File(path).name} on $backend")
-                val newHandle = WhisperBridge.nativeLoad(path, backend)
-                check(newHandle != 0L) { "The runtime returned no handle for $path." }
-                handle = newHandle
-                loadedModelId = modelId
-                if (!params.isEmpty) WhisperBridge.nativeApplyParams(handle, params.toJsonString())
-                WhisperBridge.nativeInfo(handle)
-            }
+                val device = computeDevice.chosen(RuntimeRegistry.WHISPER)
+                val backend = device.registryNames.first()
+                // The detector's own model, if one came down with the weights.
+                // Without it whisper decodes every window including the silent
+                // ones, which is what this build has always done — the key
+                // existed in the manifest, nothing read it, and the badge said
+                // otherwise.
+                val vadModel = companions.string(VAD_COMPANION_ROLE).orEmpty()
+                val effective = if (vadModel.isBlank()) {
+                    params
+                } else {
+                    params.overlaidWith(SparseParams.of("vad_model" to vadModel))
+                }
+
+                nativeLock.withLock {
+                    unload()
+                    android.util.Log.i(TAG, "loading ${File(path).name} on $backend")
+                    val newHandle = WhisperBridge.nativeLoad(path, backend)
+                    check(newHandle != 0L) { "The runtime returned no handle for $path." }
+                    handle = newHandle
+                    loadedModelId = modelId
+                    loadedBackend = device
+                    if (!effective.isEmpty) {
+                        WhisperBridge.nativeApplyParams(handle, effective.toJsonString())
+                    }
+                    val info = WhisperBridge.nativeInfo(handle)
+                    vadActive = runCatching {
+                        json.parseToJsonElement(info).jsonObject["vad"]
+                            ?.jsonPrimitive?.content == "true"
+                    }.getOrDefault(false)
+                    android.util.Log.i(TAG, "loaded ${File(path).name} backend=$backend vad=$vadActive")
+                    info
+                }
+                // A half-loaded context is worse than none: it reports a model
+                // id the callers will trust and skip the reload for.
+            }.onFailure { unload() }
         }
 
-    fun unload() {
+    fun unload() = nativeLock.withLock {
         if (handle != 0L) {
             WhisperBridge.nativeFree(handle)
             handle = 0L
         }
         loadedModelId = null
+        loadedBackend = null
+        vadActive = false
     }
 
-    fun applyParams(params: SparseParams): ParamReport {
+    fun applyParams(params: SparseParams): ParamReport = nativeLock.withLock {
         if (handle == 0L) return ParamReport(rejected = params.keys.toList())
         val report = json.parseToJsonElement(
             WhisperBridge.nativeApplyParams(handle, params.toJsonString()),
@@ -327,7 +420,7 @@ class Transcriber(
         }
     }
 
-    private fun decode(samples: FloatArray): List<TranscriptSegment> {
+    private fun decode(samples: FloatArray): List<TranscriptSegment> = nativeLock.withLock {
         if (handle == 0L) return emptyList()
         val result = json.parseToJsonElement(WhisperBridge.nativeTranscribe(handle, samples)).jsonObject
         return result["segments"]?.jsonArray.orEmpty().map { element ->
@@ -460,6 +553,9 @@ class Transcriber(
 
         /** An hour. Past that the whole-file decode stops being a sane shape. */
         const val MAX_FILE_SECONDS = 3600
+
+        /** The key `companionPathsJson` files the Silero detector under. */
+        const val VAD_COMPANION_ROLE = "VAD"
     }
 }
 

@@ -50,8 +50,24 @@ class DiffusionEngine(
     var loadedModelId: String? = null
         private set
 
+    /** The device this context was built for — see [Transcriber.loadedBackend]. */
+    @Volatile
+    var loadedBackend: ai.ondevice.core.BackendId? = null
+        private set
+
     val available: Boolean get() = SdBridge.available
     val isLoaded: Boolean get() = handle != 0L
+
+    /**
+     * Whether the loaded model is the one asked for, on the device asked for.
+     *
+     * sd.cpp resolves its backend once, when the context is built, so a changed
+     * Compute device is only a changed setting until something reloads. The
+     * Image screen compared model ids alone and so never did.
+     */
+    suspend fun isCurrent(modelId: String): Boolean =
+        isLoaded && loadedModelId == modelId &&
+            loadedBackend == computeDevice.chosen(RuntimeRegistry.STABLE_DIFFUSION)
 
     suspend fun load(
         modelId: String,
@@ -82,7 +98,8 @@ class DiffusionEngine(
             // Settings → Compute device. sd.cpp picked its own device before
             // this, which was defensible while there was only one to pick and a
             // silent override of the user's answer once there were three.
-            val backend = computeDevice.registryName(RuntimeRegistry.STABLE_DIFFUSION)
+            val device = computeDevice.chosen(RuntimeRegistry.STABLE_DIFFUSION)
+            val backend = device.registryNames.first()
 
             val newHandle = SdBridge.nativeLoad(
                 modelPath = modelPath,
@@ -109,6 +126,7 @@ class DiffusionEngine(
                     .ifEmpty { listOf("none") }.joinToString("+"),
             )
             loadedModelId = modelId
+            loadedBackend = device
         }
     }
 
@@ -118,6 +136,7 @@ class DiffusionEngine(
             handle = 0L
         }
         loadedModelId = null
+        loadedBackend = null
     }
 
     fun applyParams(params: SparseParams): ParamReport {

@@ -227,7 +227,7 @@ class ImageViewModel @Inject constructor(
                 }
             }
             try {
-                if (diffusion.loadedModelId != model.id) {
+                if (!diffusion.isCurrent(model.id)) {
                     _state.value = _state.value.copy(loadingModel = true)
                     val loaded = diffusion.load(
                         model.id,
@@ -978,7 +978,11 @@ class VoiceViewModel @Inject constructor(
                 // defaults, so setting them in Advanced changed neither the
                 // capture nor the line claiming to describe it.
                 stepMs = stt.int("step_ms") ?: _state.value.stepMs,
-                vadEnabled = stt.bool("vad") ?: _state.value.vadEnabled,
+                // Not `stt.bool("vad")`. That is the request; this is whether a
+                // detector is loaded and will run. They differ whenever no
+                // Silero model came down with the weights, which is the usual
+                // case — and the badge read "VAD on" throughout.
+                vadEnabled = transcriber.vadActive,
             )
             // A blend written as "af_heart:bm_george:0.4" in Advanced and one
             // set with the Blend control are the same setting, so they share
@@ -1316,9 +1320,12 @@ class VoiceViewModel @Inject constructor(
             .firstOrNull() ?: return
         _state.value = _state.value.copy(transcribingReference = true)
         val text = runCatching {
-            if (transcriber.loadedModelId != speech.id) {
+            if (!transcriber.isCurrent(speech.id)) {
                 transcriber.load(
-                    speech.id, speech.localPath, SparseParams.parse(speech.paramOverridesJson),
+                    speech.id,
+                    speech.localPath,
+                    SparseParams.parse(speech.paramOverridesJson),
+                    SparseParams.parse(speech.companionPathsJson),
                 ).getOrThrow()
             }
             // The engine wants 24 kHz and whisper wants 16, so this is decoded
@@ -1398,9 +1405,14 @@ class VoiceViewModel @Inject constructor(
         }
 
         recordingJob = viewModelScope.launch {
-            if (transcriber.loadedModelId != model.id) {
+            if (!transcriber.isCurrent(model.id)) {
                 _state.value = _state.value.copy(loading = true)
-                val loaded = transcriber.load(model.id, model.localPath, SparseParams.parse(model.paramOverridesJson))
+                val loaded = transcriber.load(
+                    model.id,
+                    model.localPath,
+                    SparseParams.parse(model.paramOverridesJson),
+                    SparseParams.parse(model.companionPathsJson),
+                )
                 _state.value = _state.value.copy(loading = false)
                 if (loaded.isFailure) {
                     _state.value = _state.value.copy(
@@ -1419,7 +1431,12 @@ class VoiceViewModel @Inject constructor(
             val stepMs = overrides.int("step_ms") ?: _state.value.stepMs
             _state.value = _state.value.copy(
                 stepMs = stepMs,
-                vadEnabled = overrides.bool("vad") ?: _state.value.vadEnabled,
+                // The runtime's answer, not the setting's. `vad` has been in the
+                // manifest and on this badge since before whisper's parameter
+                // table had the key, so it read "VAD on" over a detector that
+                // had never been loaded. It only runs when a Silero model came
+                // down with the weights, and only whisper knows whether it did.
+                vadEnabled = transcriber.vadActive,
             )
             transcriber.listen(stepMillis = stepMs, captureTo = captureFile).collect { event ->
                 when (event) {
@@ -1610,8 +1627,13 @@ class VoiceViewModel @Inject constructor(
         val name = _state.value.sourceName ?: file.name
         viewModelScope.launch {
             _state.value = _state.value.copy(loading = true, error = null, fileProgress = 0f)
-            if (transcriber.loadedModelId != model.id) {
-                val loaded = transcriber.load(model.id, model.localPath, SparseParams.parse(model.paramOverridesJson))
+            if (!transcriber.isCurrent(model.id)) {
+                val loaded = transcriber.load(
+                    model.id,
+                    model.localPath,
+                    SparseParams.parse(model.paramOverridesJson),
+                    SparseParams.parse(model.companionPathsJson),
+                )
                 if (loaded.isFailure) {
                     _state.value = _state.value.copy(
                         loading = false,
