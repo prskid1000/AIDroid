@@ -41,8 +41,6 @@ class Converters {
 @Database(
     entities = [
         ModelEntity::class,
-        PresetEntity::class,
-        PersonaEntity::class,
         ConversationEntity::class,
         MessageEntity::class,
         GeneratedImageEntity::class,
@@ -60,8 +58,6 @@ class Converters {
 @TypeConverters(Converters::class)
 abstract class OnDeviceDatabase : RoomDatabase() {
     abstract fun models(): ModelDao
-    abstract fun presets(): PresetDao
-    abstract fun personas(): PersonaDao
     abstract fun conversations(): ConversationDao
     abstract fun messages(): MessageDao
     abstract fun images(): GeneratedImageDao
@@ -79,7 +75,7 @@ abstract class OnDeviceDatabase : RoomDatabase() {
 
         /** One [Migration] per version step, in order, from 1 to [DATABASE_VERSION]. */
         val MIGRATIONS: Array<androidx.room.migration.Migration> =
-            arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
     }
 }
 
@@ -154,4 +150,50 @@ private val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
     }
 }
 
-internal const val DATABASE_VERSION = 5
+/**
+ * v6 — three things that described features nobody could reach.
+ *
+ * `runtime_bundles` loses the six columns that carried an install/update/
+ * rollback story: the `.so` files are inside the APK, Android's W^X enforcement
+ * refuses to load a native library from writable storage, and so an engine
+ * update is an app update. Nothing ever wrote them. The table is recreated
+ * rather than altered because ALTER TABLE DROP COLUMN needs SQLite 3.35 and so
+ * Android 14, and minSdk here is 31; nothing is carried across because every
+ * row is seeded from `runtimes.json` and an empty table seeds itself again.
+ *
+ * `presets` and `personas` go entirely. The preset picker was removed from chat
+ * settings but its parameters kept being applied as the base layer under the
+ * model's own overrides, so "Precise" went on quietly lowering the temperature
+ * of a conversation nobody had set it on. Personas were never read into a
+ * prompt at all.
+ *
+ * `conversations.presetId`, `conversations.personaId` and
+ * `models.defaultPresetId` stay as inert columns: dropping those means
+ * recreating the tables that hold every conversation and the whole model
+ * library, which is not a trade worth making for three unread TEXT columns.
+ */
+private val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("DROP TABLE IF EXISTS `presets`")
+        db.execSQL("DROP TABLE IF EXISTS `personas`")
+        db.execSQL("DROP TABLE IF EXISTS `runtime_bundles`")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `runtime_bundles` (
+                `engine` TEXT NOT NULL,
+                `buildTag` TEXT,
+                `upstreamCommit` TEXT,
+                `jniContract` INTEGER NOT NULL,
+                `installedAt` INTEGER,
+                `sizeBytes` INTEGER NOT NULL,
+                `state` TEXT NOT NULL,
+                `architectureCount` INTEGER NOT NULL,
+                `backendsJson` TEXT NOT NULL,
+                PRIMARY KEY(`engine`)
+            )
+            """.trimIndent(),
+        )
+    }
+}
+
+internal const val DATABASE_VERSION = 6

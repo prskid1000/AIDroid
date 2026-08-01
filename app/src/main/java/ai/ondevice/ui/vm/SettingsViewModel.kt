@@ -225,38 +225,6 @@ class SettingsViewModel @Inject constructor(
     fun setToken(value: String?) {
         tokens.hfToken = value
     }
-
-    /** SPEC §17.4 — engines are separately installable. */
-    fun installRuntime(engine: String) {
-        viewModelScope.launch {
-            val bundle = db.runtimes().get(engine) ?: return@launch
-            db.runtimes().upsert(
-                bundle.copy(
-                    state = RuntimeState.INSTALLED,
-                    installedAt = System.currentTimeMillis(),
-                ),
-            )
-        }
-    }
-
-    fun updateRuntime(engine: String) {
-        viewModelScope.launch {
-            val bundle = db.runtimes().get(engine) ?: return@launch
-            val target = bundle.availableBuildTag ?: return@launch
-            // The previous bundle is kept so a runtime that fails to init twice
-            // can revert on its own (SPEC §17.8).
-            db.runtimes().upsert(
-                bundle.copy(
-                    previousBuildTag = bundle.buildTag,
-                    buildTag = target,
-                    availableBuildTag = null,
-                    availableNotes = null,
-                    state = RuntimeState.INSTALLED,
-                    installedAt = System.currentTimeMillis(),
-                ),
-            )
-        }
-    }
 }
 
 data class SettingsState(

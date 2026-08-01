@@ -142,7 +142,15 @@ class WebSearch(client: OkHttpClient) {
         text = TAGS.replace(text, "")
         text = unescape(text)
         text = SPACES.replace(text, " ")
-        text = text.lines().joinToString("\n") { it.trim() }
+        // What survives the tag strip is still half furniture: "LOGOUT",
+        // "Loading…", a headline repeated in the nav and again in the page. So
+        // drop the scraps and anything already said, keeping first occurrences
+        // in order.
+        val seen = mutableSetOf<String>()
+        text = text.lines()
+            .map { it.trim() }
+            .filter { line -> line.isEmpty() || (line.length >= MIN_LINE_CHARS && seen.add(line)) }
+            .joinToString("\n")
         text = BLANK_LINES.replace(text, "\n\n").trim()
         return if (text.length > MAX_PAGE_CHARS) {
             text.take(MAX_PAGE_CHARS).trimEnd() + "\n…(truncated)"
@@ -176,6 +184,9 @@ class WebSearch(client: OkHttpClient) {
                 "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 
         const val MAX_SNIPPET_CHARS = 400
+
+        /** Below this a line is a button, a badge or a menu item, not prose. */
+        const val MIN_LINE_CHARS = 25
         const val MAX_PAGE_CHARS = 3000
         const val MAX_PAGE_BYTES = 1_500_000L
 
@@ -185,8 +196,10 @@ class WebSearch(client: OkHttpClient) {
             setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
         )
         val CHROME = Regex(
-            "<(?:nav|header|footer|aside|form|iframe|noscript|script|style|svg|template|figure|dialog)" +
-                "\\b[^>]*>.*?</(?:nav|header|footer|aside|form|iframe|noscript|script|style|svg|template|figure|dialog)>",
+            "<(?:nav|header|footer|aside|form|iframe|noscript|script|style|svg|template|figure|dialog|" +
+                "button|select|label|menu)" +
+                "\\b[^>]*>.*?</(?:nav|header|footer|aside|form|iframe|noscript|script|style|svg|template|figure|dialog|" +
+                "button|select|label|menu)>",
             setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
         )
         val MAIN = Regex(

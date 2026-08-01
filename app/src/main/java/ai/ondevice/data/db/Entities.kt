@@ -62,28 +62,6 @@ data class ModelEntity(
     val attachmentRole: AttachmentRole? = null,
 )
 
-@Entity(tableName = "presets", indices = [Index("modality")])
-data class PresetEntity(
-    @PrimaryKey val id: String,
-    val modality: Modality,
-    val name: String,
-    /** Sparse JSON. A built-in preset is editable and deletable like any other. */
-    val paramsJson: String,
-    val isBuiltIn: Boolean,
-)
-
-@Entity(tableName = "personas")
-data class PersonaEntity(
-    @PrimaryKey val id: String,
-    val name: String,
-    val avatarPath: String?,
-    val systemPrompt: String,
-    val defaultModelId: String?,
-    val defaultPresetId: String?,
-    val defaultVoice: String?,
-    val memoryNotes: String?,
-)
-
 @Entity(tableName = "conversations", indices = [Index("updatedAt")])
 data class ConversationEntity(
     @PrimaryKey val id: String,
@@ -202,6 +180,16 @@ data class DownloadJobEntity(
     val updatedAt: Long,
 )
 
+/**
+ * What is compiled into this build, as a row per engine.
+ *
+ * It once described something that could be installed, updated and rolled back
+ * on its own. It never could: the `.so` files are inside the APK, Android's W^X
+ * enforcement refuses to load a native library from writable storage, and so an
+ * engine update is an app update. Nothing ever wrote the six columns that
+ * carried the other story, and no code path could reach the buttons that read
+ * them. Seeded from `runtimes.json` at first launch.
+ */
 @Entity(tableName = "runtime_bundles")
 data class RuntimeBundleEntity(
     @PrimaryKey val engine: String,
@@ -211,15 +199,8 @@ data class RuntimeBundleEntity(
     val installedAt: Long?,
     val sizeBytes: Long,
     val state: RuntimeState,
-    /** Kept so a runtime that fails to init twice can auto-revert (SPEC §17.8). */
-    val previousBuildTag: String?,
-    val availableBuildTag: String?,
-    val availableSizeBytes: Long?,
-    val availableNotes: String?,
     val architectureCount: Int,
     val backendsJson: String,
-    val initFailureCount: Int,
-    val rolledBackFrom: String?,
 )
 
 /** An MCP server the user added by hand. */

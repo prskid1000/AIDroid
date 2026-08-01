@@ -12,7 +12,6 @@ import ai.ondevice.data.ModelStorage
 import ai.ondevice.data.db.GeneratedImageEntity
 import ai.ondevice.data.db.ModelEntity
 import ai.ondevice.data.db.OnDeviceDatabase
-import ai.ondevice.data.db.PresetEntity
 import ai.ondevice.data.db.TranscriptEntity
 import ai.ondevice.data.hf.DeviceCapabilities
 import ai.ondevice.engine.CaptureEvent
@@ -57,10 +56,8 @@ class ImageViewModel @Inject constructor(
             val model = baseModelsOnly(
                 db.models().observeInstalledByModality(Modality.DIFFUSION).first(),
             ).firstOrNull()
-            val presets = db.presets().observeFor(Modality.DIFFUSION).first()
             _state.value = _state.value.copy(
                 model = model,
-                presets = presets,
                 runtimeInstalled = runtimeInstalled,
             )
             refreshAttachmentLibrary()
@@ -501,7 +498,6 @@ enum class ImageMode(val label: String) {
 data class ImageState(
     val mode: ImageMode = ImageMode.GENERATE,
     val model: ModelEntity? = null,
-    val presets: List<PresetEntity> = emptyList(),
     val prompt: String = "low-key studio portrait of a lynx, black backdrop, rim light <lora:filmgrain:0.6>",
     val negativePrompt: String = "blurry, oversaturated",
     val steps: Int = 28,

@@ -57,12 +57,6 @@ class ConversationArchive(
                     messages = db.messages().getFor(conversation.id).map { it.toArchived() },
                 )
             },
-            personas = db.personas().getAll().map {
-                ArchivedPersona(it.id, it.name, it.systemPrompt, it.defaultModelId, it.defaultVoice, it.memoryNotes)
-            },
-            presets = db.presets().getAll().map {
-                ArchivedPreset(it.id, it.modality.name, it.name, it.paramsJson, it.isBuiltIn)
-            },
         )
 
         destination.parentFile?.mkdirs()
@@ -181,38 +175,6 @@ class ConversationArchive(
         var conversationCount = 0
         var messageCount = 0
 
-        archive.personas.forEach { persona ->
-            if (db.personas().get(persona.id) == null) {
-                db.personas().upsert(
-                    ai.ondevice.data.db.PersonaEntity(
-                        id = persona.id,
-                        name = persona.name,
-                        avatarPath = null,
-                        systemPrompt = persona.systemPrompt,
-                        defaultModelId = persona.defaultModelId,
-                        defaultPresetId = null,
-                        defaultVoice = persona.defaultVoice,
-                        memoryNotes = persona.memoryNotes,
-                    ),
-                )
-            }
-        }
-
-        archive.presets.forEach { preset ->
-            if (db.presets().get(preset.id) == null) {
-                db.presets().upsert(
-                    ai.ondevice.data.db.PresetEntity(
-                        id = preset.id,
-                        modality = runCatching { ai.ondevice.core.Modality.valueOf(preset.modality) }
-                            .getOrDefault(ai.ondevice.core.Modality.TEXT),
-                        name = preset.name,
-                        paramsJson = preset.paramsJson,
-                        isBuiltIn = false,
-                    ),
-                )
-            }
-        }
-
         archive.conversations.forEach { archived ->
             val collides = db.conversations().get(archived.id) != null
             val conversationId = if (collides) UUID.randomUUID().toString() else archived.id
@@ -320,6 +282,11 @@ data class ArchiveDocument(
     @SerialName("exported_at") val exportedAt: Long,
     val application: String,
     val conversations: List<ArchivedConversation> = emptyList(),
+    /**
+     * Read from older archives and ignored. Presets and personas no longer
+     * exist; an archive written before they went is still a valid archive, and
+     * dropping the fields would make it fail to parse rather than import.
+     */
     val personas: List<ArchivedPersona> = emptyList(),
     val presets: List<ArchivedPreset> = emptyList(),
 )

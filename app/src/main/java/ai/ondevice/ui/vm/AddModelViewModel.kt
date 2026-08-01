@@ -279,7 +279,7 @@ class AddModelViewModel @Inject constructor(
                     paramOverridesJson = SparseParams.of(
                         "n_ctx" to _state.value.contextTokens,
                     ).toJsonString(),
-                    defaultPresetId = defaultPresetFor(modality),
+                    defaultPresetId = null,
                     displayName = resolved.displayName,
                     attachmentRole = role,
                 ),
@@ -301,12 +301,6 @@ class AddModelViewModel @Inject constructor(
                 ),
             )
         }
-    }
-
-    private fun defaultPresetFor(modality: Modality): String = when (modality) {
-        Modality.DIFFUSION -> "image-quality"
-        Modality.SPEECH_TO_TEXT -> "speech-accurate"
-        else -> "text-balanced"
     }
 
     fun applyRemedy(action: RemedyAction) {

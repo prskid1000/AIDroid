@@ -10,8 +10,6 @@ import ai.ondevice.data.db.ConversationEntity
 import ai.ondevice.data.db.MessageEntity
 import ai.ondevice.data.db.ModelEntity
 import ai.ondevice.data.db.OnDeviceDatabase
-import ai.ondevice.data.db.PersonaEntity
-import ai.ondevice.data.db.PresetEntity
 import ai.ondevice.data.prefs.AppPrefs
 import ai.ondevice.engine.EngineMessage
 import ai.ondevice.engine.EngineManager
@@ -97,20 +95,11 @@ class ChatViewModel @Inject constructor(
         val model = conversation.modelId?.let { db.models().get(it) }
             ?: chatModels.firstOrNull()
 
-        val presets = db.presets().observeFor(Modality.TEXT).first()
-        val personas = db.personas().observeAll().first()
-
         _state.value = _state.value.copy(
             conversation = conversation,
             model = model,
             messages = db.messages().getFor(conversation.id),
-            presets = presets,
-            personas = personas,
-            selectedPresetId = conversation.presetId ?: model?.defaultPresetId ?: presets.firstOrNull()?.id,
-            selectedPersonaId = conversation.personaId,
-            systemPrompt = conversation.systemPrompt
-                ?: personas.firstOrNull { it.id == conversation.personaId }?.systemPrompt
-                ?: "",
+            systemPrompt = conversation.systemPrompt ?: "",
             availableModels = chatModels,
         )
     }
@@ -174,8 +163,6 @@ class ChatViewModel @Inject constructor(
                 errorSuggestion = null,
                 lastExport = null,
                 importSummary = null,
-                selectedPresetId = conversation.presetId ?: _state.value.selectedPresetId,
-                selectedPersonaId = conversation.personaId,
                 systemPrompt = conversation.systemPrompt ?: "",
                 model = conversation.modelId?.let { db.models().get(it) } ?: _state.value.model,
                 messages = db.messages().getFor(conversation.id),
@@ -296,13 +283,14 @@ class ChatViewModel @Inject constructor(
         )
     }
 
-    /** The parameter set actually in force: preset, then per-model overrides. */
-    private suspend fun effectiveParams(): SparseParams {
-        val presetJson = _state.value.selectedPresetId?.let { db.presets().get(it)?.paramsJson }
-        val preset = SparseParams.parse(presetJson)
-        val modelOverrides = SparseParams.parse(_state.value.model?.paramOverridesJson)
-        return preset.overlaidWith(modelOverrides).overlaidWith(_state.value.liveOverrides)
-    }
+    /**
+     * The parameter set actually in force: the model's own overrides, then
+     * whatever the sheet has changed this session. There used to be a preset
+     * layer under both, applied invisibly after its picker was removed.
+     */
+    private fun effectiveParams(): SparseParams =
+        SparseParams.parse(_state.value.model?.paramOverridesJson)
+            .overlaidWith(_state.value.liveOverrides)
 
     fun send() {
         val typed = _state.value.input.trim()
@@ -727,31 +715,6 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    fun setPreset(presetId: String) {
-        viewModelScope.launch {
-            val conversation = _state.value.conversation ?: return@launch
-            db.conversations().upsert(conversation.copy(presetId = presetId, updatedAt = System.currentTimeMillis()))
-            _state.value = _state.value.copy(selectedPresetId = presetId)
-        }
-    }
-
-    fun setPersona(persona: PersonaEntity) {
-        viewModelScope.launch {
-            val conversation = _state.value.conversation ?: return@launch
-            db.conversations().upsert(
-                conversation.copy(
-                    personaId = persona.id,
-                    systemPrompt = persona.systemPrompt,
-                    updatedAt = System.currentTimeMillis(),
-                ),
-            )
-            _state.value = _state.value.copy(
-                selectedPersonaId = persona.id,
-                systemPrompt = persona.systemPrompt,
-            )
-        }
-    }
-
     /**
      * The chat template, overridden per model and applied by reloading it.
      *
@@ -923,10 +886,6 @@ data class ChatState(
     val tokensPerSecond: Float = 0f,
     val contextUsed: Int = 0,
     val cachedTokens: Int = 0,
-    val presets: List<PresetEntity> = emptyList(),
-    val personas: List<PersonaEntity> = emptyList(),
-    val selectedPresetId: String? = null,
-    val selectedPersonaId: String? = null,
     val systemPrompt: String = "",
     val liveOverrides: SparseParams = SparseParams.EMPTY,
     val expandedThinking: Set<String> = emptySet(),
@@ -957,7 +916,6 @@ data class ChatState(
         get() = SparseParams.parse(model?.paramOverridesJson).int("n_ctx")
             ?: model?.contextLength
             ?: 8192
-    val presetName: String? get() = presets.firstOrNull { it.id == selectedPresetId }?.name
 
     /** The template arguments in force: what has been set this session, else what the model loaded with. */
     val templateKwargsJson: String

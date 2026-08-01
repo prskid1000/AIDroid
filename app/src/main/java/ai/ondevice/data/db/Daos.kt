@@ -117,54 +117,7 @@ interface ModelDao {
     fun observeBytesFor(modalities: List<Modality>): Flow<Long?>
 }
 
-@Dao
-interface PresetDao {
-    /** Seed order, not alphabetical. */
-    @Query("SELECT * FROM presets WHERE modality = :modality ORDER BY isBuiltIn DESC, rowid")
-    fun observeFor(modality: Modality): Flow<List<PresetEntity>>
 
-    @Query("SELECT * FROM presets WHERE id = :id")
-    suspend fun get(id: String): PresetEntity?
-
-    @Query("SELECT * FROM presets ORDER BY rowid")
-    suspend fun getAll(): List<PresetEntity>
-
-    @Query("SELECT COUNT(*) FROM presets")
-    suspend fun count(): Int
-
-    @Upsert
-    suspend fun upsert(preset: PresetEntity)
-
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertAll(presets: List<PresetEntity>)
-
-    @Query("DELETE FROM presets WHERE id = :id")
-    suspend fun deleteById(id: String)
-}
-
-@Dao
-interface PersonaDao {
-    @Query("SELECT * FROM personas ORDER BY rowid")
-    fun observeAll(): Flow<List<PersonaEntity>>
-
-    @Query("SELECT * FROM personas WHERE id = :id")
-    suspend fun get(id: String): PersonaEntity?
-
-    @Query("SELECT * FROM personas ORDER BY rowid")
-    suspend fun getAll(): List<PersonaEntity>
-
-    @Query("SELECT COUNT(*) FROM personas")
-    suspend fun count(): Int
-
-    @Upsert
-    suspend fun upsert(persona: PersonaEntity)
-
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertAll(personas: List<PersonaEntity>)
-
-    @Query("DELETE FROM personas WHERE id = :id")
-    suspend fun deleteById(id: String)
-}
 
 @Dao
 interface McpServerDao {
