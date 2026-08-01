@@ -67,12 +67,19 @@ class EngineManager(
             if (engine.isLoaded) engine.unload()
 
             val params = SparseParams.parse(model.paramOverridesJson).overlaidWith(paramOverrides)
+            // The vision projector lives here, and llama.cpp cannot be handed
+            // one after the fact — it is a load argument, not a parameter.
+            val companions = SparseParams.parse(model.companionPathsJson)
 
             val result = engine.load(
                 LoadRequest(
                     modelId = model.id,
                     modelPath = model.localPath,
-                    companionPaths = emptyMap(),
+                    companionPaths = companions.keys
+                        .mapNotNull { key ->
+                            companions.string(key)?.takeIf { it.isNotBlank() }?.let { key to it }
+                        }
+                        .toMap(),
                     params = params,
                     chatTemplate = model.chatTemplate,
                 ),

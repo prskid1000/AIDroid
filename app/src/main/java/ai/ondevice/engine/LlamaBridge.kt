@@ -43,7 +43,13 @@ object LlamaBridge {
 
     external fun nativeTokenCount(handle: Long, text: String): Int
 
-    external fun nativeStartGeneration(handle: Long, prompt: String, stopsJson: String): String
+    /** [imagePathsJson] must hold one path per media marker in [prompt], in order. */
+    external fun nativeStartGeneration(
+        handle: Long,
+        prompt: String,
+        stopsJson: String,
+        imagePathsJson: String,
+    ): String
 
     external fun nativeNextToken(handle: Long): String
 

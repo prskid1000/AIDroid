@@ -50,6 +50,10 @@ data class LoadedModel(
     val templateSource: String = "gguf.chat_template",
     /** `--chat-template-kwargs` as the runtime currently holds it. */
     val templateKwargsJson: String = "{}",
+    /** Whether a vision projector loaded beside the weights — not whether one was installed. */
+    val vision: Boolean = false,
+    /** Where an image goes in the prompt text, as this projector spells it. */
+    val mediaMarker: String = "",
     val stopSequences: List<String>,
     val loadMillis: Long,
 )

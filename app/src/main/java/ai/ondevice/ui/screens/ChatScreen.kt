@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -30,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -329,22 +331,29 @@ private fun MessageBubble(
             }
             val images = SparseParams.parse(message.imagePathsJson).stringList("images").orEmpty()
             images.forEach { path ->
-                Box(
-                    Modifier
+                // The picture itself. The file name is a copy-in id and a
+                // sanitised original, which reads as a hash and tells the reader
+                // nothing they cannot see by looking.
+                coil3.compose.AsyncImage(
+                    model = path,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
                         .fillMaxWidth(0.8f)
-                        .height(96.dp)
+                        .heightIn(max = 220.dp)
+                        .clip(Radius.Md)
                         .background(NocturneColors.Neutral900, Radius.Md)
                         .ring(NocturneColors.Divider, Radius.Md),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    // Per-image token cost, shown before it is sent — images
-                    // consume context fast (SPEC §4.5).
-                    Text(
-                        "${path.substringAfterLast('/')} · ${Fmt.grouped(message.imageTokenCount ?: 0)} img tokens",
-                        style = NocturneType.MonoXs,
-                        color = NocturneColors.TextMuted,
-                    )
-                }
+                )
+            }
+            // Images consume context fast, and the cost is per turn, not per
+            // image (SPEC §4.5).
+            if (images.isNotEmpty()) {
+                Text(
+                    "${Fmt.grouped(message.imageTokenCount ?: 0)} image tokens",
+                    style = NocturneType.MonoXs,
+                    color = NocturneColors.TextMuted,
+                )
             }
         }
 

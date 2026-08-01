@@ -54,9 +54,16 @@ class LlamaEngine(
             // app never holds two at once (SPEC §3.5).
             if (handle != 0L) freeHandle()
 
+            // The projector is a load-time argument, not a parameter the user
+            // sets: mtmd builds its graph against these weights.
+            val loadParams = request.companionPaths[VISION_PROJECTOR]
+                ?.takeIf { it.isNotBlank() }
+                ?.let { request.params.overlaidWith(SparseParams.of("mmproj" to it)) }
+                ?: request.params
+
             val started = System.currentTimeMillis()
             val newHandle = withContext(Dispatchers.IO) {
-                LlamaBridge.nativeLoad(request.modelPath, request.params.toJsonString())
+                LlamaBridge.nativeLoad(request.modelPath, loadParams.toJsonString())
             }
             check(newHandle != 0L) { "The runtime returned no handle for ${request.modelPath}." }
             handle = newHandle
@@ -72,6 +79,8 @@ class LlamaEngine(
                 heads = info.int("heads") ?: 0,
                 chatTemplate = info.string("chatTemplate")?.takeIf { it.isNotBlank() },
                 templateSource = info.string("templateSource") ?: "gguf.chat_template",
+                vision = info.bool("vision") ?: false,
+                mediaMarker = info.string("mediaMarker").orEmpty(),
                 // The end-of-generation tokens the *vocabulary* declares.
                 stopSequences = info["eogTokens"]?.jsonArray
                     ?.mapNotNull { it.jsonPrimitive.contentOrNull }
@@ -86,7 +95,7 @@ class LlamaEngine(
                     "context=${model.contextLength} " +
                     "layers=${model.layers} threads=${info.int("threads") ?: 0} " +
                     "template=${if (model.chatTemplate.isNullOrBlank()) "none" else "gguf"} " +
-                    "eog=${model.stopSequences.size}",
+                    "eog=${model.stopSequences.size} vision=${model.vision}",
             )
             model
         }.onFailure { android.util.Log.e(TAG, "load failed", it) }
@@ -132,8 +141,14 @@ class LlamaEngine(
         }
 
         val formatted = formatPrompt(request, addGenerationPrompt = true)
+        val images = imagePaths(request)
         val start = json.parseToJsonElement(
-            LlamaBridge.nativeStartGeneration(handle, formatted.string("prompt").orEmpty(), "[]"),
+            LlamaBridge.nativeStartGeneration(
+                handle,
+                formatted.string("prompt").orEmpty(),
+                "[]",
+                buildJsonArray { images.forEach { add(it) } }.toString(),
+            ),
         ).jsonObject
 
         start.string("error")?.let { error ->
@@ -147,7 +162,7 @@ class LlamaEngine(
             TAG,
             "prompt tokens=${start.int("promptTokens") ?: 0} " +
                 "cached=${start.int("cachedTokens") ?: 0} " +
-                "messages=${request.messages.size} tools=${request.tools.size} " +
+                "messages=${request.messages.size} images=${images.size} tools=${request.tools.size} " +
                 "template=${formatted.string("templateSource")?.takeIf { it.isNotBlank() } ?: "runtime default"} " +
                 "at ${"%.1f".format(start.float("promptPerSecond") ?: 0f)} t/s",
         )
@@ -322,7 +337,7 @@ class LlamaEngine(
                 add(
                     buildJsonObject {
                         put("role", message.role)
-                        put("content", message.content)
+                        put("content", withMarkers(message))
                         message.toolCallId?.let { put("tool_call_id", it) }
                         message.toolName?.let { put("tool_name", it) }
                         if (message.toolCalls.isNotEmpty()) {
@@ -363,8 +378,28 @@ class LlamaEngine(
         ).jsonObject
     }
 
+    /**
+     * The rendered prompt is what mtmd splits on, so every image has to leave a
+     * marker in the text where it belongs — one per image, ahead of what the
+     * user said about it. Without a projector the markers would render as
+     * literal `<__media__>` in the prompt, so they are only added when one
+     * loaded.
+     */
+    private fun withMarkers(message: EngineMessage): String {
+        val marker = loaded?.mediaMarker.orEmpty()
+        if (marker.isEmpty() || message.imagePaths.isEmpty()) return message.content
+        return message.imagePaths.joinToString("") { "$marker\n" } + message.content
+    }
+
+    /** Every image in the conversation, in the order its markers appear. */
+    private fun imagePaths(request: GenerateRequest): List<String> =
+        if (loaded?.vision != true) emptyList() else request.messages.flatMap { it.imagePaths }
+
     private companion object {
         const val TAG = "LlamaEngine"
+
+        /** The companion key [ai.ondevice.data.hf.CompanionRole.VISION_PROJECTOR] is stored under. */
+        const val VISION_PROJECTOR = "VISION_PROJECTOR"
 
         /** Only used to label the inspector; the real count comes from mtmd. */
         const val IMAGE_TOKENS = 1456

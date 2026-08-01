@@ -70,6 +70,12 @@ set(LLAMA_SUBPROCESS        OFF CACHE BOOL "" FORCE)
 set(LLAMA_CURL              OFF CACHE BOOL "" FORCE)
 set(LLAMA_ALL_WARNINGS      OFF CACHE BOOL "" FORCE)
 
+# The vision projector. Upstream keeps mtmd under tools/, but exposes this hook
+# for exactly this case: the library on its own, without the CLI binaries that
+# LLAMA_BUILD_TOOLS would also produce. mtmd's video support turns itself off
+# because LLAMA_SUBPROCESS is OFF — it shells out to ffmpeg, which no phone has.
+set(LLAMA_BUILD_MTMD        ON  CACHE BOOL "" FORCE)
+
 # The app decides its own CPU features per ABI (see below); ggml must not probe
 # the *build host*, which is an x86 desktop and has nothing to do with a phone.
 set(GGML_NATIVE             OFF CACHE BOOL "" FORCE)
@@ -116,10 +122,11 @@ target_include_directories(ondevice_llama PRIVATE
     "${VENDOR_DIR}/llama.cpp/ggml/include"
     "${VENDOR_DIR}/llama.cpp/common"
     "${VENDOR_DIR}/llama.cpp/vendor"
+    "${VENDOR_DIR}/llama.cpp/tools/mtmd"
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
-target_link_libraries(ondevice_llama PRIVATE llama llama-common android log)
+target_link_libraries(ondevice_llama PRIVATE llama llama-common mtmd android log)
 
 # Keep the shipped .so as small as the C++ allows — a runtime bundle is
 # downloaded on the sideload channel and its size is quoted to the user.

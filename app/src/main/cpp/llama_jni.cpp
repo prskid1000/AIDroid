@@ -22,6 +22,9 @@
 #include "log.h"
 #include "build-info.h"
 
+#include "mtmd.h"
+#include "mtmd-helper.h"
+
 #include "nlohmann/json.hpp"
 
 #include "jni_util.h"
@@ -47,6 +50,11 @@ struct od_engine {
 
     common_chat_templates_ptr templates;
     common_sampler *          smpl = nullptr;
+
+    // The vision projector, when the model was installed with one. It is a
+    // separate GGUF beside the weights, so it is a load-time parameter like the
+    // model path itself — `mmproj` in the table below.
+    mtmd_context * mctx = nullptr;
 
     // What the Jinja template is handed besides the messages — upstream's
     // `--chat-template-kwargs`, verbatim. Values are raw JSON text, so `true`,
@@ -90,6 +98,9 @@ struct od_engine {
     std::string              stop_reason;
 
     ~od_engine() {
+        if (mctx) {
+            mtmd_free(mctx);
+        }
         if (smpl) {
             common_sampler_free(smpl);
         }
@@ -273,6 +284,10 @@ const std::map<std::string, param_row> & param_table() {
           } } },
         { "stop",             { false, [](od_engine & e, const json & v) { e.params.antiprompt = as_string_list(v); } } },
         { "chat_template",    { true,  [](od_engine & e, const json & v) { e.params.chat_template = as_string(v); } } },
+        // The projector file that lets a text model be shown a picture. Set
+        // from the model's VISION_PROJECTOR companion, and only readable at
+        // load: mtmd builds its own graph against the weights.
+        { "mmproj",           { true,  [](od_engine & e, const json & v) { e.params.mmproj.path = as_string(v); } } },
         // The one kwarg with a switch of its own, because it is the one users
         // reach for. It writes into the same map as the general form below, so
         // whichever is set last wins and there is no second source of truth.
@@ -585,6 +600,28 @@ Java_ai_ondevice_engine_LlamaBridge_nativeLoad(JNIEnv * env, jobject, jstring jp
     engine->templates = common_chat_templates_init(engine->model, engine->params.chat_template);
     rebuild_sampler(*engine);
 
+    // A projector that will not load is not a reason to refuse the model: the
+    // text half is intact and every text conversation still works. It is a
+    // reason to say so, because the alternative is a model that silently
+    // ignores every picture it is shown.
+    if (!engine->params.mmproj.path.empty()) {
+        mtmd_context_params mparams_mtmd = mtmd_context_params_default();
+        mparams_mtmd.use_gpu       = false;
+        mparams_mtmd.print_timings = false;
+        mparams_mtmd.n_threads     = engine->params.cpuparams.n_threads;
+        mparams_mtmd.warmup        = false;
+        engine->mctx = mtmd_init_from_file(engine->params.mmproj.path.c_str(),
+                                           engine->model, mparams_mtmd);
+        if (engine->mctx == nullptr) {
+            LOGE("vision projector %s would not load; this model stays text-only",
+                 engine->params.mmproj.path.c_str());
+        } else {
+            LOGI("vision projector loaded: vision=%d audio=%d",
+                 mtmd_support_vision(engine->mctx) ? 1 : 0,
+                 mtmd_support_audio(engine->mctx) ? 1 : 0);
+        }
+    }
+
     return reinterpret_cast<jlong>(engine);
 }
 
@@ -629,6 +666,10 @@ Java_ai_ondevice_engine_LlamaBridge_nativeInfo(JNIEnv * env, jobject, jlong hand
         } catch (const std::exception &) { /* written by us; unparseable means dropped */ }
     }
     info["chatTemplateKwargs"] = kwargs;
+
+    // What the projector turned out to be, rather than what the file was named.
+    info["vision"]      = e->mctx != nullptr && mtmd_support_vision(e->mctx);
+    info["mediaMarker"] = e->mctx != nullptr ? mtmd_get_marker(e->mctx) : mtmd_default_marker();
 
     json eog = json::array();
     for (llama_token token = 0; token < llama_vocab_n_tokens(e->vocab); ++token) {
@@ -760,49 +801,135 @@ Java_ai_ondevice_engine_LlamaBridge_nativeTokenCount(JNIEnv * env, jobject, jlon
 /** Begin a generation. */
 JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_LlamaBridge_nativeStartGeneration(
-        JNIEnv * env, jobject, jlong handle, jstring jprompt, jstring jstops) {
+        JNIEnv * env, jobject, jlong handle, jstring jprompt, jstring jstops, jstring jimages) {
     auto * e = as_engine(handle);
     if (e == nullptr) return jni_from_string(env, "{}");
 
     std::lock_guard<std::mutex> lock(e->mutex);
 
     const auto prompt = jni_to_string(env, jprompt);
-    const auto tokens = common_tokenize(e->vocab, prompt, true, true);
 
+    std::vector<std::string> image_paths;
+    try {
+        for (const auto & item : json::parse(jni_to_string(env, jimages))) {
+            if (item.is_string()) image_paths.push_back(item.get<std::string>());
+        }
+    } catch (const std::exception &) { /* no images is the ordinary case */ }
 
     const uint32_t n_ctx = llama_n_ctx(e->ctx);
-    if (tokens.size() >= n_ctx) {
-        return jni_from_string(env, dump_json(json{
-            { "error", "The prompt is " + std::to_string(tokens.size()) +
-                       " tokens and the context is " + std::to_string(n_ctx) + "." },
-            { "suggestion", "Raise n_ctx and reload, or start a new conversation." },
-        }));
-    }
 
-    // How much of the KV we can keep. Stopping one short of the shared prefix
-    // guarantees there is always a token to decode and therefore fresh logits.
-    size_t n_common = 0;
-    while (n_common < e->cached.size() && n_common < tokens.size() &&
-           e->cached[n_common] == tokens[n_common]) {
-        ++n_common;
-    }
-    if (n_common == tokens.size() && n_common > 0) {
-        --n_common;
-    }
+    size_t n_common   = 0;
+    size_t n_prompt   = 0;
+    const int64_t t0  = ggml_time_us();
 
-    llama_memory_seq_rm(llama_get_memory(e->ctx), 0, static_cast<llama_pos>(n_common), -1);
+    if (!image_paths.empty()) {
+        if (e->mctx == nullptr) {
+            return jni_from_string(env, dump_json(json{
+                { "error", "This model was installed without a vision projector, so it cannot be shown a picture." },
+                { "suggestion", "Install the model's mmproj companion, or send the message without the image." },
+            }));
+        }
 
-    const int64_t t0 = ggml_time_us();
-    if (!decode_tokens(*e, tokens, n_common)) {
-        return jni_from_string(env, dump_json(json{
-            { "error", "llama_decode failed while processing the prompt." },
-            { "suggestion", "This is usually memory. Lower n_ctx or n_batch and try again." },
-        }));
+        // An image turn always starts from an empty context. The image lives in
+        // the KV as embeddings, not as tokens, so there is nothing to compare a
+        // later prompt against and the prefix cache cannot be trusted.
+        llama_memory_seq_rm(llama_get_memory(e->ctx), 0, 0, -1);
+        e->cached.clear();
+
+        std::vector<mtmd_bitmap *>       owned;
+        std::vector<const mtmd_bitmap *> bitmaps;
+        for (const auto & path : image_paths) {
+            auto wrapper = mtmd_helper_bitmap_init_from_file(e->mctx, path.c_str(), false);
+            if (wrapper.bitmap == nullptr) {
+                for (auto * bitmap : owned) mtmd_bitmap_free(bitmap);
+                return jni_from_string(env, dump_json(json{
+                    { "error", "The image could not be read: " + path.substr(path.find_last_of('/') + 1) },
+                    { "suggestion", "Attach a JPEG or PNG." },
+                }));
+            }
+            owned.push_back(wrapper.bitmap);
+            bitmaps.push_back(wrapper.bitmap);
+        }
+
+        mtmd_input_chunks * chunks = mtmd_input_chunks_init();
+        mtmd_input_text text{};
+        text.text          = prompt.c_str();
+        text.text_len      = prompt.size();
+        text.add_special   = true;
+        text.parse_special = true;
+
+        const int32_t tokenized = mtmd_tokenize(e->mctx, chunks, &text, bitmaps.data(), bitmaps.size());
+        if (tokenized != 0) {
+            mtmd_input_chunks_free(chunks);
+            for (auto * bitmap : owned) mtmd_bitmap_free(bitmap);
+            return jni_from_string(env, dump_json(json{
+                { "error", tokenized == 1
+                    ? "The prompt carries a different number of image markers than images."
+                    : "The image could not be pre-processed for this projector." },
+                { "suggestion", "Start a new conversation and attach the image again." },
+            }));
+        }
+
+        n_prompt = mtmd_helper_get_n_tokens(chunks);
+        if (n_prompt >= n_ctx) {
+            mtmd_input_chunks_free(chunks);
+            for (auto * bitmap : owned) mtmd_bitmap_free(bitmap);
+            return jni_from_string(env, dump_json(json{
+                { "error", "The prompt is " + std::to_string(n_prompt) + " tokens with the image and the context is " +
+                           std::to_string(n_ctx) + "." },
+                { "suggestion", "Raise n_ctx and reload, or start a new conversation." },
+            }));
+        }
+
+        llama_pos n_past = 0;
+        const int32_t evaluated = mtmd_helper_eval_chunks(
+            e->mctx, e->ctx, chunks, 0, 0, std::max(1, e->params.n_batch), true, &n_past);
+
+        mtmd_input_chunks_free(chunks);
+        for (auto * bitmap : owned) mtmd_bitmap_free(bitmap);
+
+        if (evaluated != 0) {
+            return jni_from_string(env, dump_json(json{
+                { "error", "The image could not be evaluated." },
+                { "suggestion", "This is usually memory. Lower n_ctx and try again." },
+            }));
+        }
+        LOGI("vision prompt images=%zu tokens=%zu positions=%d",
+             image_paths.size(), n_prompt, static_cast<int>(n_past));
+    } else {
+        const auto tokens = common_tokenize(e->vocab, prompt, true, true);
+        if (tokens.size() >= n_ctx) {
+            return jni_from_string(env, dump_json(json{
+                { "error", "The prompt is " + std::to_string(tokens.size()) +
+                           " tokens and the context is " + std::to_string(n_ctx) + "." },
+                { "suggestion", "Raise n_ctx and reload, or start a new conversation." },
+            }));
+        }
+
+        // How much of the KV we can keep. Stopping one short of the shared prefix
+        // guarantees there is always a token to decode and therefore fresh logits.
+        while (n_common < e->cached.size() && n_common < tokens.size() &&
+               e->cached[n_common] == tokens[n_common]) {
+            ++n_common;
+        }
+        if (n_common == tokens.size() && n_common > 0) {
+            --n_common;
+        }
+
+        llama_memory_seq_rm(llama_get_memory(e->ctx), 0, static_cast<llama_pos>(n_common), -1);
+
+        if (!decode_tokens(*e, tokens, n_common)) {
+            return jni_from_string(env, dump_json(json{
+                { "error", "llama_decode failed while processing the prompt." },
+                { "suggestion", "This is usually memory. Lower n_ctx or n_batch and try again." },
+            }));
+        }
+        e->cached = tokens;
+        n_prompt  = tokens.size();
     }
     e->t_prompt_us = ggml_time_us() - t0;
 
-    e->cached      = tokens;
-    e->n_prompt    = static_cast<int>(tokens.size());
+    e->n_prompt    = static_cast<int>(n_prompt);
     e->n_cache_hit = static_cast<int>(n_common);
     e->n_generated = 0;
     e->generated.clear();
@@ -822,7 +949,7 @@ Java_ai_ondevice_engine_LlamaBridge_nativeStartGeneration(
     e->t_gen_start = ggml_time_us();
 
     const float prompt_per_second = e->t_prompt_us > 0
-        ? static_cast<float>(tokens.size() - n_common) * 1e6f / static_cast<float>(e->t_prompt_us)
+        ? static_cast<float>(n_prompt - n_common) * 1e6f / static_cast<float>(e->t_prompt_us)
         : 0.0f;
 
     return jni_from_string(env, dump_json(json{
