@@ -42,17 +42,7 @@ import ai.ondevice.ui.theme.Radius
 import ai.ondevice.ui.theme.ring
 import ai.ondevice.ui.vm.ParamsViewModel
 
-/**
- * **S8 — All parameters.**
- *
- * The proof of SPEC §1.5. Every row on this screen is generated from the
- * manifest; there is not one hand-written parameter widget in the file. Switch
- * tiers, search, flip `rope_scaling_type` and watch the YaRN rows appear —
- * all of that is `dependsOn` and `tier` metadata doing the work.
- *
- * At the bottom sits §16.6's escape hatch, which guarantees that anything the
- * loaded `.so` supports stays reachable even if manifest generation missed it.
- */
+/** **S8 — All parameters.** The proof of SPEC §1.5. */
 @Composable
 fun AllParametersScreen(
     onBack: () -> Unit,

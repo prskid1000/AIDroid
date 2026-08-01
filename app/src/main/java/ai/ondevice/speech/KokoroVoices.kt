@@ -1,26 +1,9 @@
 package ai.ondevice.speech
 
-/**
- * Kokoro's voice catalogue.
- *
- * This is a *display* catalogue, not a capability claim. The names, languages
- * and genders come from the voice-pack naming scheme Kokoro itself uses —
- * `<language><gender>_<name>`, so `bf_emma` is British English, female, "Emma".
- * Which of them can actually speak is decided by [catalogue]'s `available`
- * flag, which the caller derives from whether the runtime and a voice pack are
- * installed. Listing a voice the device cannot produce is fine and useful;
- * *speaking* in a different one and calling it Kokoro is not.
- */
+/** Kokoro's voice catalogue. */
 object KokoroVoices {
 
-    /**
-     * [available] is whether Kokoro's runtime and weights are installed. A
-     * voice also needs a *front end* for its language, and this build's
-     * phonemiser is espeak-ng, which is not what Kokoro's own pipeline uses for
-     * Japanese or Mandarin. Those voices are listed and marked rather than
-     * quietly offered, because producing espeak's guess at Japanese and calling
-     * it Kokoro would be exactly the substitution §1.2 forbids.
-     */
+    /** [available] is whether Kokoro's runtime and weights are installed. */
     fun catalogue(available: Boolean): List<SynthVoice> = NAMES.map { id ->
         SynthVoice(
             id = id,

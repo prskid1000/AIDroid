@@ -1,15 +1,4 @@
 // stable-diffusion.cpp behind the string-keyed contract (SPEC §16.7).
-//
-// Diffusion differs from the other two engines in one way that shapes the whole
-// file: `generate_image` blocks for the entire run. There is no token loop to
-// pull from. So progress and the live preview are published *into* this struct
-// by sd.cpp's own callbacks, and Kotlin polls them from a second coroutine —
-// which keeps the rule that no native thread ever calls into the JVM, and means
-// cancellation is a flag rather than a race between two runtimes.
-//
-// SPEC §5.4 asks for intermediate latents rather than a spinner. That is what
-// the preview callback is for, and it is why TAESD is worth loading: it decodes
-// a latent to a viewable image cheaply enough to do every few steps.
 
 #include <jni.h>
 
@@ -31,40 +20,14 @@
 #include "jni_util.h"
 
 
-/**
- * The fallback thread count: every core but one.
- *
- * sd.cpp's own `sd_get_num_physical_cores()` was the fallback, and on a phone
- * with 8 logical cores it returns the physical count and leaves the rest idle.
- * The Kotlin caller now always passes DeviceCapabilities.inferenceThreads, so
- * this only decides what happens when something forgets to — and it should
- * agree with the policy rather than quietly differ from it.
- */
+/** The fallback thread count: every core but one. */
 static int od_default_threads() {
     return std::max(1, static_cast<int>(std::thread::hardware_concurrency()) - 1);
 }
 
 using json = nlohmann::ordered_json;
 
-/**
- * JSON on its way out to Kotlin, with invalid UTF-8 replaced rather than thrown at.
- *
- * `dump()` defaults to `error_handler_t::strict`, which throws on a byte
- * sequence that is not valid UTF-8 — and across a JNI boundary an uncaught C++
- * exception is not an error, it is SIGABRT. The whole process dies with no
- * message anything in Kotlin can catch.
- *
- * Which is reachable from ordinary use, because every one of these runtimes
- * emits text a *piece* at a time: whisper's segments and llama's tokens are
- * byte-level, so a multi-byte character routinely arrives split across two of
- * them and each half is invalid on its own. Observed as exactly that — whisper
- * transcribing a noisy recording, `invalid UTF-8 byte at index 0: 0xA2`, and
- * the app gone.
- *
- * `replace` substitutes U+FFFD for the bad bytes. A replacement character in a
- * transcript is a cosmetic flaw in one word; the alternative is losing the
- * conversation, the recording and the run.
- */
+/** JSON on its way out to Kotlin, with invalid UTF-8 replaced rather than thrown at. */
 static std::string dump_json(const json & value) {
     return value.dump(-1, ' ', false, json::error_handler_t::replace);
 }
@@ -123,14 +86,9 @@ struct od_sd {
     }
 };
 
-// sd.cpp's callbacks carry a `void* data`, and the app only ever holds one
-// diffusion context, so a single current pointer is enough and avoids handing
-// raw pointers through a C callback that outlives a JNI frame.
 std::atomic<od_sd *> g_current{nullptr};
 
-// The last error sd.cpp logged. Kept so a load failure can be reported with the
-// runtime's own words instead of a generic "it didn't work" — the difference
-// between "this GGUF uses tensor names longer than ggml supports" and a shrug.
+// The last error sd.cpp logged.
 std::mutex  g_last_error_mutex;
 std::string g_last_error;
 
@@ -140,10 +98,7 @@ void set_last_error(const char * text) {
     while (!line.empty() && (line.back() == '\n' || line.back() == '\r' || line.back() == ' ')) {
         line.pop_back();
     }
-    // Upstream prefixes every line with `file.hpp:72   - `. That is useful in a
-    // terminal and noise in a sentence shown to someone deciding whether to
-    // delete a 1.6 GB download, so the file:line is dropped and the message
-    // kept. The full line still goes to logcat untouched.
+    // Upstream prefixes every line with `file.hpp:72 - `.
     const auto dash = line.find(" - ");
     if (dash != std::string::npos && line.find(':') < dash) {
         line = line.substr(dash + 3);
@@ -231,9 +186,7 @@ const std::map<std::string, row> & table() {
     return t;
 }
 
-// This build's defaults, read back off a default-constructed od_sd rather than
-// asserted a second time in the manifest. Every setter above already falls back
-// to the live value, so the numbers were here all along.
+// This build's defaults, read back off a default-constructed od_sd rather than asserted a second time in the manifest.
 const std::map<std::string, json (*)(const od_sd &)> & default_table() {
     static const std::map<std::string, json (*)(const od_sd &)> t = {
         { "prompt",           [](const od_sd & e) { return json(e.prompt); } },
@@ -259,17 +212,6 @@ const std::map<std::string, json (*)(const od_sd &)> & default_table() {
     return t;
 }
 
-/**
- * sd.cpp funnels three unrelated things through one progress callback:
- * weight loading (`pretty_bytes_progress`), VAE tile decoding, and the actual
- * sampling loop. They all arrive as `(step, steps, time)` with no tag.
- *
- * Reporting them all as "step X/Y" is how the screen ended up saying
- * "step 686/686" for a three-step run — 686 was the loader counting tensors.
- * The only signal available is the *total*: the sampling loop is the one whose
- * total matches the step count we asked for. Anything else is a different
- * phase, and is reported as one rather than mislabelled as progress.
- */
 void progress_cb(int step, int steps, float time, void *) {
     od_sd * e = g_current.load();
     if (e == nullptr) return;
@@ -337,11 +279,7 @@ owned_image take_image(JNIEnv * env, jbyteArray bytes, jint width, jint height) 
 
 extern "C" {
 
-/**
- * The keys this binary will act on. See the note on llama's copy of this. A
- * diffusion parameter is read when the sampler runs, so none of them require a
- * reload and every row says so.
- */
+/** The keys this binary will act on. */
 JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeSupportedParams(JNIEnv * env, jobject) {
     const od_sd defaults = {};
@@ -376,21 +314,13 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
     const auto vae        = jni_to_string(env, jvae);
     const auto taesd      = jni_to_string(env, jtaesd);
     const auto controlNet = jni_to_string(env, jcontrolNet);
-    // The rest of sd_ctx_params_t's auxiliary paths. These were classified,
-    // offered in the UI, sent across as role-tagged attachments — and then
-    // dropped, because the per-run attachment loop only understands LORA and
-    // CONTROLNET and every other role fell through its if/else. They are
-    // load-time fields in sd.cpp, so this is where they belong.
+    // The rest of sd_ctx_params_t's auxiliary paths.
     const auto clipL      = jni_to_string(env, jclipL);
     const auto clipG      = jni_to_string(env, jclipG);
     const auto t5xxl      = jni_to_string(env, jt5xxl);
     const auto ipAdapter  = jni_to_string(env, jipAdapter);
     const auto embeddings = jni_to_string(env, jembeddings);
-    // An IP-Adapter cannot work without this. sd.cpp constructs a
-    // FrozenCLIPVisionEmbedder the moment ip_adapter_path is set and binds it
-    // from the shared tensor map, and SD 1.5 contributes only a *text* encoder
-    // to that map — so with no image encoder loaded there is nothing for the
-    // vision embedder to find.
+    // An IP-Adapter cannot work without this.
     const auto clipVision = jni_to_string(env, jclipVision);
 
     static std::once_flag once;
@@ -421,24 +351,10 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
     params.clip_vision_path = clipVision.empty() ? nullptr : clipVision.c_str();
     params.n_threads        = threads > 0 ? threads : od_default_threads();
     params.enable_mmap      = true;
-    // Flash attention stays off. It is an accelerator kernel, and asking for one
-    // that a given backend does not have is how a load turns into a fallback
-    // nobody asked for; the Compute device choice below is the honest knob.
+    // Flash attention stays off.
     params.flash_attn       = false;
 
     // The Compute device setting, in the one field sd.cpp takes it in.
-    //
-    // `backend` is a *spec string*, and sd.cpp resolves it against both device
-    // names and registry names (ggml_extend_backend.cpp:126), so the same
-    // "OpenCL"/"HTP"/"CPU" the other two runtimes match on works here
-    // unchanged. Empty means sd.cpp picks, which is what it did before this and
-    // is still the answer when nothing was chosen.
-    //
-    // `params_backend` — where the *weights* live, as opposed to where the
-    // arithmetic happens — is only pinned for CPU. Pinning it to an accelerator
-    // would put every tensor in that device's memory at load time, which on a
-    // phone is how a 2 GB checkpoint fails to load at all; left empty, sd.cpp's
-    // own fitting decides, and it knows the budget.
     const auto backend = jni_to_string(env, jbackend);
     const bool cpu_only = jni_iequals(backend, "CPU");
     if (!backend.empty()) {
@@ -462,17 +378,7 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
         return 0;
     }
 
-    // A context can come back non-null with its weights half-built: the tensor
-    // load fails, the graph does not, and `new_sd_ctx` still hands back a
-    // pointer. `sd_ctx_supports_image_generation` believes it too — it reports
-    // what the *architecture* can do, not whether the weights arrived. The
-    // first honest signal is that ggml logged an error while reading the file,
-    // and the next thing that happens otherwise is `ggml_abort` inside the
-    // conditioner, which kills the process with no message the user can act on.
-    //
-    // So: any error logged while building the context disqualifies it. That is
-    // deliberately blunt. Refusing a model that would have worked is a bad day;
-    // vanishing mid-tap is not something the user can even report.
+    // A context can come back non-null with its weights half-built: the tensor load fails, the graph does not, and `new_sd_ctx` still hands back a pointer.
     const auto load_error = take_last_error();
     if (!load_error.empty()) {
         delete engine;
@@ -488,13 +394,7 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
 
     sd_set_progress_callback(progress_cb, nullptr);
 
-    // TAESD decodes a latent to something that looks like the final image, but
-    // it is a *separate model file*. Asking for PREVIEW_TAE without one means
-    // the callback never fires and the preview stays empty for the whole run —
-    // which is worse than no preview, because the screen sits on "warming up"
-    // while the engine is plainly working. PREVIEW_PROJ is a cheap linear
-    // projection of the latent: blurry and colour-shifted, but real, and it
-    // needs no extra weights. So the mode follows what is actually installed.
+    // TAESD decodes a latent to something that looks like the final image, but it is a *separate model file*.
     const bool has_taesd = !taesd.empty();
     sd_set_preview_callback(preview_cb, has_taesd ? PREVIEW_TAE : PREVIEW_PROJ,
                             /* interval */ 1, /* denoised */ true, /* noisy */ false, nullptr);
@@ -581,12 +481,7 @@ Java_ai_ondevice_engine_SdBridge_nativeCancel(JNIEnv *, jobject, jlong handle) {
     sd_cancel_generation(e->ctx, SD_CANCEL_ALL);
 }
 
-/**
- * Run one generation. Blocks for its whole duration — the caller runs it on a
- * background dispatcher and polls [nativeProgress] meanwhile.
- *
- * Returns packed RGB with an 8-byte width/height header, matching the preview.
- */
+/** Run one generation. */
 JNIEXPORT jbyteArray JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeGenerate(
         JNIEnv * env, jobject, jlong handle,
@@ -616,12 +511,7 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
     owned_image mask    = take_image(env, jmask, maskW, maskH);
     owned_image control = take_image(env, jcontrol, controlW, controlH);
 
-    // Attachments arrive as a role-tagged list, not as named arguments. That
-    // is what keeps this generic: a new auxiliary kind is a new role string and
-    // a manifest key, never another parameter on this function and another
-    // branch below. The runtime decides whether a given file is usable with the
-    // loaded base — the app does not carry a compatibility table it would have
-    // to keep correct for every architecture ever released.
+    // Attachments arrive as a role-tagged list, not as named arguments.
     std::vector<sd_lora_t>   loras;
     std::vector<std::string> lora_paths;
     std::string              control_net_path;
@@ -745,19 +635,7 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
     return out;
 }
 
-/**
- * ESRGAN upscaling.
- *
- * A separate context from the diffusion one, because that is how sd.cpp models
- * it: `upscaler_ctx_t` owns its own weights and is not part of `sd_ctx_t`. It is
- * built and freed per call rather than held, since an upscale is a deliberate
- * one-off on a finished picture and keeping a second set of weights resident for
- * the rest of the session would cost memory the generator wants.
- *
- * Same wire format as nativeGenerate: an 8-byte header carrying the output
- * width and height, then packed RGB. The dimensions have to be returned rather
- * than inferred, because the model's own factor wins when the caller passes 0.
- */
+/** ESRGAN upscaling. */
 JNIEXPORT jbyteArray JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeUpscale(
         JNIEnv * env, jobject, jstring jesrgan, jbyteArray jrgb, jint width, jint height,
@@ -774,10 +652,6 @@ Java_ai_ondevice_engine_SdBridge_nativeUpscale(
         return nullptr;
     }
 
-    // Take the backend strings from a default-initialised params struct rather
-    // than passing nullptr: the upscaler forwards them to the same backend
-    // resolution the diffusion context uses, and this build has no GPU backend
-    // compiled in either way.
     sd_ctx_params_t defaults;
     sd_ctx_params_init(&defaults);
 

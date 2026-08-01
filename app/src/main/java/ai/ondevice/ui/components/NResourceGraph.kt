@@ -27,25 +27,7 @@ import ai.ondevice.ui.theme.NocturneType
 import ai.ondevice.ui.theme.Radius
 import ai.ondevice.ui.theme.ring
 
-/**
- * What a run cost, drawn.
- *
- * Two series on one canvas because they are read together: a run pinned at 100%
- * CPU with flat memory is compute-bound, and one at 30% with memory climbing to
- * the ceiling is neither — those are different problems with different fixes,
- * and separating them into two charts would make the comparison a memory task.
- *
- * CPU sits on a fixed 0–100% axis, so height means the same thing in every graph
- * on every screen. Memory cannot, and it took drawing one to see why: a 700 MB
- * model and a 6 GB one share no useful scale, but a 0-to-peak axis is worse than
- * no scale at all — a run that holds 2.5 GB steadily and adds 44 MB is a flat
- * line pinned to the ceiling, which is the shape of "at the limit" drawn over
- * data that says the opposite.
- *
- * So RAM is drawn between its own minimum and maximum, where the variation
- * actually lives, and **both** ends are stated in the legend. A rescaling axis
- * is only a lie when it is unlabelled.
- */
+/** What a run cost, drawn. */
 @Composable
 fun ResourceGraph(
     trace: ResourceTrace,
@@ -91,11 +73,6 @@ fun ResourceGraph(
             )
         }
 
-        // The GPU, on the same 0–100 axis as the CPU, because the whole point
-        // of drawing them together is that they trade against each other: a run
-        // that moved onto the GPU shows one line fall as the other rises, and
-        // two different axes would hide exactly that. Dashed rather than filled
-        // — two filled areas stacked read as a total, and these overlap.
         series(trace.gpuPercent, floor = 0, ceiling = 100)?.let { points ->
             drawPath(
                 path = Path().apply {
@@ -127,14 +104,7 @@ fun ResourceGraph(
     }
 }
 
-/**
- * Map a series onto the canvas between [floor] and [ceiling], or null when there
- * is nothing to draw.
- *
- * A single sample has no line to make. A flat series — floor equal to ceiling —
- * is drawn down the middle rather than divided by zero, which is also the right
- * picture: a value that never changed has no shape to show.
- */
+/** Map a series onto the canvas between [floor] and [ceiling], or null when there is nothing to draw. */
 private fun DrawScope.series(values: List<Int>, floor: Int, ceiling: Int): List<Offset>? {
     if (values.size < 2 || ceiling < floor) return null
     val span = (ceiling - floor).toFloat()
@@ -145,13 +115,7 @@ private fun DrawScope.series(values: List<Int>, floor: Int, ceiling: Int): List<
     }
 }
 
-/**
- * The collapsed form, for a screen where the graph is not the point.
- *
- * Deliberately the same shape as the chat screen's thinking block: a one-line
- * row you can tap open. Both are "the machinery behind this answer", both are
- * worth having and neither is worth a permanent third of the screen.
- */
+/** The collapsed form, for a screen where the graph is not the point. */
 @Composable
 fun ResourceBlock(
     trace: ResourceTrace,
@@ -228,9 +192,7 @@ fun ResourceDetail(trace: ResourceTrace, modifier: Modifier = Modifier) {
                 add("cpu peak" to "${trace.peakCpuPercent}% of ${trace.cores} cores")
                 add("cpu mean" to "${trace.meanCpuPercent}%")
                 add("ram peak" to Fmt.bytes(trace.peakRssBytes))
-                // The model's own footprint, separated from whatever the app was
-                // already holding — the number that decides whether a bigger
-                // quant would fit.
+                // The model's own footprint, separated from whatever the app was already holding — the number that decides whether a bigger quant would fit.
                 add("ram added" to Fmt.bytes(trace.deltaRssMb.toLong() * ResourceTrace.BYTES_PER_MB))
                 add(
                     "device free" to "${Fmt.bytes(trace.minAvailMb.toLong() * ResourceTrace.BYTES_PER_MB)} " +

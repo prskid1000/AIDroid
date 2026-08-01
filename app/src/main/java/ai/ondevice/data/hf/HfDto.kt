@@ -4,14 +4,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 
-/**
- * The Hugging Face API surface verified in SPEC §3.1.
- *
- * Note the caveat that comes with it: the `gguf` block is effectively
- * undocumented and may change shape without notice. Every field here is
- * therefore optional, and [GgufHeaderReader] exists as a maintained fallback
- * rather than a stub — SPEC §3.1 and risk table §15.
- */
+/** The Hugging Face API surface verified in SPEC §3.1. */
 
 @Serializable
 data class HfModelInfo(
@@ -32,10 +25,7 @@ data class HfModelInfo(
     val config: JsonElement? = null,
     val cardData: JsonElement? = null,
 ) {
-    /**
-     * `gated` comes back as `false`, `"auto"` or `"manual"` — a bare boolean
-     * check would read `"auto"` as untruthy and let a gated repo through.
-     */
+    /** `gated` comes back as `false`, `"auto"` or `"manual"` — a bare boolean check would read `"auto"` as untruthy and let a gated repo through. */
     val isGated: Boolean
         get() {
             val p = gated as? kotlinx.serialization.json.JsonPrimitive ?: return false
@@ -66,7 +56,6 @@ data class HfGgufBlock(
     @SerialName("head_count_kv") val headCountKv: Int? = null,
 )
 
-/** `POST /api/models/{id}/paths-info/{revision}` with `{"paths":[…],"expand":true}`. */
 @Serializable
 data class HfPathInfo(
     val path: String,
@@ -96,11 +85,7 @@ data class HfCommit(
     val date: String? = null,
 )
 
-/**
- * Malware-scan verdicts from JFrog / ProtectAI. SPEC §3.1 is specific that an
- * `unscanned` verdict warrants a *warning*, not a block — GGUF has had SSTI
- * vulnerabilities, so the user is told and allowed to proceed.
- */
+/** Malware-scan verdicts from JFrog / ProtectAI. */
 @Serializable
 data class HfSecurityStatus(
     val status: String? = null,

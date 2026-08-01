@@ -8,18 +8,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.unit.dp
 
-/**
- * The interface icon set, transcribed path-for-path from the design canvas.
- *
- * The design system nominates Phosphor, and the canvas draws a hand-cut subset
- * of it inline as SVG at specific stroke weights (1.7 for navigation, 1.8 for
- * toolbars, 2.0–2.6 for marks inside discs). Those exact paths and weights are
- * reproduced here rather than pulling a Phosphor dependency, because the canvas
- * is the tighter specification of the two — it says which glyph, at which
- * weight, in which slot.
- *
- * Everything is stroked on a 24×24 viewport and tinted at the call site.
- */
+/** The interface icon set, transcribed path-for-path from the design canvas. */
 object NIcons {
 
     // — path-data helpers, so the transcriptions below read like the SVG —
@@ -85,11 +74,7 @@ object NIcons {
         icon(1.8f, cap = StrokeCap.Round, stroked = listOf("M4 11v2M8 8v8M12 4.5v15M16 8v8M20 11v2"))
     }
 
-    /**
-     * Library: three spines on a shelf. Deliberately not the Models stack — one
-     * is what the device can do, the other is what it has done, and the two
-     * being adjacent in the bar makes telling them apart the icon's job.
-     */
+    /** Library: three spines on a shelf. */
     val Library: ImageVector by lazy {
         icon(
             1.7f,
@@ -141,10 +126,7 @@ object NIcons {
         icon(filled = listOf(circle(12f, 5f, 1.7f), circle(12f, 12f, 1.7f), circle(12f, 19f, 1.7f)))
     }
 
-    // — verdict and state marks —
-    // Nocturne carries no red or green. "Runnable" is the accent check, "caveat"
-    // is an accent outline, "no" is a neutral disc with a slash. Weight comes
-    // from the mark, never the hue.
+    // — verdict and state marks — Nocturne carries no red or green.
 
     /** The heavy check inside a `.tag-accent` — stroke 3, deliberately blunt. */
     val Check: ImageVector by lazy { icon(3f, stroked = listOf("M4 12.5l5 5L20 6.5")) }
@@ -193,14 +175,7 @@ object NIcons {
         icon(1.7f, stroked = listOf("M4 9v6h3l5 4V5L7 9zM16 8.5a5 5 0 0 1 0 7"))
     }
 
-    /**
-     * Transcribe, as the counterpart to [Speaker].
-     *
-     * The pair has to read as opposites at 20 dp — sound going out of the
-     * device against sound coming into it — which is why this is a microphone
-     * rather than the [Waveform] the nav bar uses. A waveform beside a speaker
-     * says "audio" twice and "which direction" not at all.
-     */
+    /** Transcribe, as the counterpart to [Speaker]. */
     val Mic: ImageVector by lazy {
         icon(
             1.7f,
@@ -219,14 +194,7 @@ object NIcons {
     val Stop: ImageVector by lazy { icon(2f, stroked = listOf(rrect(6f, 6f, 12f, 12f, 2f))) }
     val Send: ImageVector by lazy { icon(2f, stroked = listOf("M12 19V5M6 11l6-6 6 6")) }
 
-    /**
-     * Import: an arrow coming down onto a floor.
-     *
-     * Deliberately not [Send] reversed. A bare down arrow is "download", and
-     * this reads a file the user already has; the line underneath is what makes
-     * it land somewhere rather than merely descend. It was [Send] for one
-     * build, which pointed up — the exact opposite of what the button does.
-     */
+    /** Import: an arrow coming down onto a floor. */
     val Import: ImageVector by lazy {
         icon(1.8f, stroked = listOf("M12 4v9M8 9.5l4 4 4-4", "M5 19h14"))
     }
@@ -256,14 +224,7 @@ object NIcons {
 
     val Brush: ImageVector by lazy { icon(1.7f, stroked = listOf("M15.5 4.5l4 4-9 9H6v-4.5")) }
 
-    /**
-     * Outpainting: four corners opening outwards.
-     *
-     * It has to be legible beside [Image] and [Brush] at 18 dp, and it is the
-     * odd one of the three — generate makes a picture, inpaint repairs part of
-     * one, and this grows the canvas past its edges. Corner brackets say that
-     * without borrowing either of their shapes.
-     */
+    /** Outpainting: four corners opening outwards. */
     val Expand: ImageVector by lazy {
         icon(
             1.7f,

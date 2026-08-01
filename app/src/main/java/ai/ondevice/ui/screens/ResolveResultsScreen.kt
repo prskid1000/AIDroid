@@ -34,17 +34,7 @@ import ai.ondevice.ui.theme.NIcons
 import ai.ondevice.ui.theme.NocturneColors
 import ai.ondevice.ui.theme.NocturneType
 
-/**
- * **S5 — Honest refusal.**
- *
- * SPEC §1.2 made visible: "Won't run" is an acceptable answer; a crash is not.
- * Each of the ways a repo can be turned down gets its own card, its own
- * message, and at least one remedy that is an *action* rather than advice.
- *
- * The colour discipline matters here. There is no red on this screen: a
- * refusal is a neutral-800 disc with a cross, a caveat is an accent-800 disc
- * with a bang. Weight comes from the mark, not the hue.
- */
+/** **S5 — Honest refusal.** SPEC §1.2 made visible: "Won't run" is an acceptable answer; a crash is not. */
 @Composable
 fun ResolveResultsScreen(onBack: () -> Unit) {
     PhoneScaffold(
@@ -76,10 +66,7 @@ fun ResolveResultsScreen(onBack: () -> Unit) {
     }
 }
 
-/**
- * One refusal, rendered the same way wherever it appears — on S1 under the
- * paste field, or gathered here.
- */
+/** One refusal, rendered the same way wherever it appears — on S1 under the paste field, or gathered here. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun RefusalCard(

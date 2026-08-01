@@ -11,19 +11,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 
-/**
- * A sparse key→value parameter set.
- *
- * SPEC §11 and Appendix A #12 are emphatic about this: presets, per-model
- * overrides and stored generation params are sparse JSON, **not** typed columns,
- * and a key the current manifest doesn't recognise is *preserved inert* rather
- * than dropped. Dropping it silently destroys a user's tuning the moment an
- * engine is downgraded or rolled back.
- *
- * So this type never validates against a manifest and never filters. It holds
- * whatever it was given. The manifest decides what to *render*; this decides
- * what to *keep*, and those are deliberately different questions.
- */
+/** A sparse key→value parameter set. */
 @JvmInline
 value class SparseParams(val values: Map<String, JsonElement> = emptyMap()) {
 
@@ -51,10 +39,7 @@ value class SparseParams(val values: Map<String, JsonElement> = emptyMap()) {
     /** Clearing a key means "back to the runtime default", not "store a null". */
     fun without(key: String): SparseParams = SparseParams(values - key)
 
-    /**
-     * Layer another set on top. Used for preset → per-model override →
-     * per-conversation override, in that order of increasing specificity.
-     */
+    /** Layer another set on top. */
     fun overlaidWith(other: SparseParams): SparseParams = SparseParams(values + other.values)
 
     fun toJsonString(): String = JSON.encodeToString(JsonObject.serializer(), JsonObject(values))
@@ -71,11 +56,7 @@ value class SparseParams(val values: Map<String, JsonElement> = emptyMap()) {
             explicitNulls = false
         }
 
-        /**
-         * Parse from storage. A malformed blob yields an empty set rather than
-         * throwing — a corrupt preset must not take the app down with it — but
-         * a *well-formed* blob is kept whole, unknown keys and all.
-         */
+        /** Parse from storage. */
         fun parse(json: String?): SparseParams {
             if (json.isNullOrBlank()) return EMPTY
             return runCatching {

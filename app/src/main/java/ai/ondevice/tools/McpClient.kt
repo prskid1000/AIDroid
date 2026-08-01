@@ -22,21 +22,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
-/**
- * A Model Context Protocol client, over Streamable HTTP.
- *
- * Only the HTTP transport, and that is not a shortcut. MCP's other transport is
- * stdio, which means launching a process — Android's W^X rules make that either
- * impossible or a way to sneak executable code onto the device, and SPEC §17.1
- * is explicit that this app does not do that. An HTTP endpoint the user typed
- * in is a thing they can see, revoke and reason about.
- *
- * The protocol surface used here is the minimum that makes tools work:
- * `initialize`, `tools/list`, `tools/call`. Prompts, resources and sampling are
- * not implemented — in particular *sampling* is deliberately absent, because it
- * would let a remote server drive inference on this device, which inverts the
- * entire premise of a local-first app.
- */
+/** A Model Context Protocol client, over Streamable HTTP. */
 class McpToolProvider(
     private val server: McpServerEntity,
     private val client: OkHttpClient,
@@ -74,12 +60,7 @@ class McpToolProvider(
         specs
     }
 
-    /**
-     * What the model is told about — the server's list, minus the tools the user
-     * switched off. Not offering it is the real control: a tool the model was
-     * never told exists cannot be called, whereas one that is merely refused at
-     * call time still costs a round trip and an apology.
-     */
+    /** What the model is told about — the server's list, minus the tools the user switched off. */
     override suspend fun specs(): List<ToolSpec> =
         offered().filterNot { it.name in disabledTools }
 
@@ -107,9 +88,7 @@ class McpToolProvider(
                 },
             )
 
-            // MCP returns content parts; text is all this app renders into the
-            // conversation, and a part it cannot render is named rather than
-            // dropped silently.
+            // MCP returns content parts; text is all this app renders into the conversation, and a part it cannot render is named rather than dropped silently.
             val text = result["content"]?.jsonArray.orEmpty().joinToString("\n") { part ->
                 val obj = part.jsonObject
                 when (obj["type"]?.jsonPrimitive?.content) {
@@ -127,14 +106,7 @@ class McpToolProvider(
         }
     }
 
-    /**
-     * Probe a server without registering it — what the "Test" button calls, and
-     * what Refresh calls to pick up tools that have appeared or gone away.
-     *
-     * Reports everything the server offers, including tools the user has
-     * switched off: this is the inventory the picker is drawn from, so hiding
-     * the disabled ones here would make them unrecoverable.
-     */
+    /** Probe a server without registering it — what the "Test" button calls, and what Refresh calls to pick up tools that have appeared or gone away. */
     suspend fun probe(): McpProbe = withContext(Dispatchers.IO) {
         runCatching {
             val info = initialize(force = true)
@@ -261,26 +233,14 @@ data class McpProbe(
     val error: String? = null,
 )
 
-/**
- * Reading and writing the two tool lists on a server row.
- *
- * Both are stored as JSON in a text column rather than as their own tables. A
- * tool list is only ever read whole, alongside the server it belongs to, and is
- * replaced wholesale by the next refresh — there is nothing to query across, so
- * a join table would be structure without a use for it.
- */
+/** Reading and writing the two tool lists on a server row. */
 object McpTools {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val toolList = ListSerializer(McpTool.serializer())
     private val nameList = ListSerializer(String.serializer())
 
-    /**
-     * Accepts the old format too. Before tools carried descriptions this column
-     * held a comma-joined list of bare names, and a server the user added last
-     * week should not come back empty because the shape changed — it comes back
-     * with names and no descriptions, until the next refresh fills them in.
-     */
+    /** Accepts the old format too. */
     fun parse(raw: String?): List<McpTool> {
         val text = raw?.trim().orEmpty()
         if (text.isEmpty()) return emptyList()
@@ -300,23 +260,13 @@ object McpTools {
     fun encodeDisabled(names: Set<String>): String = json.encodeToString(nameList, names.sorted())
 }
 
-/**
- * Builds the live provider list. Rebuilt per turn rather than cached, so pausing
- * a server or switching off one of its tools takes effect on the next message
- * rather than the next process start.
- */
+/** Builds the live provider list. */
 class ToolProviderFactory(
     private val db: OnDeviceDatabase,
     private val capabilities: ai.ondevice.data.hf.DeviceCapabilities,
 ) {
     private val http = McpToolProvider.httpClient()
 
-    /**
-     * Only providers that are actually switched on are constructed, so a paused
-     * server has no representative in the registry at all — rather than one that
-     * is present and filtered out somewhere further down, which is how it came
-     * to be filtered in two places by two different flags that disagreed.
-     */
     suspend fun registry(builtInEnabled: Boolean): ToolRegistry {
         val servers = db.mcpServers().getAll().filter { it.enabled }
         return ToolRegistry(

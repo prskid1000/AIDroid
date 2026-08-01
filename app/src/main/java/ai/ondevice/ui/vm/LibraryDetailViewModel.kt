@@ -20,20 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/**
- * One artifact, in full.
- *
- * The library could list four kinds of thing and open none of them: an image
- * tile went to a grid, a synthesis fired a share sheet, and a transcript row was
- * inert. Everything needed to show what a stored artifact *is* was already in
- * the database — the prompt, the parameter set, the model, and now the run that
- * produced it — and nothing read it back.
- *
- * One view model for all four kinds rather than four. They differ in what they
- * display and agree on everything else: load by id, find the runs keyed to that
- * id, delete the row and its file together. Splitting them would have meant
- * writing that agreement out four times.
- */
+/** One artifact, in full. */
 @HiltViewModel
 class LibraryDetailViewModel @Inject constructor(
     private val db: OnDeviceDatabase,
@@ -63,15 +50,9 @@ class LibraryDetailViewModel @Inject constructor(
                 _state.value = _state.value.copy(
                     conversation = conversation,
                     messages = messages,
-                    // A conversation is not one run. Every assistant turn in it
-                    // is, so the runs are gathered across the messages rather
-                    // than looked up under the conversation's own id — which no
-                    // run has ever been keyed to.
+                    // A conversation is not one run.
                     runs = messages.flatMap { db.predictionRuns().getFor(it.id) },
-                    // The same rule the list uses. Nothing renames a thread, so
-                    // the stored title is "New conversation" for almost all of
-                    // them — a detail screen headed that way names nothing, and
-                    // would disagree with the row that was just tapped.
+                    // The same rule the list uses.
                     title = conversation?.title
                         ?.takeIf { it.isNotBlank() && it != "New conversation" }
                         ?: messages.firstOrNull { it.content.isNotBlank() }
@@ -124,14 +105,7 @@ class LibraryDetailViewModel @Inject constructor(
         _state.value = _state.value.copy(format = format)
     }
 
-    /**
-     * Produce the file, in whatever the chosen format is.
-     *
-     * An image and a synthesis already exist on disk as the thing you would
-     * export, so those are handed over as they are rather than copied into a
-     * staging area first. A conversation and a transcript are rendered on
-     * demand, because neither is stored in the shape anyone wants to read.
-     */
+    /** Produce the file, in whatever the chosen format is. */
     private suspend fun build(): ai.ondevice.core.Export? {
         val state = _state.value
         val stem = state.title
@@ -199,14 +173,7 @@ class LibraryDetailViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Write it to the folder the user chose, asking for one the first time.
-     *
-     * [onNeedFolder] is called rather than the picker being opened here, because
-     * only a composable can launch one — and the save is retried by
-     * [folderPicked] once the answer comes back, so the user's tap is not
-     * silently swallowed by the permission round trip.
-     */
+    /** Write it to the folder the user chose, asking for one the first time. */
     fun save(onNeedFolder: () -> Unit) {
         viewModelScope.launch {
             val folder = exports.folder()
@@ -249,13 +216,7 @@ class LibraryDetailViewModel @Inject constructor(
         _state.value = _state.value.copy(exportMessage = null)
     }
 
-    /**
-     * Remove the artifact, its file and its runs.
-     *
-     * All three or none. A row without its file is a broken thumbnail, a file
-     * without its row is storage nothing can reach, and a run pointing at a
-     * deleted artifact is a record of work on something that no longer exists.
-     */
+    /** Remove the artifact, its file and its runs. */
     fun delete(onDone: () -> Unit) {
         viewModelScope.launch {
             val state = _state.value
@@ -313,13 +274,7 @@ data class LibraryDetailState(
 
     val traces: List<ResourceTrace> get() = runs.mapNotNull { ResourceTrace.parse(it.traceJson) }
 
-    /**
-     * The parameter set this artifact was produced under, whichever kind it is.
-     *
-     * A conversation has no parameters of its own — they are recorded per
-     * message, because they can change mid-thread — so it reports the ones the
-     * last assistant turn actually ran with rather than a blank table.
-     */
+    /** The parameter set this artifact was produced under, whichever kind it is. */
     val params: SparseParams
         get() = when (kind) {
             PredictionKind.CHAT -> SparseParams.parse(
@@ -331,15 +286,7 @@ data class LibraryDetailState(
             PredictionKind.TRANSCRIBE -> SparseParams.parse(transcript?.paramsJson)
         }
 
-    /**
-     * Which model made this.
-     *
-     * A conversation records one only when the user picks it explicitly, so most
-     * threads carry null and the row read "—" while the reply above it had
-     * plainly been generated by something. The run knows — it is written from
-     * whatever was loaded at the time — so it is the better answer where the
-     * conversation has none.
-     */
+    /** Which model made this. */
     val modelId: String?
         get() = when (kind) {
             PredictionKind.CHAT -> conversation?.modelId

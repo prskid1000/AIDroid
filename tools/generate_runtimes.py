@@ -132,20 +132,24 @@ def main() -> int:
         entry["architectures"] = architectures
         entry["installed"] = True
         # What CMakeLists compiles, which is a property of the APK and not of
-        # any phone. arm64 additionally builds ggml's OpenCL and Hexagon
-        # backends; x86_64 is the emulator, which has neither an Adreno nor a
-        # DSP behind it.
+        # any phone. arm64 additionally builds ggml's OpenCL backend; x86_64 is
+        # the emulator, which has no Adreno behind it.
         #
         # Compiled is not the same as present: whether a device has a driver
-        # behind libOpenCL.so, or a DSP that admits an unsigned module, is
-        # unknowable from here, so this list is only the fallback.
-        # RuntimeRegistry.backendsFor asks the loaded binary first and reports
-        # what ggml registered on the phone in front of it — SPEC 8.2, do not
-        # assert what can be measured.
-        # Kokoro is the exception: it is ONNX Runtime, not ggml, and its
-        # accelerators are execution providers asked of ORT at load time.
+        # behind libOpenCL.so is unknowable from here, so this list is only the
+        # fallback. RuntimeRegistry.backendsFor asks the loaded binary first and
+        # reports what ggml registered on the phone in front of it — SPEC 8.2,
+        # do not assert what can be measured.
+        #
+        # The ONNX runtimes are CPU and only CPU, and that is not a gap in this
+        # build. ONNX Runtime ships no OpenCL and no Vulkan execution provider
+        # for Android at all, so there is no route from Kokoro or OmniVoice to
+        # the Adreno. Its one accelerator here is Qualcomm's QNN, which needs a
+        # different artifact — 174 MB of it — and then refuses these graphs
+        # anyway: both are variable-length, and QNN's HTP backend rejects a
+        # dynamic shape outright rather than partitioning around it.
         entry["backends"] = (
-            ["CPU", "OPENCL", "HEXAGON"] if runtime_id in GGML_RUNTIMES else ["CPU"]
+            ["CPU", "OPENCL"] if runtime_id in GGML_RUNTIMES else ["CPU"]
         )
         print(f"  {runtime_id}: {tag} ({commit}) — {len(architectures)} architectures")
 

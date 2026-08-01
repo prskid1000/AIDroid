@@ -32,11 +32,6 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
 
-/**
- * S1's state machine, and the place the "no path reaches a native load without
- * passing the gate" rule (Appendix A #5) is actually enforced: the download
- * button is only enabled once a [VerdictResult] says the model is runnable.
- */
 @HiltViewModel
 class AddModelViewModel @Inject constructor(
     private val resolver: ModelResolver,
@@ -56,15 +51,7 @@ class AddModelViewModel @Inject constructor(
         _state.value = _state.value.copy(query = value)
     }
 
-    /**
-     * Resolve a repo, or search for one.
-     *
-     * A Hugging Face id is `owner/name`, so text with no slash in it cannot be
-     * one — and resolving it could only ever fail with "no such repo". Treating
-     * that as a search costs the user nothing and turns a dead end into the
-     * thing they were trying to do. Anything with a slash, a URL, or a direct
-     * .gguf link still resolves exactly as before.
-     */
+    /** Resolve a repo, or search for one. */
     fun resolve() {
         val query = _state.value.query.trim()
         if (query.isEmpty()) return
@@ -93,9 +80,6 @@ class AddModelViewModel @Inject constructor(
                         resolving = false,
                         resolved = enriched,
                         selectedQuant = defaultQuant?.name,
-                        // The resolver's defaults are a starting point the user
-                        // can move; holding them here rather than reading them
-                        // back off the resolved model is what makes them movable.
                         companionChoice = enriched.companions.associate { it.role to it.selected },
                         contextTokens = (enriched.contextLength ?: 8192).coerceAtMost(8192),
                     )
@@ -110,20 +94,7 @@ class AddModelViewModel @Inject constructor(
         recomputeVerdict()
     }
 
-    /**
-     * Choose which file fills a companion role.
-     *
-     * Two behaviours, because the roles mean two different things. Where the
-     * runtime takes one file the candidates are rivals, so picking one replaces
-     * the last; tapping the chosen one again clears it, since a preview decoder
-     * is worth having and worth refusing. Where they are parts — Kokoro's voice
-     * packs — each is independently useful, so tapping toggles just that one:
-     * the engine finds voices by scanning the folder, and someone who wants
-     * four of the fifty-five should not have to take all of them.
-     *
-     * A required role never empties. Kokoro with no voice pack is an install
-     * that cannot speak.
-     */
+    /** Choose which file fills a companion role. */
     fun chooseCompanion(role: ai.ondevice.data.hf.CompanionRole, filename: String) {
         val group = _state.value.resolved?.companions?.firstOrNull { it.role == role } ?: return
         val current = _state.value.companionChoice[role] ?: group.selected
@@ -170,18 +141,11 @@ class AddModelViewModel @Inject constructor(
 
         viewModelScope.launch {
             val reserve = prefs.storageReserveMb.first() * 1_000_000L
-            // Only autoregressive models have a KV cache. Passing a context to
-            // the estimator for a diffusion or transcription model would invent
-            // a number the user could act on, so the context is zeroed for them
-            // and the summary drops the term rather than printing a fiction.
+            // Only autoregressive models have a KV cache.
             val autoregressive = resolved.modality == ai.ondevice.core.Modality.TEXT ||
                 resolved.modality == ai.ondevice.core.Modality.VISION
             val estimate = CompatibilityGate.estimate(
-                // Companions are resident too, and for a vision or diffusion
-                // model the companion can outweigh the model — a T5-XXL encoder
-                // is gigabytes. Counting them on the download button but not in
-                // the headroom check made the two numbers describe different
-                // downloads.
+                // Companions are resident too, and for a vision or diffusion model the companion can outweigh the model — a T5-XXL encoder is gigabytes.
                 weightsBytes = quant.totalBytes + _state.value.companionBytes,
                 layers = resolved.layers,
                 contextTokens = if (autoregressive) _state.value.contextTokens else 0,
@@ -209,26 +173,8 @@ class AddModelViewModel @Inject constructor(
     }
 
     /** Prefer the Adreno fast path when one exists and fits. */
-    /**
-     * Smallest that runs, not smallest.
-     *
-     * A variant this build cannot load is not a cheaper option, and defaulting
-     * to one is worse than listing it: OmniVoice's int4 is 240 MB smaller than
-     * the variant that works, so "pick the smallest" selected the one that
-     * refuses to open and did it silently.
-     */
-    /**
-     * What to pre-select.
-     *
-     * Smallest-that-runs, with one exclusion: a variant carrying a caution is
-     * not offered as the default. The pre-selection is a recommendation whether
-     * it is meant as one or not — most people take it — so recommending the
-     * cheapest download while a note underneath explains that it answers
-     * confidently and wrongly is the app disagreeing with itself.
-     *
-     * Cautioned variants stay in the list and stay selectable. The user is
-     * allowed to want one; they should not arrive at one by not choosing.
-     */
+    /** Smallest that runs, not smallest. */
+    /** What to pre-select. */
     private fun pickDefaultQuant(model: ResolvedModel): QuantVariant? {
         val runnable = model.quants.filter { it.runnable }.ifEmpty { model.quants }
         val advisable = runnable.filter { it.cautionReason == null }.ifEmpty { runnable }
@@ -236,10 +182,7 @@ class AddModelViewModel @Inject constructor(
             ?: advisable.minByOrNull { it.totalBytes }
     }
 
-    /**
-     * Queue the primary file, every shard, and every required companion as one
-     * atomic job (SPEC §3.4).
-     */
+    /** Queue the primary file, every shard, and every required companion as one atomic job (SPEC §3.4). */
     private fun searchHub(query: String) {
         _state.value = _state.value.copy(
             searching = true,
@@ -273,13 +216,9 @@ class AddModelViewModel @Inject constructor(
         val resolved = _state.value.resolved ?: return
         val quant = resolved.quants.firstOrNull { it.name == _state.value.selectedQuant } ?: return
         if (_state.value.verdict?.verdict?.runnable != true) return
-        // The button is disabled for this, but a guard that only exists in the
-        // UI is one screen away from not existing. Nothing downloads 759 MB of
-        // a file this build has already established it cannot open.
+        // The button is disabled for this, but a guard that only exists in the UI is one screen away from not existing.
         if (quant.blockedReason != null) return
-        // Type and role are the user's to state. Without them there is nothing
-        // to write, and falling back to the detected value here would quietly
-        // reinstate the guessing this replaced.
+        // Type and role are the user's to state.
         val modality = _state.value.selectedModality ?: return
         if (!_state.value.roleAnswered) return
         val role = _state.value.selectedRole
@@ -413,24 +352,14 @@ data class AddModelState(
     val verdict: VerdictResult? = null,
     val totalRamBytes: Long = 0,
     val pendingAction: RemedyAction? = null,
-    /**
-     * What this model *is*, and which add-on slot it fills — both chosen here
-     * rather than inferred, which is why they start unset. The header parse
-     * still supplies context length, architecture, chat template and the fit
-     * estimate; it just no longer decides these two.
-     */
+    /** What this model *is*, and which add-on slot it fills — both chosen here rather than inferred, which is why they start unset. */
     val searching: Boolean = false,
     val searchResults: List<ai.ondevice.data.hf.HfSearchResult> = emptyList(),
     val selectedModality: Modality? = null,
     val selectedRole: AttachmentRole? = null,
     /** True once [selectedRole] has been answered, including answered as "none". */
     val roleAnswered: Boolean = false,
-    /**
-     * Which file fills each companion role, seeded from the resolver's defaults.
-     *
-     * Held apart from [resolved] so the user's answer survives a recompute and
-     * so there is exactly one place that says what will be downloaded.
-     */
+    /** Which file fills each companion role, seeded from the resolver's defaults. */
     val companionChoice: Map<ai.ondevice.data.hf.CompanionRole, Set<String>> = emptyMap(),
 ) {
     val runnable: Boolean get() = verdict?.verdict?.runnable == true
@@ -439,14 +368,7 @@ data class AddModelState(
     /** Type and role are required, so Download stays closed until both are set. */
     val classified: Boolean get() = selectedModality != null && roleAnswered
 
-    /**
-     * The companion files this download will actually fetch.
-     *
-     * One definition, used by the figure on the button, the fit estimate and the
-     * enqueue alike. The predicate used to be written out twice — once in the
-     * screen and once in the view model — which is a disagreement waiting to
-     * happen, and the copy in the screen was the one people read.
-     */
+    /** The companion files this download will actually fetch. */
     val chosenCompanions: List<ai.ondevice.data.hf.CompanionFile>
         get() = resolved?.companions.orEmpty().flatMap { group ->
             val picked = companionChoice[group.role] ?: group.selected

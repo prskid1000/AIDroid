@@ -17,24 +17,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
-/**
- * Conversations in and out of the app, whole.
- *
- * SPEC §13's position is that nothing lives in a private opaque store, and a
- * conversation you cannot get out of the app is exactly that. Two formats,
- * because they answer different questions:
- *
- *  - **`.zip`** — lossless. Every message with its full generation parameter
- *    set, its measured tok/s, its backend, its reasoning block and its
- *    attachments as real files. This round-trips: what you export is what you
- *    get back, including the numbers that make a reply reproducible.
- *  - **`.md`** — readable. What you paste into a bug report.
- *
- * The import side is deliberately forgiving about *unknown* fields and strict
- * about *missing* ones. An archive written by a later build carries keys this
- * one has never seen; §11 says keep them, so the parameter blobs come across as
- * opaque strings rather than being parsed into a schema that would drop them.
- */
+/** Conversations in and out of the app, whole. */
 class ConversationArchive(
     private val db: OnDeviceDatabase,
     private val storage: ModelStorage,
@@ -50,7 +33,7 @@ class ConversationArchive(
 
     /**
      * Write a lossless archive. [conversationIds] empty means the whole library.
-     */
+ */
     suspend fun exportArchive(
         conversationIds: List<String> = emptyList(),
         destination: File,
@@ -160,12 +143,7 @@ class ConversationArchive(
 
     // — import —
 
-    /**
-     * Read an archive back. Conversations keep their identity where they can:
-     * an id that already exists is imported under a fresh one rather than
-     * overwriting what is already here, because a silent overwrite of a
-     * conversation is not recoverable.
-     */
+    /** Read an archive back. */
     suspend fun importArchive(input: InputStream): ImportReport = withContext(Dispatchers.IO) {
         var document: ArchiveDocument? = null
         val attachments = mutableMapOf<String, File>()
@@ -272,9 +250,7 @@ class ConversationArchive(
                         toolCallsJson = message.toolCallsJson,
                         tokenCount = message.tokenCount,
                         imageTokenCount = message.imageTokenCount,
-                        // Kept as an opaque string: an archive written under a
-                        // newer engine carries keys this build has never seen,
-                        // and §11 says an unknown key survives.
+                        // Kept as an opaque string: an archive written under a newer engine carries keys this build has never seen, and §11 says an unknown key survives.
                         generationParamsJson = message.generationParamsJson,
                         tokensPerSecond = message.tokensPerSecond,
                         backend = message.backend?.let {

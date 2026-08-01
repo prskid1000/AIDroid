@@ -14,19 +14,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-/**
- * Tools that need nothing but this device.
- *
- * The selection is deliberately narrow. Every one of these answers a question a
- * local model genuinely cannot answer on its own — the clock it has no access
- * to, arithmetic it will get subtly wrong, and the state of the very device it
- * is running on — and not one of them touches the network. That is the whole
- * point: the built-in set is the part of tool use that costs the user nothing
- * in privacy, so it is the part that can be on by default.
- *
- * Anything that leaves the handset lives behind an MCP server the user has
- * added by hand (see [McpToolProvider]).
- */
+/** Tools that need nothing but this device. */
 class BuiltInToolProvider(
     private val db: OnDeviceDatabase,
     private val capabilities: DeviceCapabilities,
@@ -136,14 +124,7 @@ class BuiltInToolProvider(
     }
 }
 
-/**
- * A small recursive-descent evaluator.
- *
- * Deliberately *not* a scripting engine. A tool the model can drive is an
- * attack surface, and `eval` on model-authored text with anything more than
- * arithmetic in scope is how a chat app grows a remote-code path. The grammar
- * here has no identifiers beyond two constants and no way to reach the host.
- */
+/** A small recursive-descent evaluator. */
 internal object Arithmetic {
 
     fun evaluate(input: String): Double {
@@ -198,15 +179,7 @@ internal object Arithmetic {
             }
         }
 
-        /**
-         * Sign binds *looser* than the exponent, so `-2^2` is −4.
-         *
-         * This used to sit below [power], which made the minus part of the base
-         * and answered 4. Every calculator and every language with an exponent
-         * operator disagrees, and a wrong answer from a tool is worse than no
-         * tool — it arrives with an authority the model's own arithmetic does
-         * not have.
-         */
+        /** Sign binds *looser* than the exponent, so `-2^2` is −4. */
         private fun unary(): Double {
             skipSpace()
             if (consume('-')) return -unary()

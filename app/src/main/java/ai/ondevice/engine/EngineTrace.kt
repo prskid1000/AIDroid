@@ -1,32 +1,7 @@
 package ai.ondevice.engine
 
-/**
- * What an engine says about its own output when that output is wrong.
- *
- * Every engine in this app can fail in the same three ways and not one of them
- * throws: arithmetic that overflowed to NaN, a graph that ran and produced
- * zeros, and a graph that produced perfectly finite numbers which are not the
- * signal that was asked for. A peak alone cannot separate them — `abs(NaN) >
- * peak` is false, so an all-NaN buffer reports a peak of zero exactly like a
- * silent one — and that ambiguity is what let Kokoro spend seventy seconds a run
- * writing 44-byte WAV files the app then called a success.
- *
- * These live here rather than in each engine so the same line means the same
- * thing whether it came from a vocoder, a diffusion sampler or a token grid.
- * When output is wrong the first question is always which stage it went wrong
- * at, and that question is only answerable if every stage answers it the same
- * way.
- */
+/** What an engine says about its own output when that output is wrong. */
 
-/**
- * `n=… peak=… mean=… nonZero=… inf=… nan=… head=…` for any float buffer.
- *
- * Infinity and NaN are counted apart because they say different things about
- * where to look: an infinity is the arithmetic that overflowed, and a NaN is
- * usually what happened *next* to that infinity — `inf − inf`, `0 × inf`. A
- * buffer of pure NaN with no infinity in it means the overflow happened in an
- * earlier stage than the one being measured.
- */
 fun FloatArray.signalSummary(head: Int = 4): String {
     var peak = 0f
     var sum = 0.0
@@ -58,16 +33,7 @@ fun FloatArray.signalSummary(head: Int = 4): String {
         "nonZero=$nonZero inf=$infinite nan=$notANumber$start"
 }
 
-/**
- * How much variety a block of token ids has, and what dominates it.
- *
- * A degenerate decode is an error nowhere in the stack: the ids are in range,
- * the vocoder decodes them, and what comes out is a buzz. The number of distinct
- * values and the share held by the commonest one is what separates speech from a
- * tone — 42 distinct codes across 1024 slots is the signature of a backbone that
- * cannot see forwards, and it looks identical to working output at every layer
- * that only checks for exceptions.
- */
+/** How much variety a block of token ids has, and what dominates it. */
 fun LongArray.codeSummary(): String {
     if (isEmpty()) return "n=0"
     val counts = HashMap<Long, Int>(size / 2 + 1)
@@ -85,17 +51,7 @@ fun LongArray.codeSummary(): String {
     return "n=$size distinct=${counts.size} mode=$mode×$modeCount ($share%)"
 }
 
-/**
- * Whether a finished picture is a picture.
- *
- * Diffusion fails into pictures that are not pictures, and the three ways it
- * does are trivially separable by number and almost impossible to tell apart
- * from a thumbnail in a log: a black frame (mean and spread both zero), a solid
- * or washed frame (spread near zero, mean anywhere), and noise. Noise is what
- * [neighbour] catches — adjacent pixels in a photograph or a rendering agree
- * closely, and in random output they do not agree at all — so a run that
- * produced static says so here rather than being reported as a saved image.
- */
+/** Whether a finished picture is a picture. */
 fun DiffusionImage.summary(): String {
     if (pixels.isEmpty()) return "empty"
     var sum = 0.0

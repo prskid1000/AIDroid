@@ -20,22 +20,7 @@ import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import java.nio.LongBuffer
 
-/**
- * Kokoro-82M, actually running.
- *
- * The pipeline has three stages and this class owns the last two:
- *
- *  1. text → IPA, by espeak-ng ([Phonemizer]).
- *  2. IPA → token ids, through Kokoro's fixed 115-symbol vocabulary.
- *  3. ids + a style vector → a 24 kHz waveform, by the ONNX graph.
- *
- * The style vector is the part that is easy to get wrong. A Kokoro voice pack
- * is not one embedding but **510 of them**, one per possible input length, and
- * the model expects the row matching the token count it is about to be given.
- * Using row 0 for everything — which is what happens if you read the file as a
- * flat 256-float vector — produces audio that is recognisably the right voice
- * and subtly wrong in its pacing for every utterance but the shortest.
- */
+/** Kokoro-82M, actually running. */
 class KokoroEngine(private val phonemizer: Phonemizer) {
 
     private val mutex = Mutex()
@@ -57,11 +42,6 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
 
     val isLoaded: Boolean get() = session != null
 
-    /**
-     * Whether this device could speak with Kokoro at all: the ONNX runtime has
-     * to be present *and* the phonemiser, because a voice with no front end is
-     * a model that can only be handed silence.
-     */
     val runtimeAvailable: Boolean
         get() = ONNX_AVAILABLE && phonemizer.available
 
@@ -72,21 +52,12 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
             else -> null
         }
 
-    /**
-     * Load a model directory.
-     *
-     * [directory] is what the downloader produced: an `.onnx` graph, a `voices/`
-     * folder of `.bin` packs, and optionally the repo's `tokenizer.json`.
-     */
-    suspend fun load(
-        directory: File,
-        threads: Int = 0,
-        backend: ai.ondevice.core.BackendId = ai.ondevice.core.BackendId.CPU,
-    ): Result<Unit> = withContext(Dispatchers.IO) {
+    /** Load a model directory. */
+    suspend fun load(directory: File, threads: Int = 0): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             check(ONNX_AVAILABLE) { unavailableReason!! }
 
-            val model = findModel(directory, backend)
+            val model = findModel(directory)
                 ?: error(
                     "No .onnx file in ${directory.name}. A Kokoro install needs the graph " +
                         "itself, not only its voice packs.",
@@ -102,41 +73,12 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
                     if (threads > 0) setIntraOpNumThreads(threads)
                     setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
 
-                    // Kokoro's text encoder is ALBERT, and ALBERT's whole idea
-                    // is that every layer *shares* one set of weights. In this
-                    // graph a single fp16 initialiser —
-                    // encoder.bert.encoder.albert_layer_groups.0.albert_layers
-                    //   .0.full_layer_layer_norm.weight
-                    // — is read by 12 SkipLayerNormalization nodes at once.
-                    //
-                    // ORT pre-packs constant initialisers into a kernel-private
-                    // layout at session creation and then drops the original
-                    // tensor, which is sound when one kernel owns it. With a
-                    // shared initialiser the first node packs it away and every
-                    // later node asking for the same input gets a null back:
-                    //
-                    //   Non-zero status code returned while running
-                    //   SkipLayerNormalization node ... Missing Input: <that name>
-                    //
-                    // It reads like a truncated download and is not one. The
-                    // file is byte-identical to the repo, sha256-verified, and
-                    // the initialiser is present in the graph — it is released
-                    // out from under the node that needs it. Turning pre-packing
-                    // off costs a little matmul throughput and is the difference
-                    // between Kokoro speaking and not.
+                    // Kokoro's text encoder is ALBERT, and ALBERT's whole idea is that every layer *shares* one set of weights.
                     addConfigEntry("session.disable_prepacking", "1")
-
-                    // Settings -> Compute device. ONNX Runtime reaches the NPU
-                    // through QNN or not at all; see [OrtProviders].
-                    OrtProviders.apply(this, backend, TAG)
                 }
-                android.util.Log.i(TAG, "loading ${model.name} on ${OrtProviders.describe(backend)}")
                 val created = env.createSession(model.absolutePath, options)
 
-                // Bind by *name*, not position. Upstream has shipped these
-                // inputs in more than one order across exports, and a silently
-                // transposed style/speed pair produces audio rather than an
-                // error — the worst kind of mismatch to debug.
+                // Bind by *name*, not position.
                 val names = InputNames.from(created.inputNames)
                     ?: error(
                         "This ONNX graph does not look like Kokoro. It takes " +
@@ -171,15 +113,7 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
         loadedPath = null
     }
 
-    /**
-     * Speak [text] in [voiceId], returning 24 kHz mono samples in [-1, 1].
-     *
-     * Long passages are split rather than truncated. Kokoro's positional
-     * encoding stops at 510 tokens and a longer input does not fail — it comes
-     * back clipped mid-word, which is the sort of quiet data loss §1.2 rules
-     * out. So the text is broken at sentence boundaries, each piece is
-     * synthesised on its own, and the pieces are joined with a short silence.
-     */
+    /** Speak [text] in [voiceId], returning 24 kHz mono samples in [-1, 1]. */
     suspend fun synthesize(request: KokoroRequest): Result<KokoroAudio> =
         withContext(Dispatchers.Default) {
             runCatching {
@@ -197,22 +131,12 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
                         currentCoroutineContext().ensureActive()
                         if (phonemesUsed.isNotEmpty()) phonemesUsed.append(' ')
                         phonemesUsed.append(chunk.phonemes)
-                        // Per chunk, not per request: the style row is chosen by
-                        // the length of the tokens about to be fed in, and the
-                        // chunks deliberately differ in length.
+                        // Per chunk, not per request: the style row is chosen by the length of the tokens about to be fed in, and the chunks deliberately differ in length.
                         val style = styleFor(request, chunk.tokens.size)
                         val piece = runGraph(active, names, chunk.tokens, style, request.speed)
                         checkFinite(piece)
-                        // Trimmed per chunk rather than once at the end: the
-                        // silence that matters is the padding *between* two
-                        // separately-synthesised sentences, and trimming the
-                        // join afterwards cannot reach it.
                         val kept = if (request.trimSilence) trimSilence(piece) else piece
-                        // Every stage that can silently produce nothing, on one
-                        // line. Empty phonemes, empty tokens and a fully-trimmed
-                        // piece all end as a WAV header with no audio and no
-                        // exception anywhere — which is exactly the failure this
-                        // engine had, undiagnosable because nothing here spoke.
+                        // Every stage that can silently produce nothing, on one line.
                         Log.i(
                             TAG,
                             "chunk phonemes=${chunk.phonemes.length} tokens=${chunk.tokens.size} " +
@@ -240,18 +164,7 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
             }
         }
 
-    /**
-     * Refuse a waveform that is not a waveform.
-     *
-     * A graph that overflows returns NaN for every sample, and every stage after
-     * this one treats that as quiet: [trimSilence] sees a peak of zero — because
-     * `abs(NaN) > 0f` is false — and returns nothing, the pieces join to nothing,
-     * and `WavFile.write` produces a 44-byte header that the app then reports as
-     * "Saved … and it is listed in the library". Seventy seconds of computation
-     * and 1.9 GB of memory, described to the user as a success.
-     *
-     * The message names the graph, because which graph it is *is* the fix.
-     */
+    /** Refuse a waveform that is not a waveform. */
     private fun checkFinite(samples: FloatArray) {
         val nonFinite = samples.count { !it.isFinite() }
         if (nonFinite == 0) return
@@ -328,14 +241,7 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
 
     // — voices —
 
-    /**
-     * The style row for this request, blended if a second voice is set.
-     *
-     * Blending is a genuine Kokoro capability rather than a UI flourish: the
-     * style space is linear enough that interpolating two packs gives a voice
-     * between them. Both packs are indexed at the *same* row so the blend is
-     * between two voices at one length, not two lengths of one voice.
-     */
+    /** The style row for this request, blended if a second voice is set. */
     private suspend fun styleFor(request: KokoroRequest, tokenCount: Int): FloatArray {
         val row = tokenCount.coerceIn(0, STYLE_ROWS - 1)
         val primary = readStyleRow(request.voicePack, row)
@@ -362,14 +268,7 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
 
     // — tokenisation —
 
-    /**
-     * Phonemise and split so no piece exceeds the model's 510-token limit.
-     *
-     * The split is on sentence boundaries first, because that is where a seam
-     * between two separately-synthesised pieces is inaudible. Only a single
-     * sentence that is *itself* too long falls back to splitting on any space,
-     * which is audible but still better than truncation.
-     */
+    /** Phonemise and split so no piece exceeds the model's 510-token limit. */
     private suspend fun splitForContext(text: String, request: KokoroRequest): List<Chunk> {
         val sentences = text
             .split(splitRegex(request.splitPattern))
@@ -406,14 +305,7 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
         return out
     }
 
-    /**
-     * The user's pattern, or the default if theirs does not compile.
-     *
-     * `split_pattern` is a free-text Expert parameter, so a half-typed regex is
-     * an ordinary state to be in rather than an exceptional one. Falling back
-     * keeps the passage speakable; throwing would turn a typo in a field the
-     * user may not even remember setting into "Kokoro could not speak that".
-     */
+    /** The user's pattern, or the default if theirs does not compile. */
     private fun splitRegex(pattern: String): Regex =
         runCatching { Regex(pattern) }.getOrElse {
             lastError = "Chunk pattern is not a valid regular expression; using the default."
@@ -448,15 +340,7 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
 
     // — output shaping —
 
-    /**
-     * Drop leading and trailing near-silence.
-     *
-     * The threshold is relative to the chunk's own peak rather than absolute,
-     * because a quiet voice at 1.0 gain and a loud one are both legitimate and
-     * a fixed floor would eat the start of the first. Everything between the
-     * first and last loud-enough sample is kept, including internal pauses —
-     * those are the sentence's own rhythm, not padding.
-     */
+    /** Drop leading and trailing near-silence. */
     private fun trimSilence(samples: FloatArray): FloatArray {
         if (samples.isEmpty()) return samples
         var peak = 0f
@@ -473,9 +357,7 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
         while (end > start && kotlin.math.abs(samples[end - 1]) < floor) end--
         if (start >= end) return FloatArray(0)
 
-        // Leave a few milliseconds either side. Cutting exactly at the first
-        // sample above the floor clips the attack of a plosive and makes the
-        // word start with a click.
+        // Leave a few milliseconds either side.
         val pad = SAMPLE_RATE / 200 // 5 ms
         val from = (start - pad).coerceAtLeast(0)
         val to = (end + pad).coerceAtMost(samples.size)
@@ -492,14 +374,7 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
         return samples
     }
 
-    /**
-     * IPA to ids, one symbol at a time.
-     *
-     * Symbols outside the vocabulary are dropped. That is not silent damage:
-     * espeak is configured for a language Kokoro was trained on, so anything it
-     * emits that the model has no id for is a diacritic the model never saw,
-     * and passing an unknown id would be worse than omitting it.
-     */
+    /** IPA to ids, one symbol at a time. */
     private fun tokenize(phonemes: String): LongArray =
         phonemes.mapNotNull { vocabulary[it] }.toLongArray()
 
@@ -515,109 +390,23 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
             .takeIf { it.isNotEmpty() }
     }.getOrNull()
 
-    /**
-     * Whether a directory holds a Kokoro install: one graph and at least one
-     * style pack.
-     *
-     * Tested by shape, not by name. A pack is exactly [STYLE_ROWS] ×
-     * [STYLE_DIMENSIONS] floats, which is a far more specific claim than "there
-     * is a `.bin` in here somewhere" — and specificity is the point, because the
-     * library can hold two ONNX voice models at once and each engine has to be
-     * able to recognise its own without either of them being identified by the
-     * repository it came from.
-     */
+    /** Whether a directory holds a Kokoro install: one graph and at least one style pack. */
     fun looksInstalled(directory: File): Boolean =
-        // Any graph will do for "is this a Kokoro install". Which one gets
-        // loaded is a question about the device, and this question is not.
-        findModel(directory, ai.ondevice.core.BackendId.CPU) != null &&
-            voicePacks(directory).isNotEmpty()
+        findModel(directory) != null && voicePacks(directory).isNotEmpty()
 
     /** The style packs in [directory], identified by their exact byte length. */
     fun voicePacks(directory: File): List<File> =
         directory.walkTopDown().filter { it.isFile && it.length() == PACK_BYTES }.toList()
 
-    /**
-     * The graph to load, preferring one this device can actually compute.
-     *
-     * Smallest-wins was the whole rule, and on the only ABI this app ships it
-     * chose a graph that returns NaN for every sample. Kokoro's repo carries
-     * several quantisations and the `…f16` ones — `model_fp16`, `model_q8f16`,
-     * `model_q4f16`, `model_uint8f16` — keep their *activations* in float16.
-     * ORT on x86-64 has no native fp16 kernels and quietly computes those in
-     * fp32, so they work on an emulator. arm64 from ARMv8.2 does have them, and
-     * float16 tops out at 65504: Kokoro's vocoder runs well past that, overflows
-     * to infinity, and every output sample comes back NaN. Silent, no exception,
-     * and indistinguishable from a model that simply had nothing to say.
-     *
-     * So size is the tie-breaker, not the rule: an fp32-activation graph is
-     * chosen first even when it is four times larger, because a graph that
-     * cannot produce a number is not a smaller option, it is not an option.
-     */
-    /**
-     * The graph to load, chosen for the device it is going to run on.
-     *
-     * Repos ship several precisions of the same voice, and which one is right is
-     * not a property of the file — it is a property of the pairing. The Hexagon
-     * DSP is an integer accelerator: QNN takes a quantised graph and refuses a
-     * float one outright, session creation and all, rather than partitioning
-     * around what it cannot do —
-     *
-     *     ORT_FAIL - qnn_model.cc:73 ParseGraphInputOrOutput
-     *     Dynamic shape is not supported yet, for output:
-     *     /encoder/text_encoder/lstm/Transpose_output_0
-     *
-     * — which is Kokoro's fp32 export, whose text encoder is an LSTM over a
-     * sentence and so has shapes as variable as the sentence. The quantised
-     * export of the same model loads on the NPU and speaks.
-     *
-     * So the answer is to hand the NPU a graph it can take, not to hand it one
-     * it cannot and then quietly do the work somewhere else. Both files are
-     * already on disk; picking between them is free, and it is the difference
-     * between the setting working and the setting being ignored.
-     *
-     * fp16 stays last whatever the device. Those activations produce NaN on this
-     * arm64 build, which [synthesize] reports rather than playing.
-     */
-    private fun findModel(directory: File, backend: ai.ondevice.core.BackendId): File? {
-        val graphs = directory.walkTopDown()
+    /** The graph to load, preferring one this device can actually compute. */
+    /** The graph to load: the smallest non-fp16 export in the folder. */
+    private fun findModel(directory: File): File? =
+        directory.walkTopDown()
             .filter { it.isFile && it.extension.equals("onnx", ignoreCase = true) }
-            .toList()
-        val wantsQuantised = backend == ai.ondevice.core.BackendId.HEXAGON
-        return graphs
-            .sortedWith(
-                compareBy(
-                    { if (usesFloat16Activations(it)) 1 else 0 },
-                    { if (wantsQuantised && !isQuantised(it)) 1 else 0 },
-                    // Smallest of whatever survives. On a phone the compact
-                    // export is the sane default, and it is what this has always
-                    // picked when only one precision was installed.
-                    { it.length() },
-                ),
-            )
+            .sortedWith(compareBy({ if (usesFloat16Activations(it)) 1 else 0 }, { it.length() }))
             .firstOrNull()
-    }
 
-    /**
-     * Whether a graph's name marks it as integer-quantised, which is what the
-     * DSP can execute.
-     *
-     * By name, for the same reason as [usesFloat16Activations]: the alternative
-     * is parsing the protobuf looking for QuantizeLinear nodes, and upstream's
-     * naming is consistent. A file that is quantised and not named so simply
-     * does not get preferred — it still loads, and QNN still answers for it.
-     */
-    private fun isQuantised(file: File): Boolean =
-        Regex("(^|[_-])(quantized|quantised|int8|uint8|qint8|quint8|qdq)([_-]|\\.)", RegexOption.IGNORE_CASE)
-            .containsMatchIn(file.name)
-
-    /**
-     * Whether a graph's name marks it as float16-activation.
-     *
-     * By name because the alternative is parsing the ONNX protobuf to find the
-     * value_info element types, and upstream's naming for these is consistent
-     * and is what the model card documents. A graph that is fp16 and not named
-     * so still fails the same way — and now fails *loudly*, in [synthesize].
-     */
+    /** Whether a graph's name marks it as float16-activation. */
     private fun usesFloat16Activations(file: File): Boolean =
         Regex("(^|[_-])(fp16|f16)([_-]|\\.)", RegexOption.IGNORE_CASE)
             .containsMatchIn(file.name)
@@ -656,15 +445,7 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
     companion object {
         private const val TAG = "KokoroEngine"
 
-        /**
-         * The parameter keys this engine reads, for [ai.ondevice.params.EngineParams].
-         *
-         * Declared rather than enumerated, because unlike llama.cpp and friends
-         * there is no dispatch table here to walk — the keys are read one at a
-         * time by `VoiceViewModel.refreshFromOverrides`, which is the list this
-         * has to match. Kept next to the engine so the two are at least in the
-         * same conversation; the reader is named so the match is checkable.
-         */
+        /** The parameter keys this engine reads, for [ai.ondevice.params.EngineParams]. */
         val PARAM_KEYS = setOf(
             "voice", "speed", "lang_code", "voice_blend", "split_pattern",
             "trim_silence", "volume",
@@ -689,13 +470,7 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
             true
         }.getOrDefault(false)
 
-        /**
-         * Kokoro v1.0's symbol table.
-         *
-         * This is part of the *model*, not a choice this app makes, and it is
-         * embedded so a hand-placed `model.onnx` works without its repo's
-         * `tokenizer.json` alongside. When that file is present it wins.
-         */
+        /** Kokoro v1.0's symbol table. */
         private val DEFAULT_VOCABULARY: Map<Char, Long> = buildMap {
             fun put(symbols: String, from: Long) =
                 symbols.forEachIndexed { index, c -> put(c, from + index) }
@@ -735,20 +510,13 @@ data class KokoroRequest(
     val speed: Float = 1.0f,
     val blendPack: File? = null,
     val blendRatio: Float = 0f,
-    /**
-     * Where long text is cut. Kokoro stops at 510 tokens and returns clipped
-     * audio rather than an error, so this is what keeps a long passage whole.
-     */
+    /** Where long text is cut. */
     val splitPattern: String = DEFAULT_SPLIT_PATTERN,
     /** Trim near-silence from each chunk before the pieces are joined. */
     val trimSilence: Boolean = true,
     /** Gain on the finished waveform. Hard-limited, so >1 clips rather than wraps. */
     val volume: Float = 1.0f,
-    /**
-     * Force a particular espeak voice instead of deriving it from [voiceId].
-     * Null means derive — which is right almost always, and wrong exactly when
-     * you want an American-trained voice reading British spellings.
-     */
+    /** Force a particular espeak voice instead of deriving it from [voiceId]. */
     val languageOverride: String? = null,
 ) {
     companion object {

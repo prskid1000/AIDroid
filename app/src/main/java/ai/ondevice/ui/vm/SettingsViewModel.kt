@@ -23,14 +23,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /** S15 and the Settings root. */
-/**
- * Tool use and the MCP server list.
- *
- * Separate from the main settings state because it is the one screen in the app
- * where the user hands something outward: an MCP server is a third party, and
- * the decision to enable one deserves its own surface with its own evidence —
- * what it is called, what tools it offers, and when it was last reachable.
- */
+/** Tool use and the MCP server list. */
 @HiltViewModel
 class ToolsViewModel @Inject constructor(
     private val db: OnDeviceDatabase,
@@ -68,22 +61,12 @@ class ToolsViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Pause without forgetting. The row keeps its URL, its auth header and the
-     * tool list it last reported, so switching it back on costs nothing and
-     * needs no network — which is the difference between a pause and a delete,
-     * and the reason both exist.
-     */
+    /** Pause without forgetting. */
     fun pauseServer(server: McpServerEntity, enabled: Boolean) {
         viewModelScope.launch { db.mcpServers().upsert(server.copy(enabled = enabled)) }
     }
 
-    /**
-     * Switch one tool off on one server.
-     *
-     * Per-server, because two servers may offer the same name — both dummy
-     * servers offer `echo` — and silencing one must not silence the other.
-     */
+    /** Switch one tool off on one server. */
     fun toggleTool(server: McpServerEntity, toolName: String) {
         viewModelScope.launch {
             val disabled = ai.ondevice.tools.McpTools.disabled(server)
@@ -106,11 +89,7 @@ class ToolsViewModel @Inject constructor(
         )
     }
 
-    /**
-     * Add a server only after it has answered. A URL that was never reachable
-     * would sit in the list looking installed and fail silently at the moment
-     * the model tries to use it — mid-conversation, which is the worst time.
-     */
+    /** Add a server only after it has answered. */
     fun addServer() {
         val url = _state.value.draftUrl.trim()
         if (url.isBlank()) {
@@ -165,13 +144,7 @@ class ToolsViewModel @Inject constructor(
         viewModelScope.launch { db.mcpServers().deleteById(id) }
     }
 
-    /**
-     * Ask the server what it offers now.
-     *
-     * The user's exclusions survive a refresh even when the tool has gone away:
-     * a server that drops a tool and brings it back should not bring it back
-     * switched on. Nothing prunes `disabledToolsJson` for that reason.
-     */
+    /** Ask the server what it offers now. */
     fun refresh(server: McpServerEntity) {
         viewModelScope.launch {
             _state.value = _state.value.copy(testing = true)
@@ -179,9 +152,7 @@ class ToolsViewModel @Inject constructor(
             db.mcpServers().upsert(
                 server.copy(
                     lastCheckedAt = System.currentTimeMillis(),
-                    // A failed probe leaves the last known list alone. Emptying
-                    // it would lose the picker for a server that is merely
-                    // unreachable right now.
+                    // A failed probe leaves the last known list alone.
                     lastToolsJson = if (probe.ok) {
                         ai.ondevice.tools.McpTools.encode(probe.tools)
                     } else {
@@ -211,11 +182,7 @@ data class ToolsState(
     val builtInEnabled: Boolean
         get() = ai.ondevice.tools.BuiltInToolProvider.ID in enabledProviders
 
-    /**
-     * How many tools are actually reaching the model. What the screen should
-     * report, since a paused server's tools are not offered however many it
-     * has, and a switched-off tool is not offered either.
-     */
+    /** How many tools are actually reaching the model. */
     val liveToolCount: Int
         get() = (if (builtInEnabled) builtInTools.size else 0) +
             servers.filter { it.enabled }.sumOf { server ->
@@ -241,9 +208,6 @@ class SettingsViewModel @Inject constructor(
     ) { backend, wifiOnly ->
         SettingsState(
             backendMode = backend,
-            // Asked of the runtime, not of the manifest: a backend compiled in
-            // still needs a driver behind it, and the settings list is exactly
-            // where that difference has to show.
             availableBackends = registry.backendsFor(ai.ondevice.engine.RuntimeRegistry.LLAMA),
             wifiOnly = wifiOnly,
             hasToken = tokens.hasToken,
@@ -279,13 +243,7 @@ class SettingsViewModel @Inject constructor(
         tokens.hfToken = value
     }
 
-    /**
-     * SPEC §17.4 — engines are separately installable. Installing one is a
-     * package-manager operation on the sideload channel and a Play Feature
-     * Delivery module on the Play channel; the updater is channel-aware, which
-     * is why the button's behaviour is decided by a build flag rather than an
-     * `#ifdef` scattered through the UI.
-     */
+    /** SPEC §17.4 — engines are separately installable. */
     fun installRuntime(engine: String) {
         viewModelScope.launch {
             val bundle = db.runtimes().get(engine) ?: return@launch
@@ -336,9 +294,5 @@ data class SettingsState(
     val updateChannel: String = "SIDELOAD",
 )
 
-/**
- * Just the version. It used to carry a bundled-versus-stored comparison, a
- * signature verdict and a last-checked time — all three describing an update
- * mechanism the app does not have.
- */
+/** Just the version. */
 data class ManifestState(val version: Int = 0)

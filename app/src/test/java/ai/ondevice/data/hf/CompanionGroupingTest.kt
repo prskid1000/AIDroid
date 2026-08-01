@@ -4,16 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * That auxiliary files are sorted into parts, alternatives and choices correctly.
- *
- * Every filename list below is real, taken from the repo it names. That matters
- * more than usual here: the rule is a string rule, and a string rule tested only
- * against strings someone invented while writing it will pass while being wrong
- * about the world. Kokoro and ControlNet are the two that constrain it from
- * opposite directions — 55 files that must all be kept, and 29 that must all be
- * kept apart despite every one of them carrying `_fp16`.
- */
+/** That auxiliary files are sorted into parts, alternatives and choices correctly. */
 class CompanionGroupingTest {
 
     private fun file(name: String, bytes: Long = 1_000, role: CompanionRole) =
@@ -119,9 +110,7 @@ class CompanionGroupingTest {
 
     @Test
     fun `rival ControlNets stay apart despite all being fp16`() {
-        // comfyanonymous/ControlNet-v1-1_fp16_safetensors. Every one of the 29
-        // files carries _fp16; a looser precision match would fold the whole
-        // pack into one "alternative" and pick a ControlNet at random.
+        // comfyanonymous/ControlNet-v1-1_fp16_safetensors.
         val names = listOf(
             "control_v11p_sd15_canny_fp16.safetensors",
             "control_v11f1p_sd15_depth_fp16.safetensors",
@@ -153,9 +142,7 @@ class CompanionGroupingTest {
 
     @Test
     fun `a required role always ends up with something chosen`() {
-        // A VAE is required, so even when the candidates are genuinely
-        // different, leaving nothing selected would produce an install that
-        // cannot run.
+        // A VAE is required, so even when the candidates are genuinely different, leaving nothing selected would produce an install that cannot run.
         val group = CompanionGrouping.group(
             listOf("vae-a.safetensors", "vae-b.safetensors")
                 .map { file(it, 100, CompanionRole.VAE) },

@@ -6,14 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * The trace's arithmetic and its storage format.
- *
- * The sampler itself needs a device — `/proc/self/statm` and
- * `Process.getElapsedCpuTime` are Android — but everything that can be *wrong*
- * about a trace is pure: what the summary numbers mean, whether decimation
- * keeps the run's shape, and whether a stored trace comes back.
- */
+/** The trace's arithmetic and its storage format. */
 class ResourceTraceTest {
 
     private fun trace(
@@ -42,11 +35,6 @@ class ResourceTraceTest {
         assertEquals(4000, subject.minAvailMb)
     }
 
-    /**
-     * The number that answers "would a bigger quant fit" is what the run *added*,
-     * not what the process holds — a large part of which was already resident
-     * before anything started.
-     */
     @Test
     fun `added memory subtracts the baseline and never goes negative`() {
         assertEquals(1600, trace(listOf(50), rss = listOf(2400), baselineRssMb = 800).deltaRssMb)
@@ -61,10 +49,7 @@ class ResourceTraceTest {
         assertEquals(subject, restored)
     }
 
-    /**
-     * A trace that cannot be read is no trace. The alternative — throwing —
-     * would take a list screen down over a single malformed row.
-     */
+    /** A trace that cannot be read is no trace. */
     @Test
     fun `unreadable and empty traces parse to null`() {
         assertNull(ResourceTrace.parse(null))
@@ -75,16 +60,7 @@ class ResourceTraceTest {
         assertNull(ResourceTrace.parse(trace(emptyList()).toJson()))
     }
 
-    /**
-     * Decimation is the part that could quietly lie.
-     *
-     * Halving a series is easy to get wrong in a way nobody notices: averaging
-     * the memory line turns a 4 GB spike between two 1 GB samples into 2.5 GB,
-     * and the near-miss on the ceiling — the single most important thing a trace
-     * can record — disappears. So RSS takes the max of each pair and free RAM
-     * the min, while CPU averages, which is what a percentage over a longer
-     * window actually means.
-     */
+    /** Decimation is the part that could quietly lie. */
     @Test
     fun `decimation keeps peaks and loses only resolution`() {
         val halved = trace(
@@ -108,11 +84,7 @@ class ResourceTraceTest {
         assertEquals(listOf(9, 2), halved.availMb)
     }
 
-    /**
-     * The window a graph covers must not shrink just because its resolution did.
-     * 180 samples at 500 ms is 90 seconds; halved, the same 90 seconds is 90
-     * samples a second apart.
-     */
+    /** The window a graph covers must not shrink just because its resolution did. */
     @Test
     fun `a decimated trace still spans the whole run`() {
         val long = trace(cpu = List(180) { 50 })

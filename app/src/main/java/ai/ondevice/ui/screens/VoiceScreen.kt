@@ -77,23 +77,7 @@ import ai.ondevice.ui.vm.VoiceMode
 import ai.ondevice.ui.vm.VoiceState
 import ai.ondevice.ui.vm.VoiceViewModel
 
-/**
- * **S14 — Voice.**
- *
- * Two tabs, and they are inverses of each other:
- *
- *  - **Transcribe** (whisper.cpp, SPEC §6) — audio in, text out. The audio
- *    comes from the microphone or a file; both go through the same decoder and
- *    produce the same timed, confidence-scored segments.
- *  - **Speak** (SPEC §7) — text in, audio out. The text is typed or loaded from
- *    a file; the audio is played aloud and can be saved as a WAV.
- *
- * The detail the canvas calls out is the confidence shading: a partial
- * transcript fades by per-token confidence, and the caption says plainly that
- * faded text may still change as the window slides. That is the honest-refusal
- * principle applied to a streaming decoder — whisper genuinely re-decodes the
- * window each pass, so earlier words really can change.
- */
+/** **S14 — Voice.** Two tabs, and they are inverses of each other: - **Transcribe** (whisper.cpp, SPEC §6) — audio in, text out. */
 @Composable
 fun VoiceScreen(
     currentRoute: String?,
@@ -104,9 +88,6 @@ fun VoiceScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    // The Advanced screen edits the same model rows this screen surfaces, so
-    // pick its changes up on the way back — otherwise "Chunk pattern" and
-    // "Trim silence" are written and never read.
     androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.refreshFromOverrides() }
 
     // Scripts are documents, so this is the document picker rather than the
@@ -123,9 +104,6 @@ fun VoiceScreen(
     ) { uri -> uri?.let(viewModel::chooseFile) }
     val pickAudio = { audioLauncher.launch(arrayOf("audio/*", "video/*")) }
 
-    // A separate launcher from the one above: both take a recording, but one is
-    // audio to read out and the other is a voice to copy, and routing them
-    // through one callback would make which happened depend on the tab.
     val referenceLauncher = rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
     ) { uri -> uri?.let(viewModel::useReferenceClip) }
@@ -148,16 +126,7 @@ fun VoiceScreen(
 
     PhoneScaffold(
         toolbar = {
-            // No engine tag up here. Which model does the work depends on the
-            // tab, so a single toolbar badge was either wrong on one of them or
-            // duplicating the card below it — and the sheet behind the sliders
-            // names it in one place for both.
-            // The mode lives here rather than in the body. It is the one
-            // question this screen asks that changes everything below it — text
-            // out of audio, or audio out of text — and as a pill row it cost a
-            // full band of the screen to say something the toolbar can hold.
-            // Both icons carry a content description, because a microphone and
-            // a speaker are only obvious once you already know.
+            // No engine tag up here.
             RootToolbar("Voice") {
                 // Iterated, not listed — see the note on Image's toolbar. A mode
                 // added to the enum has to be given an icon before this builds.
@@ -179,12 +148,7 @@ fun VoiceScreen(
         bottomBar = { NBottomBar(BottomDestinations, currentRoute) { onNavigate(it.route) } },
         contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 18.dp),
     ) {
-        // Where the input comes from is no longer a mode. "Type" and "File"
-        // never differed in anything but where the characters arrived from, so
-        // a tab for it was a wall between one text box and the button that
-        // fills it; "Microphone" and "File" both end in the same transcript, so
-        // the two ways in sit side by side above it. Each panel now offers both
-        // and the screen has one row of chrome where it had two.
+        // Where the input comes from is no longer a mode.
         Column(Modifier.verticalScroll(rememberScrollState())) {
 
             // §1.2 — a refusal names what went wrong and what to do about it.
@@ -213,9 +177,7 @@ fun VoiceScreen(
                 }
             }
 
-            // Transcribe's engine card, the mirror of Speak's. Both tabs now
-            // name the model doing the work in the same place and the same
-            // shape, which is what the toolbar tag was standing in for.
+            // Transcribe's engine card, the mirror of Speak's.
             if (state.mode == VoiceMode.TRANSCRIBE) {
                 NCard(
                     Modifier.padding(bottom = 10.dp),
@@ -232,11 +194,7 @@ fun VoiceScreen(
                             tint = NocturneColors.Accent300,
                             modifier = Modifier.size(16.dp),
                         )
-                        // No engine name here. Transcribe has exactly one —
-                        // whisper.cpp — so naming it says nothing the user can
-                        // act on, and it duplicated the model shown immediately
-                        // below. Speak names its engine because it genuinely has
-                        // three to choose between.
+                        // No engine name here.
                         Text(
                             if (state.sttModel != null) "Speech model" else "No speech model",
                             style = NocturneType.CardTitleSm,
@@ -255,15 +213,8 @@ fun VoiceScreen(
                             color = NocturneColors.Text.copy(alpha = 0.8f),
                         )
                     }
-                    // Shown whenever anything is installed, not only when there
-                    // are two. Gating it on a choice being available hid the
-                    // control on every single-model device, so there was no way
-                    // to confirm which model was about to run — and Chat has
-                    // always shown its model row regardless.
+                    // Shown whenever anything is installed, not only when there are two.
                     if (state.sttModels.isNotEmpty()) {
-                        // Labelled by quant, since a whisper library is normally
-                        // several sizes of the same repo — "tiny-q5_1" and
-                        // "small" distinguish them, the repo name does not.
                         val labels = state.sttModels.map { it.quant ?: it.displayName }
                         NDropdown(
                             options = labels,
@@ -286,9 +237,7 @@ fun VoiceScreen(
                     onRecord = {
                         when {
                             state.recording -> viewModel.stopRecording()
-                            // The permission is asked for at the moment it is
-                            // needed, with the reason on screen — not at launch,
-                            // before the user has any context for the request.
+                            // The permission is asked for at the moment it is needed, with the reason on screen — not at launch, before the user has any context for the request.
                             !hasMicPermission ->
                                 micPermission.launch(Manifest.permission.RECORD_AUDIO)
                             else -> viewModel.startRecording()
@@ -305,9 +254,6 @@ fun VoiceScreen(
                 )
             }
 
-            // Outside the mode switch, because there is one runtime and one
-            // trace: transcribing and speaking never overlap, so a block per
-            // panel would be the same block written twice.
             (state.liveTrace ?: state.lastTrace)?.let { trace ->
                 var traceExpanded by rememberSaveable { mutableStateOf(false) }
                 ResourceBlock(
@@ -321,9 +267,7 @@ fun VoiceScreen(
         }
     }
 
-    // Left open on the way to Advanced on purpose — see the note on the Image
-    // screen's sheet. Back from Parameters returns to the panel it was opened
-    // from rather than to a bare screen.
+    // Left open on the way to Advanced on purpose — see the note on the Image screen's sheet.
     if (settingsOpen) {
         VoiceSettingsSheet(
             state = state,
@@ -334,23 +278,7 @@ fun VoiceScreen(
     }
 }
 
-/**
- * **Transcribe — SPEC §6.**
- *
- * One clip, however it arrived.
- *
- * This was two panels behind a source switch, and the switch was a wall: the
- * file button took you to a different screen, with a "Record instead" button to
- * get back, as though picking a file and recording one were different jobs. They
- * are not — both end as a decodable file on disk, and everything after that
- * point is identical. So there is one recorder, a file button beside it, and a
- * clip that behaves the same way whichever button produced it: play it, run it,
- * or put it down.
- *
- * Picking a file no longer starts a decode on its own. It stages the clip, the
- * way stopping the recorder does, and **Process** is the one thing that spends
- * compute — which also means a picked file can be listened to before it is run.
- */
+/** **Transcribe — SPEC §6.** One clip, however it arrived. */
 @Composable
 private fun TranscribePanel(
     state: VoiceState,
@@ -358,11 +286,6 @@ private fun TranscribePanel(
     onRecord: () -> Unit,
     onPickAudio: () -> Unit,
 ) {
-    // — the recorder —
-    //
-    // The waveform stays on screen when idle rather than appearing on the first
-    // press: it is the face of the recorder, and a control that materialises
-    // under your thumb moves everything below it.
     Row(
         Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -390,37 +313,36 @@ private fun TranscribePanel(
         horizontalArrangement = Arrangement.spacedBy(9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // "idle" is wrong while the take is being decoded, and that is exactly when it used to say so.
+        val transcribing = state.loading && !state.recording
         Text(
             when {
                 state.paused -> "❙❙ held ${Fmt.duration(state.elapsedMillis)}"
                 state.recording -> "● REC ${Fmt.duration(state.elapsedMillis)}"
+                transcribing -> "◐ transcribing"
                 else -> "○ idle"
             },
             style = NocturneType.MonoSm,
-            color = if (state.recording) NocturneColors.Accent else NocturneColors.TextMuted,
+            color = if (state.recording || transcribing) {
+                NocturneColors.Accent
+            } else {
+                NocturneColors.TextMuted
+            },
         )
         Text(
-            "transcribes on stop",
+            if (transcribing) "the whole take, in one pass" else "transcribes on stop",
             style = NocturneType.MonoSm,
             color = NocturneColors.TextMuted,
         )
     }
 
-    // Record, hold, stop — the three states a recorder has — and the other way
-    // in, as an icon beside them rather than as a second screen. Pause keeps the
-    // microphone, so resuming does not risk losing the device to another app in
-    // the handover.
+    // Record, hold, stop — the three states a recorder has — and the other way in, as an icon beside them rather than as a second screen.
     Row(
         Modifier.fillMaxWidth().padding(top = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         NButton(
-            // Not "Loading model…" any more. `loading` is also true while
-            // Process runs, so the recorder announced a model load that was
-            // really a transcription happening in the card below it. The
-            // recorder says what the recorder is doing; it is simply
-            // unavailable while the decoder has the runtime.
             if (state.recording) "Stop" else "Record",
             onClick = onRecord,
             style = NButtonStyle.Primary,
@@ -446,9 +368,7 @@ private fun TranscribePanel(
         )
     }
 
-    // No live transcript panel. There is nothing to put in it: recording
-    // decodes nothing now, and a panel saying "listening" over a decoder that
-    // is not running is the kind of claim this screen keeps having to retract.
+    // No live transcript panel.
     if (state.recording) {
         NHelp(
             "Recording. The take is transcribed in one pass when you stop, which is what " +
@@ -571,9 +491,6 @@ private fun TranscribePanel(
             "Opacity tracks the decoder's own confidence for each segment.",
             Modifier.padding(top = 8.dp),
         )
-        // The four format buttons moved to Library, where every artifact is
-        // saved and shared the same way and the file lands in a folder you chose
-        // rather than in app-private storage no file manager will show you.
         NHelp(
             "Saved to the library. Open it there to export as TXT, SRT, VTT or JSON into a " +
                 "folder of your choosing.",
@@ -582,17 +499,7 @@ private fun TranscribePanel(
     }
 }
 
-/**
- * **Read aloud — SPEC §7.**
- *
- * A script, a voice, an expression, and a file at the end. The order is the
- * order you work in, which is why this is a mode and not a card: choosing a
- * voice for a passage you have not written yet is backwards.
- *
- * The engine in use is named at the top of the panel, always. The app will fall
- * back to the system synthesiser when Kokoro is not installed — that is a
- * feature, but it is not something to be quiet about.
- */
+/** **Read aloud — SPEC §7.** A script, a voice, an expression, and a file at the end. */
 @Composable
 private fun SpeakPanel(
     state: ai.ondevice.ui.vm.VoiceState,
@@ -600,9 +507,6 @@ private fun SpeakPanel(
     onPickScript: () -> Unit,
     onPickReference: () -> Unit,
 ) {
-    // Which engine will speak, stated but not chosen here — the picker moved to
-    // the settings sheet with the voice list and the dials, so this panel is the
-    // script and the act, not the configuration.
     val provider = state.selectedVoice?.provider ?: ai.ondevice.speech.SynthProvider.SYSTEM
     NCard(ring = if (provider != ai.ondevice.speech.SynthProvider.SYSTEM) NocturneColors.Accent700 else NocturneColors.Divider) {
         Row(
@@ -647,10 +551,7 @@ private fun SpeakPanel(
     // — the script —
     SectionKicker("Script", Modifier.padding(top = 18.dp, bottom = 8.dp))
 
-    // OmniVoice takes direction inline, and there is no way to discover that
-    // from a text box. These are not conventions this app invented: the tag
-    // list and both pronunciation forms are upstream's, quoted so a typo in a
-    // tag reads as a typo rather than as the model ignoring you.
+    // OmniVoice takes direction inline, and there is no way to discover that from a text box.
     if (provider == ai.ondevice.speech.SynthProvider.OMNIVOICE) {
         NCard(gap = 6.dp) {
             Text("Direction goes in the text", style = NocturneType.CardTitleSm)
@@ -682,11 +583,7 @@ private fun SpeakPanel(
 
         // — the voice to copy —
         NCard(gap = 8.dp, modifier = Modifier.padding(top = 8.dp)) {
-            // The same shape as Transcribe's clip: a title row that carries the
-            // verbs as icons, and the clip itself playable underneath. A
-            // reference you can only read the filename of is one you cannot
-            // judge — whether it is clean enough to copy is a question about
-            // the sound.
+            // The same shape as Transcribe's clip: a title row that carries the verbs as icons, and the clip itself playable underneath.
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -740,9 +637,6 @@ private fun SpeakPanel(
                     if (state.transcribingReference) {
                         "Working out what it says…"
                     } else {
-                        // Not a nicety: the model is given the reference's words
-                        // and its sound and asked to carry on, so a wrong
-                        // transcript pulls the new speech towards the wrong thing.
                         "What the recording says. Filled in by the speech model where one is " +
                             "installed — correct it if it got a name wrong, because the copy " +
                             "follows these words as well as the voice."
@@ -761,15 +655,6 @@ private fun SpeakPanel(
     }
 
     // One script box, and a button that fills it.
-    //
-    // These were two tabs, and the difference between them was where the
-    // characters came from — the "File" tab already showed the same editable
-    // text area, because a file you cannot fix a typo in before it is read
-    // aloud is a worse file. So the tab was a wall between a text box and the
-    // button that fills it. Loading a file now just types into it.
-    // Two verbs on one row of icons rather than two full-width buttons. They
-    // are things you do *to* the script, so they sit with it rather than
-    // competing with Speak for the width of the screen.
     Row(
         Modifier.fillMaxWidth().padding(bottom = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -842,13 +727,7 @@ private fun SpeakPanel(
         block = true,
         modifier = Modifier.padding(top = 16.dp),
     )
-    // Rendering still writes the WAV — it has to, the library lists it — but
-    // the two buttons that used to sit here are gone. "Save as WAV" wrote into
-    // app-private storage and called that a save; Library does it properly, to
-    // a folder you picked, and does it the same way for every artifact.
-    // The take itself, playable. Before this the only way to hear a render was
-    // to render it again, which for OmniVoice is minutes of compute to replay
-    // four seconds of audio.
+    // Rendering still writes the WAV — it has to, the library lists it — but the two buttons that used to sit here are gone.
     state.lastAudioPath?.let { path ->
         NAudioPlayer(
             file = java.io.File(path),
@@ -883,15 +762,7 @@ private fun SpeakSlider(
     NSlider(value = value, onValueChange = onChange, valueRange = range)
 }
 
-/**
- * Five.
- *
- * The catalogue is 338 voices and the list is not the point of the screen — the
- * script above it is. Fourteen rows pushed Expression and the read-aloud button
- * off the bottom of a phone, which made the voice picker look like the whole
- * feature. Five is enough to browse and short enough that searching is the
- * obvious next move, which for a list this long it should be.
- */
+/** Five. */
 private const val VOICE_ROWS = 5
 
 private fun voiceDescription(voice: String, speed: Float): String {
@@ -911,14 +782,7 @@ private fun voiceDescription(voice: String, speed: Float): String {
     return "$region · $gender · ${String.format("%.1f", speed)}×"
 }
 
-/**
- * Which engine, which model, which voice, and how it is shaped.
- *
- * All of it used to sit in the same scroll as the script and the Speak button —
- * the engine card, a fifty-row voice list, three sliders and a blend picker
- * between what you wrote and the button that reads it. None of that is about
- * this passage; it is how this device is set up to speak.
- */
+/** Which engine, which model, which voice, and how it is shaped. */
 @Composable
 private fun VoiceSettingsSheet(
     state: ai.ondevice.ui.vm.VoiceState,
@@ -932,11 +796,7 @@ private fun VoiceSettingsSheet(
             return@NBottomSheet
         }
 
-        // A switch rather than an automatic choice. The two neural engines are
-        // not interchangeable: Kokoro is an order of magnitude faster, OmniVoice
-        // can do things Kokoro cannot do at all. Picking on the user's behalf
-        // would mean either surprising them with a minute of compute or silently
-        // dropping the feature they came for.
+        // A switch rather than an automatic choice.
         val provider = state.selectedVoice?.provider ?: ai.ondevice.speech.SynthProvider.SYSTEM
         val engines = ai.ondevice.speech.SynthProvider.entries
         SectionKicker("Engine", Modifier.padding(bottom = 8.dp))
@@ -947,13 +807,7 @@ private fun VoiceSettingsSheet(
             modifier = Modifier.fillMaxWidth(),
         )
 
-        // Which *model* provides the engine, as distinct from which engine. Only
-        // the models this engine can load, and only when the engine loads one at
-        // all: Android's synthesiser is part of the OS and has no file to
-        // choose, so a picker over it is a control with nothing behind it. The
-        // unfiltered list was worse than useless — the OmniVoice tab listed
-        // Kokoro and showed it as the selection, which is a promise the engine
-        // cannot keep.
+        // Which *model* provides the engine, as distinct from which engine.
         val engineModels = state.ttsModels.filter { state.ttsModelProviders[it.id] == provider }
         if (provider != ai.ondevice.speech.SynthProvider.SYSTEM && engineModels.isNotEmpty()) {
             NDropdown(
@@ -973,10 +827,6 @@ private fun VoiceSettingsSheet(
                 ai.ondevice.speech.SynthProvider.KOKORO ->
                     "The quick one — short lines come back near enough to straight away. " +
                         "Fifty voices, six languages, no emotion tags."
-                // Both descriptions used to quote figures — "half a second of work per second
-                // of speech", "six to seven times slower", "around a minute for a short
-                // sentence". None was ever timed on a device. The ordering is real and worth
-                // saying; the numbers go back in when they have been measured.
                 ai.ondevice.speech.SynthProvider.OMNIVOICE ->
                     "Reads any language with no phonemiser, takes [laughter] and [sigh], and can " +
                         "voice several speakers. Much slower than Kokoro — it runs the whole " +
@@ -999,10 +849,7 @@ private fun VoiceSettingsSheet(
             )
         }
 
-        // — the voice —
-        // Counted over this engine's voices, since those are the only ones
-        // listed. "51 available of 339" above a list of one engine's voices
-        // described the library, not the choice on offer.
+        // — the voice — Counted over this engine's voices, since those are the only ones listed.
         val engineVoices = state.voices.filter { it.provider == state.selectedProvider }
         SectionKicker(
             "Voice · ${engineVoices.count { it.available }} available of ${engineVoices.size}",
@@ -1067,13 +914,7 @@ private fun VoiceSettingsSheet(
             }
         }
 
-        // — expression —
-        //
-        // Which dials exist depends on the engine, because the two engines
-        // genuinely differ. Kokoro's graph takes token ids, a style vector and a
-        // speed — there is no pitch input at all. Showing a Pitch slider for it
-        // would leave the user adjusting something inert, so it is absent rather
-        // than ignored.
+        // — expression — Which dials exist depends on the engine, because the two engines genuinely differ.
         val kokoroSelected = state.selectedVoice?.provider == ai.ondevice.speech.SynthProvider.KOKORO
         SectionKicker("Expression", Modifier.padding(top = 20.dp, bottom = 8.dp))
         NCard(gap = 4.dp) {
@@ -1096,12 +937,7 @@ private fun VoiceSettingsSheet(
             )
         }
 
-        // — blend, Kokoro only —
-        //
-        // Gated on Kokoro being *selected*, not merely installed. Blending mixes
-        // two Kokoro style vectors, which is a thing only Kokoro's graph takes;
-        // keyed on availability it sat under OmniVoice offering af_heart and
-        // bm_george to an engine with no style input at all.
+        // — blend, Kokoro only — Gated on Kokoro being *selected*, not merely installed.
         if (kokoroSelected) {
             SectionKicker("Blend", Modifier.padding(top = 20.dp, bottom = 8.dp))
             NCard(gap = 6.dp) {
@@ -1125,9 +961,7 @@ private fun VoiceSettingsSheet(
             }
         }
 
-        // Each engine's own parameter set. Kokoro and OmniVoice are both
-        // text-to-speech but share almost no controls, which is why the label
-        // names what is behind the button rather than saying "Advanced".
+        // Each engine's own parameter set.
         NButton(
             when (provider) {
                 ai.ondevice.speech.SynthProvider.OMNIVOICE -> "Advanced · voice design, language, steps"
@@ -1164,9 +998,6 @@ private fun TranscribeSettings(
         )
         return
     }
-    // Labelled by quant, since a whisper library is normally several sizes of
-    // the same repo — "tiny-q5_1" and "small" distinguish them, the repo name
-    // does not.
     val labels = state.sttModels.map { it.quant ?: it.displayName }
     NDropdown(
         options = labels,
@@ -1186,11 +1017,6 @@ private fun TranscribeSettings(
 private fun timestamp(millis: Long): String =
     String.format("%02d:%02d.%d", millis / 60_000, (millis % 60_000) / 1000, (millis % 1000) / 100)
 
-/**
- * The export leaves through the system share sheet rather than a bespoke
- * "saved to…" toast: the file is already in a folder the user can open, and the
- * chooser is how a transcript actually reaches a player or an editor.
- */
 /** The "send audio" half of §7 — the rendered WAV, out through the share sheet. */
 private fun shareAudio(context: android.content.Context, file: java.io.File) {
     val uri = androidx.core.content.FileProvider.getUriForFile(

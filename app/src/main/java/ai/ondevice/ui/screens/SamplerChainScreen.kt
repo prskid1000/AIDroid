@@ -44,17 +44,7 @@ import ai.ondevice.ui.theme.Radius
 import ai.ondevice.ui.theme.ring
 import ai.ondevice.ui.vm.ParamsViewModel
 
-/**
- * **S9 — Sampler chain.**
- *
- * SPEC §4.2: "Sampler chain ordering deserves first-class UI. The order
- * materially changes output and most apps hide it." So it gets a screen, a
- * drag-to-reorder list, and per-sampler enable/disable.
- *
- * The chain string is written verbatim into `samplers` and stored with every
- * message, which is what makes a reply reproducible rather than merely
- * repeatable.
- */
+/** **S9 — Sampler chain.** SPEC §4.2: "Sampler chain ordering deserves first-class UI. */
 @Composable
 fun SamplerChainScreen(
     onBack: () -> Unit,
@@ -64,9 +54,6 @@ fun SamplerChainScreen(
     var order by remember { mutableStateOf(emptyList<String>()) }
     var draggingIndex by remember { mutableStateOf<Int?>(null) }
 
-    // The manifest loads asynchronously, so the working order has to be seeded
-    // once it arrives — keying a `remember` on the (initially empty) value map
-    // would latch the empty list forever.
     LaunchedEffect(state.allSpecs, state.samplerOrder) {
         if (draggingIndex == null) order = viewModel.samplerOrder()
     }
@@ -199,11 +186,7 @@ fun SamplerChainScreen(
     }
 }
 
-/**
- * Labels for upstream's sampler identifiers. These are display strings for
- * values that come *from the manifest*, not a hardcoded list of samplers — an
- * unrecognised name still renders, using the raw identifier.
- */
+/** Labels for upstream's sampler identifiers. */
 private fun samplerLabel(id: String): String = when (id) {
     "penalties" -> "Repetition penalties"
     "dry" -> "DRY"

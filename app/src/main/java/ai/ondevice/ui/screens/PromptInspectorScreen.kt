@@ -46,17 +46,6 @@ import ai.ondevice.ui.theme.Radius
 import ai.ondevice.ui.theme.ring
 import ai.ondevice.ui.vm.ChatViewModel
 
-/**
- * **S10 — Prompt inspector.**
- *
- * SPEC §4.4 calls this "the single most useful debugging affordance for a local
- * LLM app and almost nothing ships it": the exact final string sent to the
- * tokenizer, its token count, and its token boundaries.
- *
- * Special tokens are painted from the accent ramp and ordinary tokens with an
- * alternating text tint, so boundaries are visible without a second colour —
- * the mono palette doing category work through value, not hue.
- */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PromptInspectorScreen(
@@ -166,9 +155,6 @@ fun PromptInspectorScreen(
             ) {
                 NButton(
                     "Copy",
-                    // The exact string, unmarked — a copy that pasted middle
-                    // dots for spaces would be useless for the one thing you
-                    // copy a prompt for, which is replaying it elsewhere.
                     onClick = {
                         clipboard.setText(
                             androidx.compose.ui.text.AnnotatedString(
@@ -253,11 +239,6 @@ fun PromptInspectorScreen(
     }
 }
 
-/**
- * SPEC §4.4 — trailing spaces and stray newlines in a chat template are a
- * classic cause of "the model behaves differently to llama-cli", and they are
- * invisible until you make them visible.
- */
 private fun String.marked(on: Boolean): String =
     if (!on) this else replace(" ", "·").replace("\t", "→   ").replace("\n", "⏎\n")
 

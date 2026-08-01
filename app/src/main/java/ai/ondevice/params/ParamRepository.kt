@@ -10,15 +10,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
-/**
- * Loads the manifest and answers "what should this screen render?".
- *
- * SPEC §16.5 — the app uses `max(bundled, downloaded)` by version. The bundled
- * copy in `assets/` guarantees the app works offline with no updates applied;
- * an OTA manifest can correct metadata, retier, relabel and *reveal* parameters
- * the installed `.so` already supports, but it cannot add capability the native
- * lib lacks. The `sinceBuild` gate makes that automatic and invisible.
- */
+/** Loads the manifest and answers "what should this screen render?". */
 class ParamRepository(
     private val context: Context,
     private val db: OnDeviceDatabase,
@@ -35,9 +27,7 @@ class ParamRepository(
     suspend fun manifest(): ParamManifest = cached ?: withContext(Dispatchers.IO) {
         val bundled = loadBundled()
         val stored = db.manifests().newest()
-        // Only a signature-verified OTA manifest may win. A failed signature
-        // means we keep what we have (§16.5) — it is never a reason to render
-        // nothing.
+        // Only a signature-verified OTA manifest may win.
         val chosen = when {
             stored != null && stored.signatureOk && stored.version > bundled.manifestVersion ->
                 runCatching { json.decodeFromString(ParamManifest.serializer(), stored.json) }.getOrDefault(bundled)
@@ -54,25 +44,7 @@ class ParamRepository(
 
     suspend fun bundledVersion(): Int = withContext(Dispatchers.IO) { loadBundled().manifestVersion }
 
-    /**
-     * The parameters a runtime *has*, as opposed to the ones a document claims
-     * for it.
-     *
-     * The manifest describes; [EngineParams] decides. Everything the runtime
-     * reports keeps whatever description the manifest has for it, and anything
-     * the manifest describes that the runtime does not accept is dropped — that
-     * being a control which moves, saves and does nothing, which is a worse
-     * failure than the parameter simply not being there.
-     *
-     * Keys the runtime reports and nobody has described are kept and shown
-     * plainly, in their own group. A text field with the key as its label is a
-     * poor control; an unreachable capability is worse, and the JSON contract
-     * coerces strings on the way through, so typing `40` into one reaches the
-     * runtime as forty.
-     *
-     * @return [described] unchanged when the runtime cannot be asked. A missing
-     *   `.so` must not empty this screen.
-     */
+    /** The parameters a runtime *has*, as opposed to the ones a document claims for it. */
     fun specsFor(manifest: ParamManifest, runtimeId: String): List<ParamSpec> {
         val described = manifest.paramsFor(runtimeId)
         val declared = EngineParams.capabilities(runtimeId)?.takeIf { it.isNotEmpty() } ?: return described
@@ -80,16 +52,7 @@ class ParamRepository(
         val kept = described
             .filter { it.key in declared }
             .map { spec ->
-                // The reload flag and the default belong to the runtime. It is
-                // the only party that knows whether a key can be pushed into a
-                // live context, and its default is the one generation will
-                // actually use — the manifest's was a second copy of a number
-                // upstream is free to change between releases.
-                //
-                // A null default means the engine did not report one, not that
-                // the default is nothing, so the manifest's stands. App-applied
-                // keys take the manifest's answer for both: it is their only
-                // source.
+                // The reload flag and the default belong to the runtime.
                 val capability = declared.getValue(spec.key)
                 if (capability.appliedBy == ParamCapability.Applier.RUNTIME) {
                     spec.copy(
@@ -123,17 +86,7 @@ class ParamRepository(
 
     suspend fun storedManifest(): ParamManifestEntity? = db.manifests().newest()
 
-    /**
-     * The visible parameter set for a screen.
-     *
-     * Filtering happens in this order, and each step is a spec requirement:
-     *  1. `appliesTo` — modality and architecture restrictions (§16.1).
-     *  2. `sinceBuild` / `untilBuild` — gated against the *actually loaded*
-     *     runtime build tag, queried from the native lib at init (§16.5).
-     *  3. `dependsOn` — conditional visibility against current values.
-     *  4. tier — visibility only, collapsed entirely by "show all" (§9).
-     *  5. search.
-     */
+    /** The visible parameter set for a screen. */
     fun visible(
         specs: List<ParamSpec>,
         values: SparseParams,
@@ -181,10 +134,7 @@ class ParamRepository(
         return true
     }
 
-    /**
-     * A parameter for a newer build simply stays hidden until the runtime
-     * catches up, then appears on its own — no app update, no user action.
-     */
+    /** A parameter for a newer build simply stays hidden until the runtime catches up, then appears on its own — no app update, no user action. */
     private fun buildInRange(spec: ParamSpec, loadedBuildTag: String?): Boolean {
         if (loadedBuildTag == null) return true
         val current = buildOrdinal(loadedBuildTag) ?: return true
@@ -220,11 +170,7 @@ class ParamRepository(
     private fun sameValue(a: JsonElement, b: JsonElement): Boolean =
         renderJson(a).equals(renderJson(b), ignoreCase = true)
 
-    /**
-     * Group the visible set into the sections the parameter screen renders.
-     * Order follows the manifest's own group ordering so a new group lands in a
-     * sensible place without a code change.
-     */
+    /** Group the visible set into the sections the parameter screen renders. */
     fun grouped(specs: List<ParamSpec>): List<ParamGroup> {
         val order = LinkedHashMap<String, MutableList<ParamSpec>>()
         specs.forEach { order.getOrPut(it.group) { mutableListOf() }.add(it) }

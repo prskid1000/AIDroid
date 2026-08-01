@@ -4,13 +4,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.unit.dp
 
-/**
- * `--space-*` — density 0.70×, already baked into the scale. The system is dense
- * on purpose; use these rather than raw numbers.
- *
- * The CSS carries fractional pixels (2.8, 5.6, 8.4…). Compose dp is a float, so
- * they survive the port unrounded.
- */
+/** `--space-*` — density 0.70×, already baked into the scale. */
 @Immutable
 object Space {
     val s1 = 2.8.dp
@@ -20,11 +14,6 @@ object Space {
     val s6 = 16.8.dp
     val s8 = 22.4.dp
 
-    /**
-     * The canvas lays its phone screens out on an 18px horizontal gutter, which
-     * is not a `--space-*` step — it is the screen margin the mockups use
-     * throughout. Named so it stays consistent across all 15 screens.
-     */
     val ScreenGutter = 18.dp
 }
 
@@ -43,14 +32,7 @@ object Radius {
     val Tag = RoundedCornerShape(6.dp)
 }
 
-/**
- * `--shadow-*`. On a dark ground elevation is "an edge plus ambient darkness",
- * so every step starts with a 1px hairline ring; only md and lg add a drop.
- *
- * Compose has no multi-layer box-shadow, so these are expressed as a ring
- * colour plus an optional ambient blur — see `elev()` in NocturneComponents.kt.
- * The readme's rule is that shadows are never stacked, so one step per surface.
- */
+/** `--shadow-*`. */
 @Immutable
 data class NocturneShadow(
     val ringColor: androidx.compose.ui.graphics.Color,
@@ -71,11 +53,7 @@ object Elevation {
     val lg = NocturneShadow(NocturneColors.Neutral500, 40.dp, 0.65f, 16.dp)
 }
 
-/**
- * Touch target floor. The canvas gives every interactive row `min-height:44px`
- * and the primary actions 46–48px; that is the number the screens honour rather
- * than Material's 48dp default, because the mockups are explicit about it.
- */
+/** Touch target floor. */
 object Touch {
     val Min = 44.dp
     val Primary = 46.dp

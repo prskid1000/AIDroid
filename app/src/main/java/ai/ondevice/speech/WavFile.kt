@@ -3,14 +3,7 @@ package ai.ondevice.speech
 import java.io.File
 import java.io.OutputStream
 
-/**
- * Mono 16-bit PCM WAV.
- *
- * Kokoro returns floats; every player expects a container. Writing the header
- * by hand rather than pulling in a media library keeps the exported file
- * exactly what it claims to be — 44 bytes of RIFF and then samples — which is
- * also what makes it checkable from a shell.
- */
+/** Mono 16-bit PCM WAV. */
 object WavFile {
 
     private const val HEADER_BYTES = 44
@@ -21,9 +14,7 @@ object WavFile {
             writeHeader(out, samples.size, sampleRate)
             val frame = ByteArray(2)
             samples.forEach { sample ->
-                // Clamp before scaling: Kokoro occasionally overshoots ±1 on
-                // plosives, and letting that wrap turns a loud consonant into a
-                // click of the opposite sign.
+                // Clamp before scaling: Kokoro occasionally overshoots ±1 on plosives, and letting that wrap turns a loud consonant into a click of the opposite sign.
                 val clamped = sample.coerceIn(-1f, 1f)
                 val value = (clamped * Short.MAX_VALUE).toInt()
                 frame[0] = (value and 0xFF).toByte()
@@ -37,16 +28,7 @@ object WavFile {
     /** What is actually in a WAV, for a file this app may not have written. */
     data class Info(val sampleRate: Int, val frames: Long, val millis: Long)
 
-    /**
-     * Read the rate and length back off disk.
-     *
-     * The alternative was to assume 24 kHz because that is what the two neural
-     * engines produce — but the system engine writes its own file at whatever
-     * rate it likes, and a duration derived from the wrong rate is a number that
-     * looks right and is not. Walks the chunk list rather than trusting the
-     * 44-byte layout, because only files this object wrote are guaranteed to
-     * have it.
-     */
+    /** Read the rate and length back off disk. */
     fun describe(file: File): Info? = runCatching {
         file.inputStream().buffered().use { input ->
             val header = ByteArray(12)
@@ -135,22 +117,7 @@ object WavFile {
     }
 }
 
-/**
- * A WAV written as the audio arrives, rather than from a finished array.
- *
- * A recording used to exist only as a ten-second rolling window inside the
- * decoder — the samples were read, fed to whisper and dropped, so there was
- * nothing to replay, re-run at a different setting, or export. Keeping them
- * meant either holding the whole take in memory (a half-hour recording is
- * upwards of a hundred megabytes of Float) or streaming it to disk. This
- * streams.
- *
- * The header is written first with a zero length and patched on [close], which
- * is the ordinary way to write a RIFF file whose length nobody knows yet. A
- * take that is never closed — the process dies mid-recording — leaves a file
- * whose header says zero samples, and every player will read that as an empty
- * clip rather than as garbage.
- */
+/** A WAV written as the audio arrives, rather than from a finished array. */
 class WavWriter(
     private val destination: java.io.File,
     private val sampleRate: Int,

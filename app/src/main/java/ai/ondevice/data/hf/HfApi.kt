@@ -10,13 +10,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 
-/**
- * The two endpoints SPEC §3.1 verified, plus search.
- *
- * Between them they answer every resolution question *without downloading
- * weights*, which is what makes the compatibility gate possible before rather
- * than after a multi-gigabyte transfer.
- */
+/** The two endpoints SPEC §3.1 verified, plus search. */
 class HfApi(
     private val client: OkHttpClient,
     private val tokens: TokenStore,
@@ -41,10 +35,7 @@ class HfApi(
             }
         }
 
-    /**
-     * `POST /api/models/{id}/paths-info/{revision}` — exact size, sha256 via
-     * `lfs.oid`, the commit id to pin to, and the security scan verdict.
-     */
+    /** `POST /api/models/{id}/paths-info/{revision}` — exact size, sha256 via `lfs.oid`, the commit id to pin to, and the security scan verdict. */
     suspend fun pathsInfo(
         repoId: String,
         paths: List<String>,
@@ -60,12 +51,7 @@ class HfApi(
             .mapCatching { json.decodeFromString(kotlinx.serialization.builtins.ListSerializer(HfPathInfo.serializer()), it) }
     }
 
-    /**
-     * Repo search, used by the "search for {repo}-GGUF" remedy on the
-     * PyTorch-weights-only refusal and by the Add-model search field. The paste
-     * field is still the primary affordance — this is a convenience shortcut
-     * (Appendix A #8).
-     */
+    /** Repo search, used by the "search for {repo}-GGUF" remedy on the PyTorch-weights-only refusal and by the Add-model search field. */
     suspend fun search(query: String, limit: Int = 25): Result<List<HfSearchResult>> =
         withContext(Dispatchers.IO) {
             val encoded = java.net.URLEncoder.encode(query, "UTF-8")
@@ -75,11 +61,7 @@ class HfApi(
             }
         }
 
-    /**
-     * The GGUF header fallback: an HTTP Range request for the first slice of a
-     * file. Kept as a real path, not a stub — the `gguf` block is undocumented
-     * and may change shape (SPEC §3.1, risk table).
-     */
+    /** The GGUF header fallback: an HTTP Range request for the first slice of a file. */
     suspend fun rangeGet(url: String, bytes: Int): Result<ByteArray> = withContext(Dispatchers.IO) {
         runCatching {
             val req = Request.Builder()
@@ -121,11 +103,6 @@ class HfApi(
     }
 }
 
-/**
- * HTTP failures carry their status so the resolver can tell 401/403 (gated,
- * needs a token) from 404 (not found or private) — SPEC §3.2 gives those two
- * different messages and different remedies.
- */
 class HfException(val code: Int, message: String) : IOException("HTTP $code: $message") {
     val isAuthFailure: Boolean get() = code == 401 || code == 403
     val isNotFound: Boolean get() = code == 404

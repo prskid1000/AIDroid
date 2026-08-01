@@ -17,14 +17,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/**
- * SPEC §3.4 — downloads run in a foreground service and survive app kill.
- *
- * The service exists for the OS's benefit, not the app's: it is what keeps the
- * process alive while several gigabytes move, and what shows the user a
- * progress notification they can act on. The actual transfer logic lives in
- * [Downloader] so it is testable without a service.
- */
+/** SPEC §3.4 — downloads run in a foreground service and survive app kill. */
 @AndroidEntryPoint
 class DownloadService : LifecycleService() {
 

@@ -9,26 +9,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 
-/**
- * SPEC §16.1 — the manifest.
- *
- * This is what makes §1.5 real: **there are zero hardcoded parameter widgets in
- * the app.** Every parameter in §4–7 is a row in this document, and the UI is a
- * generic renderer over it. The test the spec sets is unambiguous — if adding a
- * new upstream parameter requires touching Kotlin UI source, the design has
- * been violated (Appendix A #9).
- *
- * What this document is *not* is the authority on which parameters exist. It
- * describes them — label, help, range, group, tier — and
- * [ParamRepository.specsFor] shows only the ones the runtime itself reports it
- * will act on. §16.2 called for generating this in CI from pinned upstream
- * sources so the two could not drift; they drifted anyway, because a generator
- * nobody ran is a hand-written file with a longer story. Asking the binary at
- * runtime is the version of that idea which cannot go stale.
- *
- * The app still never parses upstream C++ (Appendix A #13). It asks the
- * compiled result what it accepts.
- */
+/** SPEC §16.1 — the manifest. */
 @Serializable
 data class ParamManifest(
     val manifestVersion: Int,
@@ -40,15 +21,7 @@ data class ParamManifest(
         runtimes[runtimeId]?.params?.firstOrNull { it.key == key }
 }
 
-/**
- * `sourceCommit`, `buildTag` and `jniContract` used to sit here as provenance.
- * Nothing read any of them, and their values were `a1b2c3d`, a build eleven
- * months stale, and a constant — so they were a claim about which upstream this
- * described, made by nobody, checked by nobody. The runtime reports its own
- * build tag ([RuntimeRegistry.buildTag]) and its own contract number
- * ([RuntimeRegistry.contractSatisfied], read from `runtimes.json`); a second
- * unverified copy in a data file is not provenance.
- */
+/** `sourceCommit`, `buildTag` and `jniContract` used to sit here as provenance. */
 @Serializable
 data class RuntimeParams(
     val params: List<ParamSpec> = emptyList(),
@@ -58,7 +31,6 @@ data class RuntimeParams(
 data class ParamSpec(
     /** Canonical name — this is the wire key passed through JNI verbatim. */
     val key: String,
-    /** Section heading: model, sampling, generation, vision, vad, … */
     val group: String = "other",
     val type: ParamType,
     val default: JsonElement? = null,
@@ -85,10 +57,7 @@ data class ParamSpec(
         get() = (type == ParamType.FLOAT || type == ParamType.INT) && min != null && max != null
 }
 
-/**
- * §16.4 — adding a new *type* is the only case that requires app code. Adding a
- * new *parameter* of an existing type requires none.
- */
+/** §16.4 — adding a new *type* is the only case that requires app code. */
 @Serializable
 enum class ParamType {
     @SerialName("int") INT,

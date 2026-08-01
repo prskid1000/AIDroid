@@ -5,13 +5,7 @@ import ai.ondevice.core.Fmt
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-/**
- * A file within a download job.
- *
- * [bytesDone] is persisted so a resume survives app kill *and reboot* — SPEC
- * §3.4 asks for exactly that, and it is why the offsets live in Room rather
- * than in memory.
- */
+/** A file within a download job. */
 @Serializable
 data class DownloadFile(
     val filename: String,

@@ -37,14 +37,7 @@ import ai.ondevice.ui.theme.NocturneType
 import ai.ondevice.ui.theme.Space
 import ai.ondevice.ui.theme.ruleAbove
 
-/**
- * The frame every one of the fifteen screens sits in.
- *
- * The canvas draws each screen as a 392×824 device with, top to bottom: the OS
- * status strip, a toolbar, a scrolling body on an 18px gutter, and — on root
- * destinations only — the five-item bottom bar. On a real device the status
- * strip is the system's, so this reserves its inset rather than drawing it.
- */
+/** The frame every one of the fifteen screens sits in. */
 @Composable
 fun PhoneScaffold(
     modifier: Modifier = Modifier,
@@ -75,10 +68,7 @@ fun PhoneScaffold(
     }
 }
 
-/**
- * A pushed screen's toolbar: back chevron, title, optional subtitle, optional
- * trailing action. `padding: 12px 18px 10px`, title `font:500 17px`.
- */
+/** A pushed screen's toolbar: back chevron, title, optional subtitle, optional trailing action. */
 @Composable
 fun PushToolbar(
     title: String,
@@ -117,14 +107,7 @@ fun PushToolbar(
     }
 }
 
-/**
- * A root destination's header: a title flush left, actions on the right.
- * No back chevron — these are the bottom-bar destinations.
- *
- * [subtitle] is for a screen whose title alone does not say what is loaded —
- * Chat, where the model and the live backend readout belong under the name
- * rather than in a toolbar of its own.
- */
+/** A root destination's header: a title flush left, actions on the right. */
 @Composable
 fun RootToolbar(
     title: String,
@@ -152,14 +135,7 @@ fun RootToolbar(
     }
 }
 
-/**
- * One toolbar action, so the icon size and hit target are decided once.
- *
- * Every root screen was drawing its own [Icon] with its own `size(...)`, which
- * is how Chat ended up with a 20dp plus next to a 19dp sliders — and how it
- * grew a hamburger that opened the same sheet as the sliders beside it. An
- * action a screen cannot spell differently is one that cannot drift.
- */
+/** One toolbar action, so the icon size and hit target are decided once. */
 @Composable
 fun ToolbarAction(
     icon: ImageVector,
@@ -176,16 +152,7 @@ fun ToolbarAction(
     )
 }
 
-/**
- * A toolbar action that is also a state — one of a set, with one of them on.
- *
- * The tint alone is not enough. An icon in the accent colour beside icons in
- * the text colour reads as "this one is special", not as "this one is
- * selected", and at 20 dp there is no room for a label to settle the question.
- * The filled, ringed plate is the same treatment `NPills` gives its selected
- * option, so a control that moved from the body into the toolbar still looks
- * like the same control.
- */
+/** A toolbar action that is also a state — one of a set, with one of them on. */
 @Composable
 fun ToolbarToggle(
     icon: ImageVector,
@@ -225,13 +192,7 @@ data class NavDestination(
     val route: String,
 )
 
-/**
- * The five-item bottom bar. Selected is full accent; unselected is the text
- * colour at 50% — the canvas uses opacity, not a second colour, which keeps the
- * bar mono.
- *
- * `box-shadow: 0 -1px 0 var(--color-divider)` above; `padding: 7px 6px 12px`.
- */
+/** The five-item bottom bar. */
 @Composable
 fun NBottomBar(
     destinations: List<NavDestination>,
@@ -278,11 +239,7 @@ fun NBottomBar(
     }
 }
 
-/**
- * A modal bottom sheet in the canvas' proportions: the ground dimmed, the sheet
- * on `--color-surface` with a 20px top radius and a neutral-700 grabber. Used
- * by Chat settings (S7).
- */
+/** A modal bottom sheet in the canvas' proportions: the ground dimmed, the sheet on `--color-surface` with a 20px top radius and a neutral-700 grabber. */
 @Composable
 fun NSheetHandle(modifier: Modifier = Modifier) {
     Box(modifier.fillMaxWidth().padding(top = 9.dp, bottom = 3.dp), contentAlignment = Alignment.Center) {
@@ -297,15 +254,7 @@ fun NSheetHandle(modifier: Modifier = Modifier) {
 /** How much of the screen a quick-settings sheet covers, whatever it holds. */
 private const val SHEET_HEIGHT_FRACTION = 0.8f
 
-/**
- * The sheet every quick-settings panel opens in.
- *
- * Chat had this shape written inline and Image and Voice had no sheet at all —
- * their parameters sat in the same scroll as the prompt and the result, so the
- * screen you generate on and the screen you configure on were one screen, and
- * it grew every time a runtime gained a dial. One implementation means the three
- * cannot drift apart, and [title]/[note] keep the header honest per screen.
- */
+/** The sheet every quick-settings panel opens in. */
 @Composable
 fun NBottomSheet(
     title: String,
@@ -329,11 +278,6 @@ fun NBottomSheet(
                 modifier
                     .fillMaxWidth()
                     // A fixed 80% of the screen, not "as tall as the content".
-                    // Wrapping meant the sheet's height was whatever it happened
-                    // to hold: Voice's Transcribe settings are a dropdown and one
-                    // line, so the panel collapsed to a strip at the bottom edge,
-                    // while Speak's overflowed. A sheet that changes size when you
-                    // switch tabs inside it reads as a different sheet.
                     .fillMaxHeight(SHEET_HEIGHT_FRACTION)
                     .background(
                         NocturneColors.Surface,
@@ -356,18 +300,10 @@ fun NBottomSheet(
                 }
                 Column(
                     Modifier
-                        // Weighted so the scroll region is what is left after the
-                        // handle and the header, rather than whatever the content
-                        // happens to measure — without it a tall sheet lays out
-                        // past the bottom of the window and the last control is
-                        // simply not there.
                         .weight(1f)
                         .verticalScroll(androidx.compose.foundation.rememberScrollState())
                         .padding(start = 18.dp, end = 18.dp)
                         // The navigation bar sits over the sheet, not beside it.
-                        // Without its inset the final row — every one of these
-                        // sheets ends in an Advanced button — is drawn underneath
-                        // it, which reads as the button not existing.
                         .padding(
                             bottom = 20.dp +
                                 WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
@@ -379,10 +315,7 @@ fun NBottomSheet(
     }
 }
 
-/**
- * The small live-state dot the canvas puts next to the backend readout in the
- * chat header and next to a modified parameter.
- */
+/** The small live-state dot the canvas puts next to the backend readout in the chat header and next to a modified parameter. */
 @Composable
 fun NDot(
     modifier: Modifier = Modifier,

@@ -47,13 +47,7 @@ fun NFieldLabel(text: String, modifier: Modifier = Modifier) {
     Text(text, style = NocturneType.FieldLabel, color = NocturneColors.TextLabel, modifier = modifier.padding(bottom = 5.dp))
 }
 
-/**
- * `.input`.
- *
- * Surface fill, divider hairline, accent caret, and an accent border on focus —
- * `:focus-visible { border-color: var(--color-accent); outline-offset: 0 }`, so
- * the ring replaces the border rather than sitting outside it.
- */
+/** `.input`. */
 @Composable
 fun NInput(
     value: String,
@@ -131,22 +125,13 @@ fun NField(
     }
 }
 
-/**
- * `.radio` + `.dot` — a 16px ring that fills with the accent and punches a
- * 4px hole of the ground through the middle when checked
- * (`box-shadow: inset 0 0 0 4px var(--color-bg)`).
- */
 @Composable
 fun NRadio(
     label: String,
     selected: Boolean,
     onSelect: () -> Unit,
     modifier: Modifier = Modifier,
-    /**
-     * A choice that exists but cannot be taken here — shown, dimmed, inert.
-     * Removing the row instead would answer a different question: absent reads
-     * as "no such option", where the truth is usually "not on this device".
-     */
+    /** A choice that exists but cannot be taken here — shown, dimmed, inert. */
     enabled: Boolean = true,
 ) {
     Row(
@@ -171,11 +156,7 @@ fun NRadio(
     }
 }
 
-/**
- * `.seg` + `.seg-opt` — a joined segmented control. Selected reads as accent
- * text plus an accent ring inset over the whole option; the divider between
- * options stays solid because it is an in-control separator.
- */
+/** `.seg` + `.seg-opt` — a joined segmented control. */
 @Composable
 fun NSeg(
     options: List<String>,
@@ -183,11 +164,6 @@ fun NSeg(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
     textStyle: TextStyle = NocturneType.Input.copy(fontSize = 13.sp),
-    /**
-     * Per-option, because "this one exists but not here" is information and a
-     * missing segment is not — the compute-device row lists a GPU and an NPU
-     * whether or not this phone answered for them.
-     */
     enabled: (Int) -> Boolean = { true },
 ) {
     Row(
@@ -198,11 +174,7 @@ fun NSeg(
         options.forEachIndexed { i, label ->
             val selected = i == selectedIndex
             val usable = enabled(i)
-            // The selected ring has to follow the container's own corners at
-            // the two ends. Drawing it square meant the outer clip sliced its
-            // corners off, which reads as a chipped border rather than a
-            // deliberate shape — visible on every first- or last-segment
-            // selection, which is most of them.
+            // The selected ring has to follow the container's own corners at the two ends.
             val segmentShape = RoundedCornerShape(
                 topStart = if (i == 0) Radius.md else 0.dp,
                 bottomStart = if (i == 0) Radius.md else 0.dp,
@@ -245,11 +217,7 @@ private fun Modifier.drawLeftDivider(): Modifier = drawBehind {
     )
 }
 
-/**
- * The range control. The canvas styles `input[type=range]` with
- * `accent-color: #9184d9` and gives it a 22–28px tap height, so the track is
- * thin and the thumb is the only accent mass.
- */
+/** The range control. */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun NSlider(
@@ -314,11 +282,7 @@ fun NSlider(
     )
 }
 
-/**
- * The pill toggle from S8 and S11 — 40×23 track, 17px knob, divider hairline.
- * On is an accent-700 track with an accent-200 knob; off is the neutral ramp.
- * Explicitly not `material3.Switch`, whose proportions are different.
- */
+/** The pill toggle from S8 and S11 — 40×23 track, 17px knob, divider hairline. */
 @Composable
 fun NSwitch(
     checked: Boolean,
@@ -352,11 +316,7 @@ fun NSwitch(
     }
 }
 
-/**
- * The chip editor used for `stop`, `dry_sequence_breakers` and the manifest's
- * `string[]` type. A chip is neutral-900 with a divider ring; the add
- * affordance is accent text inside an accent-700 ring.
- */
+/** The chip editor used for `stop`, `dry_sequence_breakers` and the manifest's `string[]` type. */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun NChipRow(
@@ -394,10 +354,7 @@ fun NChipRow(
     }
 }
 
-/**
- * The enum picker from S8: a wrapped row of mono option chips. Selected is an
- * accent-900 fill with an accent ring.
- */
+/** The enum picker from S8: a wrapped row of mono option chips. */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun NEnumRow(
@@ -430,20 +387,7 @@ fun NEnumRow(
     }
 }
 
-/**
- * A dropdown, for when the options are too long or too many to lay out as pills.
- *
- * [NEnumRow] is the right control for a closed set of short values — three
- * sampler names, two sources — because every option stays visible and choosing
- * is one tap. It is the wrong control for a filename, a model id, or a list that
- * grows with what the user has installed: the pills wrap into a paragraph, the
- * current value stops being obvious, and a whisper library of eight sizes fills
- * the screen.
- *
- * So this shows only the current value and a chevron, and opens the rest on
- * demand. Long values are ellipsised rather than wrapped, since the tail of a
- * path is what distinguishes it and the head is shared.
- */
+/** A dropdown, for when the options are too long or too many to lay out as pills. */
 @Composable
 fun NDropdown(
     options: List<String>,

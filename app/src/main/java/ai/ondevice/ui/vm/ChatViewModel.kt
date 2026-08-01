@@ -34,16 +34,7 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
 
-/**
- * S6/S7/S10 — the chat loop.
- *
- * Two spec obligations live here rather than in the UI:
- *  - **The full parameter set is stored with every message** (SPEC §11,
- *    Appendix A #6). Cheap at write time, impossible to reconstruct later.
- *  - **Generation is cancellable at every stage** and cancelling frees native
- *    memory — the job is cancelled, which unwinds the engine's Flow through its
- *    `onCompletion` teardown.
- */
+/** S6/S7/S10 — the chat loop. */
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -65,22 +56,14 @@ class ChatViewModel @Inject constructor(
     init {
         viewModelScope.launch { restore() }
 
-        // The model list has to be live. Taking it once at construction meant a
-        // model that finished downloading while the chat screen existed never
-        // appeared in the picker — and since the picker only rendered when
-        // there was more than one model, the *first* model you ever installed
-        // was unreachable until the app was restarted.
+        // The model list has to be live.
         viewModelScope.launch {
             db.models().observeInstalled().collect { models ->
                 _state.value = _state.value.copy(
                     availableModels = models.filter {
                         it.modality == Modality.TEXT || it.modality == Modality.VISION
                     },
-                    // Re-read the selected row too, not just the list. The
-                    // parameters screen edits this same row, and holding a
-                    // snapshot taken at restore meant the context readout kept
-                    // reporting the old n_ctx after it had been changed —
-                    // "8192 ctx" on a model since set to 2048.
+                    // Re-read the selected row too, not just the list.
                     model = _state.value.model?.let { current ->
                         models.firstOrNull { it.id == current.id } ?: current
                     },
@@ -88,9 +71,6 @@ class ChatViewModel @Inject constructor(
             }
         }
 
-        // Settings → Backend is a global preference, so it has to be observed
-        // rather than read once: changing it while the chat is open used to
-        // leave the readout describing the old choice.
         viewModelScope.launch {
             prefs.backendMode.collect { mode ->
                 _state.value = _state.value.copy(backendPreference = mode)
@@ -104,11 +84,6 @@ class ChatViewModel @Inject constructor(
                 _state.value = _state.value.copy(
                     loadedModelId = engine.loaded?.modelId,
                     loadingModel = engine.loading,
-                    // The backend the engine actually resolved, which is the
-                    // only trustworthy answer: it is the end of a four-step
-                    // fallback — per-model override, then the global setting,
-                    // then the measured winner, then OpenCL — and none of those
-                    // steps is visible from the model row alone.
                     loadedBackend = engine.backend,
                 )
             }
@@ -120,13 +95,7 @@ class ChatViewModel @Inject constructor(
             ?: db.conversations().mostRecent()
             ?: newConversation()
 
-        // A vision model is a text model that can also see. Asking for
-        // Modality.TEXT alone meant a phone whose only language model was
-        // classified VISION — which is most multimodal releases, and Qwen3.5-9B
-        // among them — opened Chat on "No model loaded · Add a model" with the
-        // model sitting installed and the picker empty. The observer at the top
-        // of this class always got this right; the restore path did not, so the
-        // list was correct the moment anything changed and wrong until then.
+        // A vision model is a text model that can also see.
         val chatModels = db.models().getInstalled().filter {
             it.modality == Modality.TEXT || it.modality == Modality.VISION
         }
@@ -167,27 +136,12 @@ class ChatViewModel @Inject constructor(
         return conversation
     }
 
-    /**
-     * Start a fresh conversation.
-     *
-     * A *new* one, not a cleared one. Wiping the current thread's messages in
-     * place would destroy work the user might want back and would leave the
-     * export they were about to take pointing at an empty conversation; a new
-     * row costs nothing and leaves the old thread whole in the library. The KV
-     * cache is dropped because it holds the previous thread's tokens, and
-     * carrying those into a conversation the user thinks is empty is the kind
-     * of invisible context that produces baffling replies.
-     */
+    /** Start a fresh conversation. */
     fun startNewConversation() {
         if (_state.value.generating) stop()
-        // Already on an empty one. Writing a second row would leave the first
-        // behind for good — nothing ever deletes it — so pressing this a few
-        // times filled the library with threads that had never held anything.
+        // Already on an empty one.
         if (_state.value.messages.isEmpty() && _state.value.conversation != null) return
         viewModelScope.launch {
-            // Dropping the KV is llama-specific, so it is asked for by type
-            // rather than added to the engine interface — no other runtime has
-            // a conversation-shaped cache to drop.
             (engines.llama as? ai.ondevice.engine.LlamaEngine)?.clearCache()
             val conversation = newConversation()
             _state.value = _state.value.copy(
@@ -206,13 +160,7 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Switch to a thread the user picked out of the library.
-     *
-     * The KV goes with it for the same reason [startNewConversation] drops it:
-     * the cache holds the *previous* thread's tokens, and llama.cpp would happily
-     * treat them as a shared prefix of a conversation that never contained them.
-     */
+    /** Switch to a thread the user picked out of the library. */
     fun openConversation(id: String) {
         if (_state.value.conversation?.id == id) return
         if (_state.value.generating) stop()
@@ -261,17 +209,7 @@ class ChatViewModel @Inject constructor(
         _state.value = _state.value.copy(input = value)
     }
 
-    /**
-     * Attach a file the user picked, and decide what it *is* before deciding
-     * what to do with it.
-     *
-     * The three kinds go three different ways, and conflating them is how these
-     * features usually break: an image is passed to the vision projector as an
-     * image; a document is read and its text enters the prompt as text, priced
-     * in tokens the user can see before sending; audio needs transcription,
-     * which needs a runtime that may not be installed, so it says so rather
-     * than attaching something the model will never receive.
-     */
+    /** Attach a file the user picked, and decide what it *is* before deciding what to do with it. */
     fun attach(uri: android.net.Uri) {
         viewModelScope.launch {
             val attachment = attachments.copyIn(uri) ?: run {
@@ -285,12 +223,7 @@ class ChatViewModel @Inject constructor(
             val pending = when (attachment.kind) {
                 ai.ondevice.data.AttachmentKind.IMAGE -> {
                     val model = _state.value.model
-                    // Two separate ways this fails, and they used to be one
-                    // check. A model can be classified as vision and still have
-                    // arrived without its projector file — the classification
-                    // reads the repo, the companion is a download that can be
-                    // skipped — so the second question has to be asked of the
-                    // files rather than of the label.
+                    // Two separate ways this fails, and they used to be one check.
                     val missing = if (model?.modality != Modality.VISION) {
                         ai.ondevice.core.MissingComponent(
                             what = "${model?.displayName ?: "This model"} cannot see images",
@@ -344,11 +277,7 @@ class ChatViewModel @Inject constructor(
                     )
                 }
 
-                // Not offered by the picker — see `pickAttachment` — but a file
-                // manager can return anything, so the refusal stays. It no
-                // longer claims whisper.cpp is missing, which it asserted
-                // whether or not that was true; the reason is that a prompt
-                // takes text, and audio becomes text on the Voice tab.
+                // Not offered by the picker — see `pickAttachment` — but a file manager can return anything, so the refusal stays.
                 ai.ondevice.data.AttachmentKind.AUDIO -> {
                     _state.value = _state.value.copy(
                         error = "Audio has to be transcribed before it can enter a prompt.",
@@ -392,9 +321,6 @@ class ChatViewModel @Inject constructor(
 
         val images = pending.filter { it.kind == ai.ondevice.data.AttachmentKind.IMAGE }.map { it.path }
 
-        // A document's text becomes part of the message, fenced and named, so
-        // the conversation records what the model actually read — not a path
-        // that means nothing once the file moves.
         val documents = pending.filter { it.kind == ai.ondevice.data.AttachmentKind.DOCUMENT }
         val text = buildString {
             documents.forEach { document ->
@@ -452,13 +378,6 @@ class ChatViewModel @Inject constructor(
             try {
                 runTurn(conversation, params, images, parentId = userMessage.id)
             } finally {
-                // Stop is a cancellation, and a cancelled coroutine cannot
-                // suspend: the first suspending call in this block throws
-                // CancellationException again and everything after it is
-                // skipped. That is why Stop appeared not to work — `touch`
-                // threw, so `generating` was never cleared and the UI kept
-                // showing a running turn over a native loop that had already
-                // finished. Teardown has to be uncancellable to run at all.
                 InferenceService.releaseWakeLock(context)
                 withContext(NonCancellable) {
                     db.conversations().touch(conversation.id, System.currentTimeMillis())
@@ -469,16 +388,7 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /**
-     * One assistant turn, and the tool loop around it.
-     *
-     * A model that asks for a tool has not finished its turn: it has to see the
-     * result and speak again. So this generates, and if the reply is a tool
-     * call, runs it, writes the result into the conversation as a `tool`
-     * message, and generates once more — up to [MAX_TOOL_ROUNDS], because a
-     * model that loops on a failing tool would otherwise run the battery flat.
-     * The cap is surfaced in the conversation rather than silently applied.
-     */
+    /** One assistant turn, and the tool loop around it. */
     private suspend fun runTurn(
         conversation: ConversationEntity,
         params: SparseParams,
@@ -515,10 +425,7 @@ class ChatViewModel @Inject constructor(
                 streaming = StreamingMessage(id = assistantId),
             )
 
-            // Per round, not per turn. A reply that calls a tool generates
-            // again after the result comes back, and those are separate pieces
-            // of work with separate costs — averaging them into one trace would
-            // hide the fact that the second round starts from a warm cache.
+            // Per round, not per turn.
             val recording = recorder.start(viewModelScope)
             val liveJob = viewModelScope.launch {
                 recording.live.collect { trace ->
@@ -591,20 +498,9 @@ class ChatViewModel @Inject constructor(
                     }
                 }
             } finally {
-                // Both of these have to happen before the NonCancellable block,
-                // and neither may suspend: Stop cancels this coroutine, so a
-                // suspending stop here would never run and the sampler would
-                // outlive the run it was describing.
                 liveJob.cancel()
                 val trace = recording.stop()
 
-                // Persist whatever was generated, including on cancellation — a
-                // half-finished reply is still the user's, and it carries the
-                // parameters it was produced under. NonCancellable is what makes
-                // that true rather than aspirational: Stop cancels this
-                // coroutine, and without it the upsert below is itself a
-                // suspending call on a cancelled job, so the partial reply was
-                // thrown away every single time.
                 withContext(NonCancellable) {
                     _state.value = _state.value.copy(liveTrace = null)
                     if (content.isNotEmpty() || thinking.isNotEmpty() || toolCalls.isNotEmpty()) {
@@ -628,9 +524,6 @@ class ChatViewModel @Inject constructor(
                                 parentMessageId = lastParent,
                             ),
                         )
-                        // Keyed to the message, so a stopped generation keeps
-                        // its trace for the same reason it keeps its partial
-                        // reply: what it cost to get that far is still true.
                         db.predictionRuns().record(
                             kind = ai.ondevice.core.PredictionKind.CHAT,
                             artifactId = assistantId,
@@ -664,9 +557,7 @@ class ChatViewModel @Inject constructor(
                 return
             }
 
-            // Run them in order. Sequential rather than parallel on purpose: a
-            // later call's arguments routinely depend on an earlier result, and
-            // the model wrote them expecting to be read in order.
+            // Run them in order.
             for (call in toolCalls) {
                 _state.value = _state.value.copy(runningTool = call.name)
                 val result = registry.call(call.name, call.argumentsJson)
@@ -731,14 +622,7 @@ class ChatViewModel @Inject constructor(
 
     // — export and import (SPEC §13) —
 
-    /**
-     * Write this conversation out and hand the file back for sharing.
-     *
-     * Two formats because they answer different questions: the `.zip`
-     * round-trips losslessly, and the `.md` is what you paste into a bug
-     * report. Offering only the readable one would make the app the only place
-     * a conversation can fully exist, which §13 rules out.
-     */
+    /** Write this conversation out and hand the file back for sharing. */
     fun export(format: ExportFormat, onReady: (java.io.File) -> Unit) {
         val conversation = _state.value.conversation ?: run {
             _state.value = _state.value.copy(error = "There is no conversation to export.")
@@ -915,12 +799,7 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /**
-     * SPEC §4.4 — "anything you add is yours and is kept per model". The
-     * template's own stops come back from the engine every render, so the user's
-     * live in `stop`, the manifest's own key, and are merged for display rather
-     * than rewritten into the template.
-     */
+    /** SPEC §4.4 — "anything you add is yours and is kept per model". */
     fun addStopSequence(value: String) {
         val updated = _state.value.userStopSequences + value
         applyStopSequences(updated)
@@ -953,9 +832,6 @@ class ChatViewModel @Inject constructor(
     private suspend fun refreshMessages() {
         val conversation = _state.value.conversation ?: return
         val messages = db.messages().getFor(conversation.id)
-        // Loaded alongside the messages rather than observed: runs only ever
-        // appear as a consequence of a message being written, and this function
-        // already runs on every one of those.
         val traces = messages
             .filter { it.role == MessageRole.ASSISTANT }
             .mapNotNull { message ->
@@ -970,9 +846,7 @@ class ChatViewModel @Inject constructor(
     private fun MessageEntity.toEngineMessage(): EngineMessage {
         val meta = SparseParams.parse(toolCallsJson)
         return EngineMessage(
-            // The wire roles the chat templates know are user/assistant/system/
-            // tool. Our storage enum is finer-grained than that, so the mapping
-            // is explicit rather than a lowercased name that happens to match.
+            // The wire roles the chat templates know are user/assistant/system/ tool.
             role = when (role) {
                 MessageRole.USER -> "user"
                 MessageRole.SYSTEM -> "system"
@@ -981,10 +855,6 @@ class ChatViewModel @Inject constructor(
             },
             content = content,
             imagePaths = SparseParams.parse(imagePathsJson).stringList("images").orEmpty(),
-            // An assistant message that asked for tools has to go back to the
-            // template *as* tool calls, not as text — the template renders each
-            // family's syntax, and re-feeding our rendering of it would teach
-            // the model a format it does not use.
             toolCalls = if (role == MessageRole.ASSISTANT) decodeToolCalls(toolCallsJson) else emptyList(),
             toolCallId = meta.string("tool_call_id")?.takeIf { role == MessageRole.TOOL_RESULT },
             toolName = meta.string("tool_name")?.takeIf { role == MessageRole.TOOL_RESULT },
@@ -1011,10 +881,7 @@ class ChatViewModel @Inject constructor(
     private companion object {
         const val IMAGE_TOKEN_COST = 1456
 
-        /**
-         * A model stuck on a failing tool would otherwise call it forever. The
-         * cap is deliberately visible in the conversation when it is reached.
-         */
+        /** A model stuck on a failing tool would otherwise call it forever. */
         const val MAX_TOOL_ROUNDS = 5
     }
 }
@@ -1050,13 +917,7 @@ data class ChatState(
     /** What the engine says is resident — not what the conversation prefers. */
     val loadedModelId: String? = null,
 
-    /**
-     * The backend actually in use, from the engine. Null until something is
-     * loaded, which the toolbar must render as "not loaded" rather than
-     * guessing — it used to print the literal string "OpenCL" in that case,
-     * which meant the readout was wrong on any device that chose otherwise and
-     * on every device before the first load.
-     */
+    /** The backend actually in use, from the engine. */
     val loadedBackend: ai.ondevice.core.BackendId? = null,
     /** The global preference, for describing what *would* be used. */
     val backendPreference: String = ai.ondevice.core.BackendId.CPU.name,
@@ -1067,32 +928,14 @@ data class ChatState(
     /** What each assistant message cost, by message id. */
     val traces: Map<String, ai.ondevice.engine.ResourceTrace> = emptyMap(),
 ) {
-    /**
-     * The context the model is *loaded at*, which is the per-model `n_ctx`
-     * override when there is one — not the architecture's theoretical maximum.
-     * Showing 262 144 when the KV cache was sized for 8 192 would misreport how
-     * much room the conversation actually has.
-     */
+    /** The context the model is *loaded at*, which is the per-model `n_ctx` override when there is one — not the architecture's theoretical maximum. */
     val contextLimit: Int
         get() = SparseParams.parse(model?.paramOverridesJson).int("n_ctx")
             ?: model?.contextLength
             ?: 8192
     val presetName: String? get() = presets.firstOrNull { it.id == selectedPresetId }?.name
 
-    /**
-     * Whether an image can reach this model, which decides what the file picker
-     * offers.
-     *
-     * Both halves are asked, because they fail separately: the modality is what
-     * the repo said, and the projector is a companion download that can be
-     * skipped or interrupted. A vision model without its `mmproj` file cannot
-     * see any more than a text model can.
-     *
-     * The picker used to offer every image type unconditionally, so on a text
-     * model choosing a photo was several taps ending in a refusal. Refusing at
-     * the end is still right — a file manager can hand back anything — but it
-     * should not be the ordinary path.
-     */
+    /** Whether an image can reach this model, which decides what the file picker offers. */
     val acceptsImages: Boolean
         get() = model?.modality == Modality.VISION &&
             ai.ondevice.core.ComponentCheck.forChatImage(
@@ -1100,13 +943,7 @@ data class ChatState(
             ) == null
 }
 
-/**
- * A file the user attached but has not sent yet.
- *
- * It carries its own token cost because the composer states the price *before*
- * the send — SPEC §4.5: an image or a document that quietly consumes half the
- * context is the kind of surprise this app is supposed to prevent.
- */
+/** A file the user attached but has not sent yet. */
 data class PendingAttachment(
     val path: String,
     val name: String,
@@ -1126,13 +963,7 @@ data class StreamingMessage(
     val thinkingComplete: Boolean = false,
 )
 
-/**
- * The two shapes a conversation can leave the app in.
- *
- * [ARCHIVE] round-trips — every generation parameter, measured tok/s, backend
- * and attachment comes back on import. [MARKDOWN] does not, and is not meant
- * to: it is for reading.
- */
+/** The two shapes a conversation can leave the app in. */
 enum class ExportFormat(val label: String, val mime: String) {
     ARCHIVE("Archive (.zip)", "application/zip"),
     MARKDOWN("Markdown (.md)", "text/markdown"),

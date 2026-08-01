@@ -3,20 +3,7 @@ package ai.ondevice.ui.theme
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 
-/**
- * Nocturne colour tokens, transcribed verbatim from the `:root` block of
- * `Mobile AI model app design/_ds/nocturne-<id>/styles.css`.
- *
- * Every value here is a literal from that stylesheet. Nothing is interpolated,
- * re-derived or "close enough" — the readme's rule is that colour comes from the
- * ramps, so a screen that needs a tint reaches for a ramp step rather than
- * mixing its own.
- *
- * The ramps are generated in OKLCH on one shared lightness scale, so step N of
- * any role carries the same visual weight as step N of any other. On this dark
- * ground: 700–900 for tinted fills, hovers and subtle borders; 500 as the base;
- * 100–300 for text on those tints and for pressed states.
- */
+/** Nocturne colour tokens, transcribed verbatim from the `:root` block of `Mobile AI model app design/_ds/nocturne-<id>/styles.css`. */
 @Immutable
 object NocturneColors {
 
@@ -25,17 +12,10 @@ object NocturneColors {
     val Surface = Color(0xFF232532)
     val Text = Color(0xFFE9E9ED)
 
-    /**
-     * `--color-accent`. The product's own blurple: OKLCH hue 289.2 at L 0.660,
-     * C 0.125. Reads as an accent against the desaturated ramps rather than as
-     * another neutral.
-     */
+    /** `--color-accent`. */
     val Accent = Color(0xFF9184D9)
 
-    /**
-     * `--color-accent-2`. A machine-derived stand-in, not a second accent —
-     * Nocturne is a mono scheme. Kept so both sets resolve; treat as one role.
-     */
+    /** `--color-accent-2`. */
     val Accent2 = Color(0xFFA7A1DB)
 
     /** `--color-divider`: `color-mix(in srgb, #e9e9ed 16%, transparent)`. */
@@ -74,11 +54,7 @@ object NocturneColors {
     val Accent2800 = Color(0xFF423E5D)
     val Accent2900 = Color(0xFF2B293A)
 
-    /**
-     * Deck section-divider ground — saturation as presence. Deck-scale fills
-     * only, *not* interface colours. The canvas uses [SectionGlow] inside the
-     * TAESD preview and gallery gradients; nothing else should touch these.
-     */
+    /** Deck section-divider ground — saturation as presence. */
     val Section = Color(0xFF262A60)
     val SectionGlow = Color(0xFF353B80)
     val SectionGhost = Color(0xFF4C5397)
@@ -111,10 +87,7 @@ object NocturneColors {
     /** `.table tbody tr:hover` tint — text at 4%. */
     val TableRowHover = Text.copy(alpha = 0.04f)
 
-    // No `.dialog-backdrop` token. The canvas specifies neutral-900 at 50%, and
-    // on this ground that is a *lightening* — neutral-900 is #292B31 and Bg is
-    // #161826, so the ramp does not go dark enough to dim anything. NDialog
-    // shows the card on elevation and a ring instead, with no wash at all.
+    // No `.dialog-backdrop` token.
 
     /** Disabled controls drop to 45% opacity. */
     const val DisabledAlpha = 0.45f

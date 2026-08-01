@@ -41,16 +41,6 @@ import ai.ondevice.ui.theme.Radius
 import ai.ondevice.ui.theme.ring
 import ai.ondevice.ui.vm.ToolsViewModel
 
-/**
- * **Tools and MCP servers.**
- *
- * The one screen where this app hands something outward, so it is the one
- * screen that argues with itself in front of the user. Tool use is off until
- * asked for; the built-in set is separated from anything remote because the
- * built-ins touch nothing but this device; and an MCP server has to answer
- * before it can be added, so a URL that was never reachable cannot sit here
- * looking installed and fail mid-conversation instead.
- */
 @Composable
 fun ToolsScreen(
     onBack: () -> Unit,
@@ -216,16 +206,7 @@ fun ToolsScreen(
     }
 }
 
-/**
- * One server: paused or not, and — when opened — every tool it offers with its
- * own switch.
- *
- * Pause and remove are deliberately separate. A paused row keeps its URL, its
- * auth header and the tool list it last reported, so turning it back on costs
- * nothing and needs no network; removing it throws all of that away. Presenting
- * one control for both would make the cheap action carry the expensive one's
- * risk.
- */
+/** One server: paused or not, and — when opened — every tool it offers with its own switch. */
 @Composable
 private fun ServerCard(
     server: McpServerEntity,
@@ -263,9 +244,7 @@ private fun ServerCard(
             NSwitch(checked = server.enabled, onCheckedChange = onPause)
         }
 
-        // The count is of what is *offered*, and says so when that is fewer
-        // than the server has — a switched-off tool is the kind of thing you
-        // forget you did.
+        // The count is of what is *offered*, and says so when that is fewer than the server has — a switched-off tool is the kind of thing you forget you did.
         Row(
             Modifier
                 .fillMaxWidth()

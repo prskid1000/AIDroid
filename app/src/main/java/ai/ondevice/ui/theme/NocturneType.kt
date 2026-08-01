@@ -10,11 +10,6 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import ai.ondevice.R
 
-/**
- * Inter for headings over Inter for body — `--font-heading` / `--font-body` are
- * the same family in this system; hierarchy is size and space, never weight
- * past 500.
- */
 val Inter = FontFamily(
     Font(R.font.inter_regular, FontWeight.Normal),
     Font(R.font.inter_medium, FontWeight.Medium),
@@ -22,23 +17,12 @@ val Inter = FontFamily(
     Font(R.font.inter_bold, FontWeight.Bold),
 )
 
-/**
- * The canvas uses `ui-monospace,Menlo,monospace` for every technical value:
- * model IDs, quant names, byte counts, token counts, the fit arithmetic, the
- * prompt inspector. Android's system mono is the equivalent of `ui-monospace`.
- */
 val Mono = FontFamily.Monospace
 
 /** `--font-heading-weight: 500`. Never bolder — the readme is explicit. */
 val HeadingWeight = FontWeight.Medium
 
-/**
- * The type scale from `styles.css`. `h1`…`h6` plus the body defaults, and the
- * handful of sizes the canvas uses repeatedly at screen scale.
- *
- * Headings: `line-height: 1.12`, `letter-spacing: -0.015em`.
- * Body: `font-size: 15px`, `line-height: 1.55`, `font-weight: 400`.
- */
+/** The type scale from `styles.css`. */
 @Immutable
 object NocturneType {
 
@@ -117,17 +101,10 @@ object NocturneType {
     /** The recurring muted footnote under a control: 10.5px. */
     val Help = TextStyle(fontFamily = Inter, fontWeight = FontWeight.Normal, fontSize = 10.5.sp, lineHeight = 14.sp)
 
-    /**
-     * `.card-kicker` — 10px, `letter-spacing: 0.1em`, uppercase, accent.
-     * The canvas also uses this shape as a standalone section heading in mono;
-     * see [SectionKicker].
-     */
+    /** `.card-kicker` — 10px, `letter-spacing: 0.1em`, uppercase, accent. */
     val Kicker = TextStyle(fontFamily = Inter, fontWeight = FontWeight.Normal, fontSize = 10.sp, lineHeight = 13.sp, letterSpacing = 0.1.em)
 
-    /**
-     * The mono section rule that separates every group on every screen:
-     * `font:600 10px ui-monospace;letter-spacing:.1em;color:neutral-500`.
-     */
+    /** The mono section rule that separates every group on every screen: `font:600 10px ui-monospace;letter-spacing:.1em;color:neutral-500`. */
     val SectionKicker = TextStyle(fontFamily = Mono, fontWeight = FontWeight.SemiBold, fontSize = 10.sp, lineHeight = 13.sp, letterSpacing = 0.1.em)
 
     // — mono variants, for every technical value on screen —

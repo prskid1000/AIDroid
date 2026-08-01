@@ -58,20 +58,6 @@ object AppModule {
         Room.databaseBuilder(context, OnDeviceDatabase::class.java, OnDeviceDatabase.NAME)
             .addMigrations(*OnDeviceDatabase.MIGRATIONS)
             .apply {
-                // Recreating a database is the right answer on a development
-                // device, where the only ones that exist came from a schema
-                // shape that no longer does and get wiped whenever the model
-                // set changes anyway.
-                //
-                // It is never the right answer for someone's conversations and
-                // per-model overrides. Dropping their data to add a column is
-                // not a trade this app gets to make on their behalf, and the
-                // failure mode of leaving the fallback in is silent — the app
-                // starts, the database is empty, and nothing reports why. So
-                // the fallback is scoped to debug builds: a release build with
-                // a version bump and no migration refuses to open the database
-                // and says so, which is a bug caught in testing rather than a
-                // support ticket from someone who lost their chat history.
                 if (BuildConfig.DEBUG) fallbackToDestructiveMigration()
             }
             .build()
@@ -124,9 +110,7 @@ object AppModule {
         @ApplicationScope scope: CoroutineScope,
     ) = Downloader(context, client, db, prefs, tokens, scope)
 
-    // One answer to "which device", shared by all three runtimes. The setting
-    // is global, so a per-engine copy of the resolution is how two of the three
-    // came to ignore it.
+    // One answer to "which device", shared by all three runtimes.
     @Provides
     @Singleton
     fun provideComputeDevice(prefs: AppPrefs, registry: RuntimeRegistry) =
@@ -189,8 +173,7 @@ object AppModule {
         kokoro: ai.ondevice.speech.KokoroEngine,
         omniVoice: ai.ondevice.speech.OmniVoiceEngine,
         capabilities: DeviceCapabilities,
-        computeDevice: ai.ondevice.engine.ComputeDevice,
-    ) = ai.ondevice.speech.SpeechSynthesizer(context, kokoro, omniVoice, capabilities, computeDevice)
+    ) = ai.ondevice.speech.SpeechSynthesizer(context, kokoro, omniVoice, capabilities)
 
     @Provides
     @Singleton

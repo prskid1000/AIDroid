@@ -34,14 +34,7 @@ import java.util.UUID
 import javax.inject.Inject
 import kotlin.random.Random
 
-/**
- * S11/S12/S13 — image generation, the mask editor and the gallery.
- *
- * SPEC §5.4's obligations that live here: a live TAESD preview rather than a
- * spinner, cancellation that actually frees memory, the used seed surfaced for
- * one-tap reuse, and the full parameter set stored with the artifact so any
- * image is reproducible.
- */
+/** S11/S12/S13 — image generation, the mask editor and the gallery. */
 @HiltViewModel
 class ImageViewModel @Inject constructor(
     private val db: OnDeviceDatabase,
@@ -61,10 +54,6 @@ class ImageViewModel @Inject constructor(
             // "No runtime" and "no model" are different problems with different
             // fixes, and SPEC §1.2 says a refusal has to name which one it is.
             val runtimeInstalled = db.runtimes().get(RUNTIME_ID)?.state != RuntimeState.NOT_INSTALLED
-            // Every query resolved before the write, for the reason spelled out
-            // in VoiceViewModel's init: a suspending call inside `copy(...)`
-            // writes back a snapshot taken before it suspended, and the live
-            // collector below is racing this exact block.
             val model = baseModelsOnly(
                 db.models().observeInstalledByModality(Modality.DIFFUSION).first(),
             ).firstOrNull()
@@ -92,27 +81,11 @@ class ImageViewModel @Inject constructor(
         }
     }
 
-    /**
-     * The diffusion entries that can be the *base* model, which is not the same
-     * set as the diffusion entries.
-     *
-     * Modality.DIFFUSION covers everything that belongs to an image run — the
-     * checkpoint and every add-on hanging off it. The picker read that set
-     * straight, so a ControlNet, an IP-Adapter, a LoRA and an ESRGAN upscaler
-     * all appeared as things you could generate *with*, and since the selection
-     * falls back to `firstOrNull()`, whichever the database returned first
-     * became the base model — a ControlNet loaded as a checkpoint.
-     *
-     * The line is drawn by the role the user gave the model on the Add screen:
-     * an add-on has one, a checkpoint does not.
-     */
+    /** The diffusion entries that can be the *base* model, which is not the same set as the diffusion entries. */
     private fun baseModelsOnly(models: List<ModelEntity>): List<ModelEntity> =
         models.filter { it.attachmentRole == null }
 
-    /**
-     * With more than one diffusion model installed, which one runs is the
-     * user's choice — not whichever the database happened to return first.
-     */
+    /** With more than one diffusion model installed, which one runs is the user's choice — not whichever the database happened to return first. */
     fun selectModel(model: ModelEntity) {
         if (_state.value.model?.id == model.id) return
         // The loaded context belongs to the old model; keep them in step.
@@ -134,11 +107,6 @@ class ImageViewModel @Inject constructor(
     fun setStrength(value: Float) = update { copy(strength = value) }
     fun setVaeTiling(value: Boolean) = update { copy(vaeTiling = value) }
 
-    /**
-     * img2img and inpaint need a source image, and until one is chosen there is
-     * nothing for `strength` to act on — so the picker is part of the form, not
-     * a hidden prerequisite discovered at generate time.
-     */
     fun setSourceImage(uri: String?) = update { copy(sourceImageUri = uri) }
 
     fun setControlImage(uri: String?) = update { copy(controlImageUri = uri) }
@@ -159,12 +127,7 @@ class ImageViewModel @Inject constructor(
         copy(extendLeft = pixels, extendTop = pixels, extendRight = pixels, extendBottom = pixels)
     }
 
-    /**
-     * Pull back anything the Advanced screen changed. Both screens edit the same
-     * diffusion model row, so this is the round trip rather than a second copy
-     * of the truth — the Image screen simply mirrors the handful of parameters
-     * it puts on the surface.
-     */
+    /** Pull back anything the Advanced screen changed. */
     fun refreshFromOverrides() {
         viewModelScope.launch {
             val model = db.models().observeInstalledByModality(Modality.DIFFUSION).first().firstOrNull()
@@ -192,10 +155,7 @@ class ImageViewModel @Inject constructor(
         checkEnvelope()
     }
 
-    /**
-     * SPEC §5.4 — warn when width × height × batch exceeds a measured-safe
-     * envelope, and suggest `vae_tiling` rather than letting it OOM.
-     */
+    /** SPEC §5.4 — warn when width × height × batch exceeds a measured-safe envelope, and suggest `vae_tiling` rather than letting it OOM. */
     private fun checkEnvelope() {
         val s = _state.value
         val pixels = s.width.toLong() * s.height * s.batchCount
@@ -216,10 +176,6 @@ class ImageViewModel @Inject constructor(
 
         generationJob = viewModelScope.launch {
             val started = System.currentTimeMillis()
-            // Started before the load, not after it: on a cold model most of the
-            // memory a diffusion run ever holds is claimed while the checkpoint
-            // is being read, and a trace that begins at the first sampler step
-            // would miss the peak entirely.
             val recording = recorder.start(viewModelScope)
             val liveJob = viewModelScope.launch {
                 recording.live.collect { trace ->
@@ -260,11 +216,7 @@ class ImageViewModel @Inject constructor(
                 ).collect { event ->
                     when (event) {
                         is ai.ondevice.engine.DiffusionEvent.Progress -> {
-                            // `steps` is the user's setting and must never be
-                            // written from here. sd.cpp counts its own internal
-                            // work — hundreds of graph nodes, not sampler steps
-                            // — and feeding that back turned the Steps slider
-                            // into "686" and destroyed the value the user set.
+                            // `steps` is the user's setting and must never be written from here.
                             val remaining = (event.steps - event.step).coerceAtLeast(0)
                             _state.value = _state.value.copy(
                                 step = event.step,
@@ -308,9 +260,7 @@ class ImageViewModel @Inject constructor(
                                 kind = ai.ondevice.core.PredictionKind.IMAGE,
                                 artifactId = image.id,
                                 modelId = model.id,
-                                // sd.cpp has no backend selection of its own; the
-                                // runtime reports what it was built with, and
-                                // claiming one here would be a guess.
+                                // sd.cpp has no backend selection of its own; the runtime reports what it was built with, and claiming one here would be a guess.
                                 backend = null,
                                 startedAt = started,
                                 trace = trace,
@@ -339,10 +289,7 @@ class ImageViewModel @Inject constructor(
                 // flow — otherwise sd.cpp keeps denoising and keeps its buffers.
                 diffusion.cancel()
                 liveJob.cancel()
-                // Idempotent: a completed run already stopped it, and a
-                // cancelled one never reached that point. Nothing is recorded
-                // here because a cancelled run produced no image, and a trace
-                // with no artifact has nothing to hang on.
+                // Idempotent: a completed run already stopped it, and a cancelled one never reached that point.
                 recording.stop()
                 _state.value = _state.value.copy(
                     generating = false,
@@ -360,14 +307,7 @@ class ImageViewModel @Inject constructor(
         generationJob = null
     }
 
-    /**
-     * Clear the composition and start again.
-     *
-     * The prompts, the attached images and the last result — not the model, the
-     * size or the sampler. Those are how this device is set up rather than what
-     * this picture is, and resetting them would make the button a factory reset
-     * dressed as a new page. The previous image is already in the library.
-     */
+    /** Clear the composition and start again. */
     fun reset() {
         cancel()
         update {
@@ -390,13 +330,7 @@ class ImageViewModel @Inject constructor(
 
     // — attachments (SPEC §5, generically) —
 
-    /**
-     * Everything installed that can hang off a diffusion run.
-     *
-     * Filed by the role the user gave it, never by a list of known model names,
-     * so a LoRA for an architecture released tomorrow shows up without an app
-     * update. Whether it actually *loads* is the runtime's answer, not ours.
-     */
+    /** Everything installed that can hang off a diffusion run. */
     private suspend fun refreshAttachmentLibrary() {
         val installed = db.models().getInstalled()
         val available = installed.mapNotNull { entity ->
@@ -428,15 +362,7 @@ class ImageViewModel @Inject constructor(
 
     fun setMaskPath(path: String?) = update { copy(maskPath = path) }
 
-    /**
-     * Upscale the picture just produced.
-     *
-     * A deliberate action on a finished image rather than a step in every run:
-     * sd.cpp keeps the upscaler in its own context, it is slow, and ×4 on a
-     * 512 ² image is four megapixels of output. The result is a new gallery
-     * entry, not a replacement — the original is what the recorded seed and
-     * parameters reproduce, and overwriting it would make the pair inconsistent.
-     */
+    /** Upscale the picture just produced. */
     fun upscale(factor: Int = 0) {
         val source = _state.value.lastImage ?: return
         val model = _state.value.model
@@ -501,10 +427,7 @@ class ImageViewModel @Inject constructor(
                     },
                 )
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                // Cancelling is not failing. Caught separately and rethrown
-                // because `Throwable` below would otherwise turn every Stop
-                // into an "Upscaling failed" banner and break the coroutine's
-                // cancellation contract on the way.
+                // Cancelling is not failing.
                 throw cancelled
             } catch (failure: Throwable) {
                 _state.value = _state.value.copy(error = failure.message ?: "Upscaling failed.")
@@ -569,24 +492,10 @@ class ImageViewModel @Inject constructor(
 enum class ImageAction { INSTALL_RUNTIME, ADD_MODEL, PICK_SOURCE, GENERATE, CANCEL }
 
 enum class ImageMode(val label: String) {
-    /**
-     * Prompt in, picture out — with an *optional* source image.
-     *
-     * Text-only and image+text used to be separate tabs, which made the user
-     * declare up front something the app can see for itself: attaching a source
-     * is what makes it img2img, and the denoise dial appears exactly when there
-     * is something to denoise. One tab, one fewer decision.
-     */
+    /** Prompt in, picture out — with an *optional* source image. */
     GENERATE("Generate"),
     INPAINT("Inpaint"),
 
-    /**
-     * Outpainting is inpainting with a mask the app derives instead of one the
-     * user paints: the canvas is enlarged, the original is composited into it,
-     * and the *new* border becomes the region to fill. Same sd.cpp code path,
-     * same denoise dial — which is why it belongs here as a mode rather than a
-     * separate screen.
-     */
     OUTPAINT("Extend"),
 }
 
@@ -604,17 +513,9 @@ data class ImageState(
     val seed: Long = 812934177,
     val usedSeed: Long? = null,
     val strength: Float = 0.75f,
-    /**
-     * The one init image. sd.cpp takes exactly one — everything else in the
-     * pipeline is derived from it, so this is a slot, not a list.
-     */
+    /** The one init image. */
     val sourceImageUri: String? = null,
-    /**
-     * ControlNet's structural reference: a pose, depth or edge map that steers
-     * composition without contributing pixels. A genuinely *different* input
-     * from the init image, which is why it is a second slot rather than a
-     * second entry in one.
-     */
+    /** ControlNet's structural reference: a pose, depth or edge map that steers composition without contributing pixels. */
     val controlImageUri: String? = null,
     val controlStrength: Float = 0.9f,
     /** Outpaint margins in pixels, per edge. */
@@ -654,13 +555,7 @@ data class ImageState(
     val attachments: List<ai.ondevice.core.ModelAttachment>
         get() = availableAttachments.filter { it.enabled }
 
-    /**
-     * Combinations that will not work, said before Generate rather than after.
-     *
-     * An IP-Adapter with no CLIP vision encoder is the case that made this
-     * necessary: sd.cpp accepts the load, builds a vision embedder with nothing
-     * behind it, and fails somewhere that reads as a corrupt adapter.
-     */
+    /** Combinations that will not work, said before Generate rather than after. */
     val missingComponents: List<ai.ondevice.core.MissingComponent>
         get() = ai.ondevice.core.ComponentCheck.forDiffusion(availableAttachments)
     val progress: Float
@@ -707,11 +602,7 @@ data class ImageState(
         }
 }
 
-// GalleryViewModel lived here. It backed a screen that was a grid of images
-// plus a detail pane for whichever was selected — which is the library's images
-// section plus LibraryDetailScreen, written twice with two parameter tables to
-// keep in agreement. The library now pushes straight to the detail screen and
-// the gallery is gone.
+// GalleryViewModel lived here.
 
 /** S14 — live and file transcription, plus the Kokoro read-aloud panel. */
 @HiltViewModel
@@ -740,34 +631,14 @@ class VoiceViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             // Read first, write second — and never `copy(x = <a suspending call>)`.
-            //
-            // That line looks atomic and is not. Kotlin evaluates the receiver
-            // before the argument, so `_state.value` is snapshotted *before* the
-            // query suspends and written back after it resumes, silently
-            // discarding everything written in between. This is what hid an
-            // installed whisper model from the Transcribe tab for weeks: the
-            // collector below put the model list in, and ten milliseconds later
-            // this line put the empty one back.
             val transcripts = db.transcripts().observeAll().first()
             _state.value = _state.value.copy(transcripts = transcripts)
         }
 
         // Both model lists are collected, not sampled once with `first()`.
-        //
-        // A download finishing while this screen is open used to leave the
-        // screen certain the model was absent — OmniVoice sat fully installed,
-        // listed on the Models screen, 759 MB on disk, while Speak said "not
-        // installed" and named the repo to fetch. The only way out was to kill
-        // the app, which is not a thing a user should have to discover. The
-        // Image and Chat pickers were fixed for this exact reason and this one
-        // was missed.
         viewModelScope.launch {
             db.models().observeInstalledByModality(Modality.SPEECH_TO_TEXT)
                 .catch { failure ->
-                    // A Room flow that throws takes its collector with it and
-                    // says nothing: the list simply stays empty for the life of
-                    // the process, which reads on screen as "no model
-                    // installed" for a model that is installed.
                     android.util.Log.e(TAG, "speech model list failed", failure)
                 }
                 .collect { models ->
@@ -783,9 +654,6 @@ class VoiceViewModel @Inject constructor(
 
         viewModelScope.launch {
             db.models().observeInstalledByModality(Modality.TEXT_TO_SPEECH).collect {
-                // loadVoices re-reads the list and rebuilds the engine/voice
-                // membership from what each engine says about the files it can
-                // see, so it is the whole refresh rather than half of one.
                 loadVoices(preferred = _state.value.ttsModel)
             }
         }
@@ -793,23 +661,8 @@ class VoiceViewModel @Inject constructor(
 
     // ——— SPEAK (SPEC §7) ———
 
-    /**
-     * The voice list is read from what is *installed*, not declared.
-     *
-     * Kokoro's 54 voices are shown whether or not its runtime is present,
-     * because knowing what you would get is half the reason to install it — but
-     * an unavailable voice is marked and cannot be selected, rather than being
-     * silently swapped for a system voice at speak time.
-     */
-    /**
-     * Which installed voice model the Speak tab uses.
-     *
-     * Needed once there is more than one, and there can easily be two: Kokoro
-     * and OmniVoice are both TEXT_TO_SPEECH, and nothing stops two builds of
-     * either. Until now the engine was inferred by sniffing directory contents
-     * and the *model* was never selectable at all — so with both installed the
-     * app decided for you and gave you no way to see or change which.
-     */
+    /** The voice list is read from what is *installed*, not declared. */
+    /** Which installed voice model the Speak tab uses. */
     fun selectTtsModel(model: ModelEntity) {
         if (_state.value.ttsModel?.id == model.id) return
         if (_state.value.speaking) stopSpeaking()
@@ -821,14 +674,6 @@ class VoiceViewModel @Inject constructor(
     }
 
     private suspend fun loadVoices(preferred: ModelEntity? = null) {
-        // Point the synthesiser at the installed weights *before* asking what
-        // it can do — `kokoroReady` is a statement about this device right now,
-        // not a capability the build declares.
-        //
-        // Both neural engines are text-to-speech models, so the library can hold
-        // either or both. Each directory is offered to each engine and the
-        // engine decides: Kokoro wants a graph plus voice packs, OmniVoice wants
-        // its four graphs and a tokenizer, and neither is identified by name.
         val ttsModels = db.models().observeInstalledByModality(Modality.TEXT_TO_SPEECH).first()
         // A chosen model is offered to the engines first, so an explicit choice
         // beats the scan order when two are installed.
@@ -840,9 +685,7 @@ class VoiceViewModel @Inject constructor(
         synthesizer.useKokoroModel(directories.firstOrNull { synthesizer.kokoroLooksInstalled(it) })
         synthesizer.useOmniVoiceModel(directories.firstOrNull { synthesizer.omniVoiceLooksInstalled(it) })
 
-        // Which engine each installed model belongs to, so the picker can offer
-        // an engine only the models it can actually load. Without this the
-        // OmniVoice tab listed — and preselected — Kokoro.
+        // Which engine each installed model belongs to, so the picker can offer an engine only the models it can actually load.
         val providers = ordered.mapNotNull { model ->
             val directory = java.io.File(model.localPath)
                 .let { if (it.isDirectory) it else it.parentFile }
@@ -870,15 +713,7 @@ class VoiceViewModel @Inject constructor(
         )
     }
 
-    /**
-     * Switch engine explicitly.
-     *
-     * Kokoro and OmniVoice are not interchangeable and the app never picks
-     * between them on the user's behalf: one is fast and fixed-voice, the other
-     * is slow and can do things the first cannot. Choosing moves the selected
-     * voice to that engine's first usable one, so the two controls never
-     * disagree about which engine is about to speak.
-     */
+    /** Switch engine explicitly. */
     fun selectProvider(provider: ai.ondevice.speech.SynthProvider) {
         val first = _state.value.voices.firstOrNull { it.provider == provider && it.available }
         if (first == null) {
@@ -925,16 +760,6 @@ class VoiceViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Pull back what the Advanced screen changed — the same round trip the
-     * Image screen makes, and for the same reason: both screens edit one row,
-     * so the surfaced handful has to reflect it rather than being a second copy
-     * of the truth that silently disagrees.
-     *
-     * Without this, every Kokoro parameter below Basic was inert: the Advanced
-     * screen wrote `split_pattern` and `trim_silence` into the model row and
-     * nothing ever read them back out.
-     */
     fun refreshFromOverrides() {
         viewModelScope.launch {
             val model = db.models().observeInstalledByModality(Modality.TEXT_TO_SPEECH).first().firstOrNull()
@@ -950,9 +775,7 @@ class VoiceViewModel @Inject constructor(
                 splitPattern = tts.string("split_pattern") ?: _state.value.splitPattern,
                 trimSilence = tts.bool("trim_silence") ?: _state.value.trimSilence,
                 languageCode = tts.string("lang_code") ?: _state.value.languageCode,
-                // OmniVoice's own three. Written by its parameter set and read
-                // back here, which is the same contract the comment above this
-                // function describes for Kokoro's.
+                // OmniVoice's own three.
                 voiceDesign = tts.string("voice_design") ?: _state.value.voiceDesign,
                 omniSteps = tts.int("steps") ?: _state.value.omniSteps,
                 omniFrames = tts.int("frames") ?: _state.value.omniFrames,
@@ -964,13 +787,7 @@ class VoiceViewModel @Inject constructor(
                 omniClassTemperature =
                     tts.float("class_temperature") ?: _state.value.omniClassTemperature,
                 omniSeed = tts.int("seed") ?: _state.value.omniSeed,
-                // The capture readout used to print these from hardcoded
-                // defaults, so setting them in Advanced changed neither the
-                // capture nor the line claiming to describe it.
             )
-            // A blend written as "af_heart:bm_george:0.4" in Advanced and one
-            // set with the Blend control are the same setting, so they share
-            // storage rather than each having their own.
             tts.string("voice_blend")?.let(::applyBlendSpec)
         }
     }
@@ -989,14 +806,7 @@ class VoiceViewModel @Inject constructor(
         )
     }
 
-    /**
-     * Which speech model transcribes.
-     *
-     * There was no way to say: the screen took whichever row the database
-     * returned first, so installing whisper base alongside small gave you one of
-     * them and no means of preferring the other. Switching drops the loaded
-     * context, because it belongs to the previous model.
-     */
+    /** Which speech model transcribes. */
     fun selectSttModel(model: ModelEntity) {
         if (_state.value.sttModel?.id == model.id) return
         if (_state.value.recording) stopRecording()
@@ -1023,9 +833,6 @@ class VoiceViewModel @Inject constructor(
     fun selectVoice(id: String) {
         val voice = _state.value.voices.firstOrNull { it.id == id } ?: return
         if (!voice.available) {
-            // Two different reasons, and conflating them sends the user to the
-            // wrong screen: a missing model is fixable by downloading one, a
-            // missing phonemiser is not fixable at all in this build.
             _state.value = _state.value.copy(
                 speakError = when {
                     !ai.ondevice.speech.KokoroVoices.hasPhonemiser(voice.id) ->
@@ -1042,20 +849,7 @@ class VoiceViewModel @Inject constructor(
         _state.value = _state.value.copy(voice = id, speakError = null)
     }
 
-    /**
-     * Read the script aloud — by rendering it, storing it, and playing the file.
-     *
-     * It used to stream straight to the speaker and file nothing, which made
-     * Speak the only part of this app that produced no artifact: an image is
-     * always written, a transcript is always written, and a take you had just
-     * waited minutes for existed until the audio stopped. That asymmetry is why
-     * this screen carried two buttons where Image and Transcribe carry one.
-     *
-     * Nothing is given up by rendering first. Both neural engines synthesise
-     * the entire passage before a sample is played, so there was never any
-     * streaming to lose — only the system engine differs, and what it loses is
-     * word-level highlighting, which no neural voice ever reported anyway.
-     */
+    /** Read the script aloud — by rendering it, storing it, and playing the file. */
     fun speak() {
         speakJob?.cancel()
         speakJob = viewModelScope.launch { render(autoPlay = true) }
@@ -1076,10 +870,7 @@ class VoiceViewModel @Inject constructor(
                 .replace(Regex("[^a-z0-9]+"), "-")
                 .trim('-')
                 .ifBlank { "read-aloud" }
-            // Uniquified. The name came from the script's source, so rendering
-            // the same passage twice — at a different speed, or in a different
-            // voice, which is the entire reason to render it twice — silently
-            // overwrote the first take.
+            // Uniquified.
             val destination = java.io.File(
                 storage.speechDir(),
                 "$stem-${System.currentTimeMillis()}.wav",
@@ -1125,9 +916,7 @@ class VoiceViewModel @Inject constructor(
                     trace = trace,
                     stats = ai.ondevice.core.SparseParams.of(
                         "audio_millis" to (info?.millis ?: 0L),
-                        // Audio seconds produced per wall second — the same
-                        // honest speed figure transcription reports, so the two
-                        // halves of the voice screen can be compared.
+                        // Audio seconds produced per wall second — the same honest speed figure transcription reports, so the two halves of the voice screen can be compared.
                         "realtime_factor" to
                             if (trace.elapsedMillis > 0) {
                                 (info?.millis ?: 0L).toFloat() / trace.elapsedMillis
@@ -1141,9 +930,7 @@ class VoiceViewModel @Inject constructor(
                 rendering = false,
                 speakError = result.exceptionOrNull()?.message,
                 lastAudioPath = result.getOrNull()?.absolutePath,
-                // Only a Speak plays itself. A render triggered any other way
-                // leaves the player parked, because audio starting on its own
-                // is startling when you did not ask to hear anything.
+                // Only a Speak plays itself.
                 autoPlay = autoPlay && result.isSuccess,
                 liveTrace = null,
                 lastTrace = trace,
@@ -1151,13 +938,7 @@ class VoiceViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Stop, whichever half is running.
-     *
-     * Cancelling the job is what actually stops a render — the synthesiser is
-     * inside a suspending call — and the playback is the player's own, so this
-     * only has to tell the engine to be quiet.
-     */
+    /** Stop, whichever half is running. */
     fun stopSpeaking() {
         speakJob?.cancel()
         speakJob = null
@@ -1170,14 +951,7 @@ class VoiceViewModel @Inject constructor(
         if (_state.value.autoPlay) _state.value = _state.value.copy(autoPlay = false)
     }
 
-    /**
-     * Clear the work in progress, keep the setup.
-     *
-     * The script, the reference clip and the last transcript go; the engine, the
-     * voice and the dials stay, for the same reason the Image screen's reset
-     * leaves the model alone — they are how this device is configured, not what
-     * this take is. Anything already rendered is in the library.
-     */
+    /** Clear the work in progress, keep the setup. */
     fun reset() {
         stopSpeaking()
         if (_state.value.recording) stopRecording()
@@ -1204,12 +978,7 @@ class VoiceViewModel @Inject constructor(
         )
     }
 
-    /**
-     * The request carries the *provider the user chose*, so the synthesiser
-     * routes on intent rather than on what happens to be loadable. Picking a
-     * Kokoro voice and hearing the system engine would be the substitution the
-     * whole voice screen is built to avoid.
-     */
+    /** The request carries the *provider the user chose*, so the synthesiser routes on intent rather than on what happens to be loadable. */
     private fun currentRequest(text: String): ai.ondevice.speech.SpeechRequest {
         val voice = _state.value.voices.firstOrNull { it.id == _state.value.voice }
         return ai.ondevice.speech.SpeechRequest(
@@ -1244,20 +1013,11 @@ class VoiceViewModel @Inject constructor(
         )
     }
 
-    /**
-     * Take a recording as the voice to copy.
-     *
-     * Decoded straight away rather than kept as a path: a content URI may not
-     * still be readable when Speak is pressed, and decoding now is what lets the
-     * screen say how long the clip is before anyone commits a minute of compute
-     * to it.
-     */
+    /** Take a recording as the voice to copy. */
     fun useReferenceClip(uri: android.net.Uri) {
         viewModelScope.launch {
             _state.value = _state.value.copy(speakError = null)
-            // Copied in the same way an attachment is: a content URI granted to
-            // the picker is not guaranteed to still be readable by the time
-            // Speak is pressed.
+            // Copied in the same way an attachment is: a content URI granted to the picker is not guaranteed to still be readable by the time Speak is pressed.
             val attachment = attachments.copyIn(uri)
             if (attachment == null) {
                 _state.value = _state.value.copy(speakError = "That recording could not be read.")
@@ -1275,9 +1035,7 @@ class VoiceViewModel @Inject constructor(
             val seconds = samples.size.toFloat() / REFERENCE_SAMPLE_RATE
             _state.value = _state.value.copy(
                 referenceSamples = samples,
-                // The copied file, kept alongside the samples so the clip can be
-                // heard. Judging whether a reference is clean enough to copy by
-                // reading its filename is not judging it at all.
+                // The copied file, kept alongside the samples so the clip can be heard.
                 referencePath = attachment.path,
                 referenceName = attachment.displayName,
                 referenceSeconds = seconds,
@@ -1287,16 +1045,7 @@ class VoiceViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Fill in what the reference says, using the speech model already installed.
-     *
-     * Upstream transcribes the clip when no transcript is given, for the reason
-     * the engine's own comment gives: cloning is continuation, so the model
-     * needs the reference's words as well as its sound. Doing it here means the
-     * user usually does not have to type them — but it is only a first guess,
-     * and the field stays editable because whisper will get names and unusual
-     * words wrong and those are exactly the words worth fixing.
-     */
+    /** Fill in what the reference says, using the speech model already installed. */
     private suspend fun transcribeReference(samples: FloatArray) {
         val speech = db.models().observeInstalledByModality(Modality.SPEECH_TO_TEXT).first()
             .firstOrNull() ?: return
@@ -1339,16 +1088,7 @@ class VoiceViewModel @Inject constructor(
         _state.value = _state.value.copy(mode = mode, error = null, errorHint = null)
     }
 
-    /**
-     * SPEC §6.2 — record, then transcribe.
-     *
-     * Recording decodes nothing. It used to re-transcribe a ten-second trailing
-     * window every three seconds to show partial text, which cost about half of
-     * eight cores for the length of the recording — measured in a silent room —
-     * and every word it showed was provisional, because whisper has no
-     * incremental decode. [stopRecording] runs the take through [process],
-     * which is one decode of each word and gives real segment boundaries.
-     */
+    /** SPEC §6.2 — record, then transcribe. */
     fun startRecording() {
         val model = _state.value.sttModel
         if (model == null) {
@@ -1377,14 +1117,7 @@ class VoiceViewModel @Inject constructor(
             "recording-${System.currentTimeMillis()}.wav",
         )
 
-        // No resource trace over the recording. It measured a capture loop that
-        // now runs no model, so the graph was a flat line and the row was
-        // discarded at Stop either way. `process` traces the decode, which is
-        // where the work moved to.
-        // No model is loaded here any more. Capture needs none — it writes a WAV
-        // and reports input levels — and loading whisper at Record put a
-        // multi-second pause between the button and the microphone opening, for
-        // a decoder nothing was going to call until Stop.
+        // No resource trace over the recording.
         recordingJob = viewModelScope.launch {
             val levels = ArrayDeque<Float>()
             transcriber.listen(captureTo = captureFile).collect { event ->
@@ -1405,13 +1138,7 @@ class VoiceViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Hold the take without ending it.
-     *
-     * The microphone stays open — see [ai.ondevice.engine.Transcriber.pause] —
-     * and the samples read while paused are dropped, so the file has a gap
-     * rather than a stretch of silence as long as the pause.
-     */
+    /** Hold the take without ending it. */
     fun pauseRecording() {
         transcriber.pause()
         _state.value = _state.value.copy(paused = true)
@@ -1427,10 +1154,6 @@ class VoiceViewModel @Inject constructor(
         recordingJob = null
         capture?.cancel()
         // The take is closed here, not left to the capture's teardown.
-        // `cancel()` only asks the loop to stop, and not waiting for it but
-        // publishing anyway handed the player a file whose header still said
-        // zero samples — which is why a three-second take showed as 00:00.
-        // Closing it directly settles the header before anything reads it.
         transcriber.finishCapture()
         val take = captureFile?.takeIf { it.isFile && it.length() > 44 }
         _state.value = _state.value.copy(
@@ -1441,23 +1164,10 @@ class VoiceViewModel @Inject constructor(
             sourceName = take?.name,
             sourceIsRecording = take != null,
         )
-        // Transcribe now, over the whole take, through the same path a picked
-        // file takes. Nothing was decoded while recording, so this is the only
-        // pass — and it is the better one: real segment boundaries, which a
-        // sliding window could never produce, and one decode of each word
-        // instead of one per window it appeared in.
-        if (take != null) process()
+        // Stop stops.
     }
 
-    /**
-     * SPEC §6.3 — take a picked file as the clip to work on.
-     *
-     * It is *staged*, not transcribed. Picking used to start a decode straight
-     * away, which meant the two ways of getting audio in behaved differently:
-     * a recording could be played back and then run, a file could only be run.
-     * Copying it in here also gets it out of the content provider and onto local
-     * disk, which is what makes the player and a re-run possible at all.
-     */
+    /** SPEC §6.3 — take a picked file as the clip to work on. */
     fun chooseFile(uri: android.net.Uri) {
         if (_state.value.recording) stopRecording()
         viewModelScope.launch {
@@ -1489,14 +1199,7 @@ class VoiceViewModel @Inject constructor(
         )
     }
 
-    /**
-     * Decode the clip properly, whichever way it arrived.
-     *
-     * For a recording this is not a repeat of the live pass: that read a
-     * ten-second window every few seconds, so it has no segment boundaries and
-     * re-decodes words as the window slides. This runs the whole take once,
-     * which is what produces timed segments.
-     */
+    /** Decode the clip properly, whichever way it arrived. */
     fun process() {
         val path = _state.value.sourcePath ?: return
         val model = _state.value.sttModel
@@ -1575,6 +1278,14 @@ class VoiceViewModel @Inject constructor(
                         liveTrace = null,
                         lastTrace = trace,
                         transcripts = db.transcripts().observeAll().first(),
+                        // A successful decode that found no words is a result, and it used to look like a failure — the screen simply stayed as it was.
+                        error = if (segments.isEmpty()) "No speech found in $name." else null,
+                        errorHint = if (segments.isEmpty()) {
+                            "The audio decoded fine — whisper just did not hear any words in it. " +
+                                "Play the clip back to check the microphone picked you up."
+                        } else {
+                            null
+                        },
                     )
                 },
                 onFailure = {
@@ -1596,16 +1307,7 @@ class VoiceViewModel @Inject constructor(
         _state.value = _state.value.copy(speed = speed)
     }
 
-    /**
-     * Reopen a stored synthesis as a working script.
-     *
-     * The Speak panel is repopulated with what produced it — the text, the
-     * voice, the speed — so "open in Voice" means the take can be changed and
-     * run again, not merely looked at. The engine is not switched: a synthesis
-     * records which provider made it, but the installed set may have changed
-     * since, and silently selecting a provider that is no longer there would
-     * fail at the moment the user pressed Speak.
-     */
+    /** Reopen a stored synthesis as a working script. */
     fun loadSynthesis(synthesis: ai.ondevice.data.db.SynthesisEntity) {
         stopSpeaking()
         val params = SparseParams.parse(synthesis.paramsJson)
@@ -1628,9 +1330,6 @@ class VoiceViewModel @Inject constructor(
         _state.value = _state.value.copy(
             mode = VoiceMode.TRANSCRIBE,
             title = transcript.title,
-            // The clip comes back too, when it is still there — a stored
-            // transcript you can read but not listen to is half the artifact,
-            // and this is the same path the picker fills.
             sourcePath = transcript.sourcePath?.takeIf { java.io.File(it).isFile },
             sourceName = transcript.title,
             sourceIsRecording = false,
@@ -1641,11 +1340,6 @@ class VoiceViewModel @Inject constructor(
         )
     }
 
-    /**
-     * SPEC §6.5 — writes the transcript into the same user-browsable directory
-     * the rest of the app's artifacts live in and hands the file back, so the
-     * screen can share it rather than the app inventing a private export store.
-     */
     fun export(format: TranscriptFormat, onReady: (java.io.File) -> Unit) {
         viewModelScope.launch {
             val state = _state.value
@@ -1673,41 +1367,19 @@ class VoiceViewModel @Inject constructor(
     }
 }
 
-/**
- * The two things this screen does.
- *
- * Split by *what the feature is*, not by where its input comes from. An earlier
- * cut had Live / File / Speak at the top level, which put two halves of speech
- * -to-text beside its opposite and made the microphone look like a peer of
- * synthesis. Whether the audio arrives from the mic or a file is a source
- * choice inside [TRANSCRIBE]; it uses the same decoder and produces the same
- * segments either way.
- */
+/** The two things this screen does. */
 enum class VoiceMode(val label: String) {
     TRANSCRIBE("Transcribe"),
 
-    /**
-     * SPEC §7 — read-aloud has a script, a voice, an expression and an output
-     * file. That is a workflow, not a setting, so it gets equal billing.
-     */
+    /** SPEC §7 — read-aloud has a script, a voice, an expression and an output file. */
     SPEAK("Speak"),
 }
 
-// Both halves of this screen used to name where their input came from — Speak
-// had TYPED/FILE, Transcribe had MICROPHONE/FILE — and neither distinction
-// survived contact with the panels. A loaded script is text in the same box you
-// can type into; a picked clip is the same WAV on disk the microphone writes.
-// What is left is one script box with a button that fills it, and one clip with
-// a button that fills it: see [VoiceState.scriptSource] and
-// [VoiceState.sourcePath].
 
 /** One bar per read of the input buffer, sized to the canvas' waveform. */
 private const val WAVEFORM_BARS = 40
 
-/**
- * A reference clip is decoded at the rate OmniVoice works in, so nothing has to
- * guess later what a bare FloatArray is.
- */
+/** A reference clip is decoded at the rate OmniVoice works in, so nothing has to guess later what a bare FloatArray is. */
 private const val REFERENCE_SAMPLE_RATE = ai.ondevice.speech.OmniVoiceEngine.SAMPLE_RATE
 
 
@@ -1724,13 +1396,6 @@ data class VoiceState(
     val omniSteps: Int = ai.ondevice.speech.OmniVoiceEngine.DEFAULT_STEPS,
     /** OmniVoice: grid length in 40 ms frames; 0 means estimate from the text. */
     val omniFrames: Int = 0,
-    /**
-     * The rest of OmniVoice's generation config, carried the same way as the two
-     * above: written by the Advanced screen into the model row, read back here,
-     * and handed to the engine. Nothing on the Speak screen shows them — they
-     * exist so the Advanced screen's writes are not inert, which is the same
-     * contract [VoiceViewModel.refreshFromOverrides] describes for Kokoro's.
-     */
     val omniGuidance: Float = ai.ondevice.speech.OmniVoiceEngine.DEFAULT_GUIDANCE,
     val omniTimestepShift: Float = ai.ondevice.speech.OmniVoiceEngine.DEFAULT_T_SHIFT,
     val omniLayerPenalty: Float = ai.ondevice.speech.OmniVoiceEngine.DEFAULT_LAYER_PENALTY,
@@ -1740,13 +1405,7 @@ data class VoiceState(
         ai.ondevice.speech.OmniVoiceEngine.DEFAULT_CLASS_TEMPERATURE,
     /** 0 picks a fresh seed per run; anything else makes the run repeatable. */
     val omniSeed: Int = 0,
-    /**
-     * The reference clip a clone copies, once decoded, and what it said.
-     *
-     * Held as samples rather than a path because the file may be a content URI
-     * the app cannot re-open later, and because decoding it once is the point
-     * at which its length can be checked and reported.
-     */
+    /** The reference clip a clone copies, once decoded, and what it said. */
     val referenceSamples: FloatArray? = null,
     /** The same clip as a file, so it can be played back before it is copied. */
     val referencePath: String? = null,
@@ -1758,34 +1417,18 @@ data class VoiceState(
     /** Whether this OmniVoice install has the encoders a clone needs. */
     val cloningAvailable: Boolean = false,
     val ttsModels: List<ModelEntity> = emptyList(),
-    /**
-     * Which engine can run each voice model, keyed by model id.
-     *
-     * The picker needs this to stay honest: "text-to-speech" is one modality but
-     * two incompatible engines, so listing every voice model under whichever
-     * engine is selected offers files that engine cannot load.
-     */
+    /** Which engine can run each voice model, keyed by model id. */
     val ttsModelProviders: Map<String, ai.ondevice.speech.SynthProvider> = emptyMap(),
     val recording: Boolean = false,
     val elapsedMillis: Long = 0,
     val waveform: List<Float> = List(40) { 0.15f },
     val transcripts: List<TranscriptEntity> = emptyList(),
     val title: String = "standup-recording",
-    /**
-     * The decoded file transcript. Held as real segments with real timings
-     * rather than pre-formatted strings, because the export has to produce SRT
-     * and VTT cue times from them.
-     */
+    /** The decoded file transcript. */
     val segments: List<TranscriptSegment> = emptyList(),
     val fileProgress: Float = 0.74f,
 
-    /**
-     * One pair for the whole screen, not one per mode.
-     *
-     * Transcribing and speaking never run at the same time — both go through
-     * the same single native runtime — so a second pair would only ever hold a
-     * stale copy of the first.
-     */
+    /** One pair for the whole screen, not one per mode. */
     val liveTrace: ai.ondevice.engine.ResourceTrace? = null,
     val lastTrace: ai.ondevice.engine.ResourceTrace? = null,
 
@@ -1810,11 +1453,6 @@ data class VoiceState(
     /** Word being spoken right now, as character offsets into the script. */
     val spokenRange: Pair<Int, Int>? = null,
     val lastAudioPath: String? = null,
-    /**
-     * The clip Transcribe is working on — the WAV just recorded, or the file
-     * that was picked, held the same way because by this point they are the
-     * same thing: a decodable file on local disk with a name.
-     */
     val sourcePath: String? = null,
     val sourceName: String? = null,
     /** True when [sourcePath] came from the microphone rather than the picker. */
@@ -1835,27 +1473,14 @@ data class VoiceState(
     val selectedVoice: ai.ondevice.speech.SynthVoice?
         get() = voices.firstOrNull { it.id == voice }
 
-    /**
-     * Voices you can actually use come first.
-     *
-     * The Kokoro catalogue is longer than the system list and none of it works
-     * until the runtime is installed, so listing it in declaration order fills
-     * the whole visible area with greyed rows and makes the picker look broken.
-     * The unavailable ones stay — knowing what installing Kokoro would get you
-     * is the point — they just stop being the first thing you see.
-     */
+    /** Voices you can actually use come first. */
     /** The engine currently chosen, which is whichever the selected voice belongs to. */
     val selectedProvider: ai.ondevice.speech.SynthProvider
         get() = selectedVoice?.provider ?: ai.ondevice.speech.SynthProvider.SYSTEM
 
     val filteredVoices: List<ai.ondevice.speech.SynthVoice>
         get() = voices
-            // Only the chosen engine's voices. The list held all of them at
-            // once, so selecting OmniVoice left fifty Kokoro names underneath it
-            // — each tagged "Kokoro", each unusable by the engine named at the
-            // top of the screen, and picking one silently switched the engine
-            // back. The engine tabs already promise this separation; the list
-            // was the one place still ignoring it.
+            // Only the chosen engine's voices.
             .filter { it.provider == selectedProvider }
             .filter {
                 voiceQuery.isBlank() ||
@@ -1867,15 +1492,7 @@ data class VoiceState(
                 .thenBy { it.localeLabel }
                 .thenBy { it.displayName })
 
-    /**
-     * The chosen engine has no voice it can actually use.
-     *
-     * Kokoro keeps its speakers in separate `.bin` packs rather than inside the
-     * graph, so a Kokoro install whose packs did not arrive loads cleanly and
-     * then fails at synthesis with a tensor-shape error. Asked of the voice list
-     * rather than of a model name: an engine with nothing marked available has
-     * nothing to speak as, whichever engine it is.
-     */
+    /** The chosen engine has no voice it can actually use. */
     val missingVoiceComponent: ai.ondevice.core.MissingComponent?
         get() = ai.ondevice.core.ComponentCheck.forSpeech(
             requiresVoicePacks = ttsModel != null,

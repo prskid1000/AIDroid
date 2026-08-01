@@ -1,14 +1,6 @@
 package ai.ondevice.core
 
-/**
- * SPEC §6.5 — a transcript leaves the app in the formats the rest of the world
- * already reads.
- *
- * The four are not decoration. TXT is what you paste; SRT and VTT are what a
- * video player and a browser respectively will accept without conversion; JSON
- * is the only one that keeps the per-segment confidence, which is the number
- * the live view fades by and therefore the one worth preserving.
- */
+/** SPEC §6.5 — a transcript leaves the app in the formats the rest of the world already reads. */
 @kotlinx.serialization.Serializable
 data class TranscriptSegment(
     val startMillis: Long,
@@ -17,21 +9,7 @@ data class TranscriptSegment(
     val confidence: Float = 1f,
 )
 
-/**
- * How a transcript is stored, and how to read one back.
- *
- * `transcripts.segmentsJson` used to hold `{"segments": ["line", "line", …]}` —
- * the text of each segment and nothing else. Every timing and every confidence
- * was discarded at the moment of writing, which made three of the four export
- * formats unproducible from a stored transcript: SRT and VTT are *entirely*
- * cue times, and JSON exists specifically to carry the confidence. Only the
- * transcript still open on screen could be exported properly, and the value of
- * the transcripts table was the part that had been thrown away.
- *
- * The column is unchanged in type and the reader accepts both shapes, so no
- * migration is needed and every transcript recorded before this still opens —
- * as text, which is all it ever held.
- */
+/** How a transcript is stored, and how to read one back. */
 object TranscriptSegments {
 
     private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; isLenient = true }
@@ -46,8 +24,6 @@ object TranscriptSegments {
         // The current shape first.
         runCatching { return json.decodeFromString(listSerializer, raw) }
         // Then the old one: a sparse object holding an array of plain strings.
-        // Timings it never had are zero rather than invented, which is the
-        // difference between an empty cue and a wrong one.
         return SparseParams.parse(raw).stringList("segments").orEmpty()
             .map { TranscriptSegment(startMillis = 0, endMillis = 0, text = it) }
     }

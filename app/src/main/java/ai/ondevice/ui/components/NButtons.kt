@@ -36,13 +36,7 @@ import ai.ondevice.ui.theme.Space
 import ai.ondevice.ui.theme.Touch
 import ai.ondevice.ui.theme.ring
 
-/**
- * `.btn` and its variants.
- *
- * The system's defining rule: **the primary action is an accent outline on
- * transparent, never a fill.** The readme says so twice and the Don't list says
- * it a third time — nothing floods a large area with the accent.
- */
+/** `.btn` and its variants. */
 enum class NButtonStyle { Primary, Secondary, Ghost }
 
 @Composable
@@ -150,10 +144,7 @@ fun NIconButton(
     }
 }
 
-/**
- * The chat send/stop control: a 44dp accent-outlined circle. Same rule as every
- * other primary — outline, not fill.
- */
+/** The chat send/stop control: a 44dp accent-outlined circle. */
 @Composable
 fun NCircleButton(
     icon: ImageVector,
@@ -173,12 +164,7 @@ fun NCircleButton(
     shape = CircleShape,
 )
 
-/**
- * `.tag` — small labels tinted from the ramps.
- *
- * `accent-2` reads the same as `accent` on purpose: Nocturne is mono and the
- * second role is a machine-derived stand-in, not a second colour.
- */
+/** `.tag` — small labels tinted from the ramps. */
 enum class NTagStyle { Accent, Accent2, Neutral, Outline }
 
 @Composable
@@ -212,11 +198,7 @@ fun NTag(
     }
 }
 
-/**
- * A tab/pill row — the shape the canvas uses for the parameter tiers (S8), the
- * image modes (S11) and the transcribe modes (S14). Selected is an accent-900
- * fill with an accent ring; unselected is the ground with a divider ring.
- */
+/** A tab/pill row — the shape the canvas uses for the parameter tiers (S8), the image modes (S11) and the transcribe modes (S14). */
 @Composable
 fun NPills(
     options: List<String>,

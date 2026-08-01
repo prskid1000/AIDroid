@@ -1,13 +1,6 @@
 package ai.ondevice.core
 
-/**
- * A part that is needed and is not going to be there when the run starts.
- *
- * @property state the difference that matters to the user. "You do not have
- *   this" and "you have this and it is switched off" want opposite actions, and
- *   the app used to give the same answer to both — which was no answer, because
- *   the failure only surfaced once the runtime had loaded and refused.
- */
+/** A part that is needed and is not going to be there when the run starts. */
 data class MissingComponent(
     val what: String,
     val because: String,
@@ -17,14 +10,7 @@ data class MissingComponent(
         /** Nothing installed can fill this slot. */
         NOT_INSTALLED,
 
-        /**
-         * It is installed and is not attached, so it will not be passed.
-         *
-         * This is the one that reads as a bug rather than as a setting: the
-         * Models screen shows the file present and the run behaves as though it
-         * were absent, because `DiffusionEngine.load` resolves each path from
-         * the *ticked* attachments and falls back to an empty string.
-         */
+        /** It is installed and is not attached, so it will not be passed. */
         INSTALLED_NOT_ATTACHED,
     }
 
@@ -34,20 +20,10 @@ data class MissingComponent(
     }
 }
 
-/**
- * Says what is missing before a run rather than after it.
- *
- * Every rule here is derived from data the app already holds — the declared
- * dependencies on [AttachmentRole], and the difference between what is
- * installed and what is switched on. There is no list of model names and no
- * per-model special case; adding a dependency is a line in the enum.
- */
+/** Says what is missing before a run rather than after it. */
 object ComponentCheck {
 
-    /**
-     * @param available every add-on the library holds for this model, ticked or
-     *   not. [ModelAttachment.enabled] is what decides whether it is passed.
-     */
+    /** @param available every add-on the library holds for this model, ticked or not. */
     fun forDiffusion(available: List<ModelAttachment>): List<MissingComponent> {
         val enabled = available.filter { it.enabled }.map { it.role }.toSet()
         val installed = available.map { it.role }.toSet()
@@ -68,14 +44,7 @@ object ComponentCheck {
         }.sortedBy { it.what }
     }
 
-    /**
-     * Whether this text model can be shown a picture.
-     *
-     * Asked of the companion map rather than of the model's name or
-     * architecture: a projector is a file that is either paired with the model
-     * or is not. The chat screen used to find this out at send time, after the
-     * user had picked an image and written a message.
-     */
+    /** Whether this text model can be shown a picture. */
     fun forChatImage(companionPaths: Map<String, String>): MissingComponent? =
         if (companionPaths.keys.any { it.contains("vision", true) || it.contains("mmproj", true) }) {
             null
@@ -88,14 +57,7 @@ object ComponentCheck {
             )
         }
 
-    /**
-     * What a voice model needs beside itself.
-     *
-     * @param voicePackCount how many voice packs came with it. A synthesiser
-     *   whose speaker embeddings are separate files has nothing to speak *as*
-     *   without at least one, and reports a shape error deep in the graph rather
-     *   than saying so.
-     */
+    /** What a voice model needs beside itself. */
     fun forSpeech(requiresVoicePacks: Boolean, voicePackCount: Int): MissingComponent? =
         if (!requiresVoicePacks || voicePackCount > 0) {
             null

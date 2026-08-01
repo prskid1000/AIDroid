@@ -75,17 +75,6 @@ import ai.ondevice.ui.vm.ImageMode
 import ai.ondevice.ui.vm.ImageState
 import ai.ondevice.ui.vm.ImageViewModel
 
-/**
- * **S11 — Image.**
- *
- * SPEC §5.4's obligations, made visible: a live TAESD preview instead of a
- * spinner, a cancel that says out loud that it frees native memory, and the
- * memory guardrail that suggests `vae_tiling` rather than letting a 1024×1024
- * run take the process down.
- *
- * The screen is honest about the hardware too: sd.cpp on Adreno 829 is
- * unproven (§15), so the readout names the backend actually in use.
- */
 @Composable
 fun ImageScreen(
     currentRoute: String?,
@@ -108,20 +97,8 @@ fun ImageScreen(
 
     PhoneScaffold(
         toolbar = {
-            // The same pair Chat and Voice carry. Gallery moved to the Library
-            // tab, where the images sit alongside the conversations and the
-            // rendered audio instead of being reachable from one screen only.
+            // The same pair Chat and Voice carry.
             RootToolbar("Image") {
-                // The modes, in the toolbar for the same reason Voice's are:
-                // the row they used to sit in cost a full band of a screen
-                // whose whole point is showing a picture.
-                //
-                // Iterated rather than listed. Writing the toggles out by hand
-                // is how Extend was dropped when this first moved up here — the
-                // pill row had always built itself from `entries`, and spelling
-                // three calls instead lost one silently. The `when` below is
-                // exhaustive, so the next mode added to the enum fails to
-                // compile until it has an icon.
                 ImageMode.entries.forEach { mode ->
                     ToolbarToggle(
                         when (mode) {
@@ -145,9 +122,7 @@ fun ImageScreen(
 
             TaesdPreview(state)
 
-            // Live while sampling, then the finished run's. Directly under the
-            // preview because on this screen the two are read together: a step
-            // rate means something different at 40% CPU than at 100%.
+            // Live while sampling, then the finished run's.
             (state.liveTrace ?: state.lastTrace)?.let { trace ->
                 var traceExpanded by rememberSaveable { mutableStateOf(false) }
                 ResourceBlock(
@@ -307,9 +282,7 @@ fun ImageScreen(
                 }
             }
 
-            // §5.4 — memory guardrail with the fix inline, not a toast. This one
-            // stays on the generation screen even though size lives in the
-            // sheet: it is a refusal about the run you are about to start.
+            // §5.4 — memory guardrail with the fix inline, not a toast.
             if (state.exceedsEnvelope) {
                 NCard(Modifier.padding(top = 14.dp), ring = NocturneColors.Neutral700) {
                     Row(
@@ -346,10 +319,7 @@ fun ImageScreen(
                 }
             }
 
-            // Only offered when there is something to upscale and something to
-            // upscale it with. sd.cpp gives the upscaler its own context, so this
-            // needs no diffusion model resident — but it does need the ESRGAN
-            // weights, and saying so is better than a disabled button.
+            // Only offered when there is something to upscale and something to upscale it with.
             state.lastImage?.let { last ->
                 val hasUpscaler = state.availableAttachments.any {
                     it.role == ai.ondevice.core.AttachmentRole.UPSCALER
@@ -380,11 +350,7 @@ fun ImageScreen(
         }
     }
 
-    // Note what is *not* here: closing the sheet on the way to Advanced. The
-    // whole screen leaves composition when the parameters screen is pushed, so
-    // the dialog goes with it — and `rememberSaveable` brings the sheet back on
-    // the way in, which is where the user was. Dismissing it explicitly meant
-    // Back from Parameters landed on a bare Image screen.
+    // Note what is *not* here: closing the sheet on the way to Advanced.
     if (settingsOpen) {
         ImageSettingsSheet(
             state = state,
@@ -395,14 +361,7 @@ fun ImageScreen(
     }
 }
 
-/**
- * Everything that decides *how* the next image is made.
- *
- * Model, size, seed, the two sliders, and the add-ons. None of it is about the
- * picture in front of you, which is why it no longer sits in the same scroll as
- * the prompt and the result — that scroll grew a row every time a runtime gained
- * a dial, and pushed the Generate button further from the thing it acts on.
- */
+/** Everything that decides *how* the next image is made. */
 @Composable
 private fun ImageSettingsSheet(
     state: ImageState,
@@ -411,13 +370,7 @@ private fun ImageSettingsSheet(
     onOpenAdvanced: () -> Unit,
 ) {
     NBottomSheet("Image settings", onDismiss, note = "applies to the next run") {
-        // Which model runs is the user's choice. Picking whichever the database
-        // returned first is how a broken model gets loaded forever while a
-        // working one sits beside it, unreachable.
-        //
-        // One base model, so one dropdown — a row of chips read as a set you
-        // combine, which is exactly what the add-ons below *are*. The list holds
-        // base models only; see baseModelsOnly.
+        // Which model runs is the user's choice.
         if (state.availableModels.isNotEmpty()) {
             SectionKicker("Model", Modifier.padding(bottom = 8.dp))
             NDropdown(
@@ -482,9 +435,6 @@ private fun ImageSettingsSheet(
 
         AttachmentsSection(state, viewModel)
 
-        // The same manifest renderer S8 uses, pointed at the sd.cpp block —
-        // schedule and clip_skip are Advanced there, SLG is Expert, and all
-        // 41 of them come from the manifest rather than this file.
         NButton(
             "Advanced · schedule, clip_skip, SLG",
             onClick = onOpenAdvanced,
@@ -495,15 +445,7 @@ private fun ImageSettingsSheet(
     }
 }
 
-/**
- * The system photo picker.
- *
- * `PickVisualMedia` is the right contract even at minSdk 31: where the platform
- * picker exists it runs without any storage permission at all, and where it
- * does not it falls back to `OPEN_DOCUMENT` on its own. Either way the app
- * never asks for READ_MEDIA_IMAGES, which is the whole point — SPEC §13 says
- * the app should hold no permission it can avoid.
- */
+/** The system photo picker. */
 @Composable
 private fun rememberSourceImagePicker(onPicked: (String) -> Unit): () -> Unit {
     val context = LocalContext.current
@@ -511,9 +453,7 @@ private fun rememberSourceImagePicker(onPicked: (String) -> Unit): () -> Unit {
         ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
         uri ?: return@rememberLauncherForActivityResult
-        // The picker's grant dies with the process. Persisting it when the
-        // provider allows keeps a chosen source valid across a restart; when it
-        // does not, the URI still works for this session.
+        // The picker's grant dies with the process.
         runCatching {
             context.contentResolver.takePersistableUriPermission(
                 uri,
@@ -529,11 +469,7 @@ private fun rememberSourceImagePicker(onPicked: (String) -> Unit): () -> Unit {
     }
 }
 
-/**
- * The img2img / inpaint source. SPEC §5.2 — the mode is meaningless without one,
- * so it sits in the form above the dial that acts on it rather than being
- * discovered at generate time.
- */
+/** The img2img / inpaint source. */
 @Composable
 private fun SourceImageField(
     label: String,
@@ -593,16 +529,7 @@ private fun SourceImageField(
     }
 }
 
-/**
- * LoRAs, ControlNets, IP-Adapters, VAEs — whatever is installed.
- *
- * There is no per-family logic here and there is not supposed to be. Each
- * installed auxiliary declares a *role*, the role knows which manifest key
- * carries its path, and the runtime decides whether the file is usable against
- * the loaded base model. That is what makes this work for SD 1.5, SDXL, Flux
- * and something released next month without an app update — the same bargain
- * §1.5 strikes for parameters, one level up.
- */
+/** LoRAs, ControlNets, IP-Adapters, VAEs — whatever is installed. */
 @Composable
 private fun AttachmentsSection(
     state: ImageState,
@@ -700,15 +627,7 @@ private fun AttachmentsSection(
         }
 }
 
-/**
- * Outpainting margins.
- *
- * The mask is derived, not painted: the original is composited into a larger
- * canvas and the new border is what gets filled. So the control the user needs
- * is "how much further, on which edges" — and the output size is shown because
- * an extend that quietly doubles the pixel count is the sort of thing that
- * turns a 30-second run into a five-minute one.
- */
+/** Outpainting margins. */
 @Composable
 private fun ExtendField(
     state: ImageState,
@@ -779,11 +698,7 @@ private fun androidx.compose.foundation.layout.RowScope.EdgeStepper(
     }
 }
 
-/**
- * The live preview. SPEC §5.4: "show intermediate latents, not just a spinner".
- * Until sd.cpp is wired in, this paints the same accent-and-section-glow field
- * the canvas mocks, over a scanline texture, with the real step/ETA readout.
- */
+/** The live preview. */
 @Composable
 private fun TaesdPreview(state: ImageState) {
     Box(
@@ -795,10 +710,7 @@ private fun TaesdPreview(state: ImageState) {
             .ring(NocturneColors.Divider, Radius.Md),
         contentAlignment = Alignment.Center,
     ) {
-        // The real thing, in priority order: the decoded latent while sampling,
-        // then the finished image, then the source it will act on. Every one of
-        // these is actual pixels — SPEC §5.4's objection is to a spinner
-        // standing in for state the engine already has.
+        // The real thing, in priority order: the decoded latent while sampling, then the finished image, then the source it will act on.
         val preview = state.previewBitmap
         val showingSource = preview == null && state.sourceImageUri != null
         if (preview != null) {
@@ -817,9 +729,7 @@ private fun TaesdPreview(state: ImageState) {
             )
         }
 
-        // The latent field only blooms while sampling. Idle, it stays on the
-        // neutral ramp — the readme forbids flooding a large area with a
-        // saturated fill, and an idle preview has nothing to say anyway.
+        // The latent field only blooms while sampling.
         val bloom = when {
             preview != null || showingSource -> 0f
             state.generating -> 1f
@@ -853,26 +763,10 @@ private fun TaesdPreview(state: ImageState) {
             }
         }
 
-        // "Warming up" is only true before the first step. Once the engine is
-        // stepping, saying it is still warming up contradicts the progress bar
-        // directly underneath — and this build has no TAESD decoder to produce
-        // a preview with, so that state used to last the entire run.
+        // "Warming up" is only true before the first step.
         if (!showingSource && preview == null) {
             Text(
-                // Driven by the phase, because the phase is the thing that
-                // knows. Keyed on `step <= 0` alone this said "warming up…"
-                // through the whole of weight loading and the whole of VAE
-                // decoding — neither of which is warming up, and both of which
-                // contradicted the status line directly underneath already
-                // naming the phase correctly.
-                //
-                // There is no step count to show in those two phases and that
-                // is not an omission: sd.cpp funnels loading, decoding and
-                // sampling through one callback with no tag, and only the
-                // sampling one has a total that means anything. Naming the
-                // phase is the honest alternative to counting the loader's
-                // graph nodes, which is how this screen once said "step
-                // 686/686" for a three-step run.
+                // Driven by the phase, because the phase is the thing that knows.
                 when {
                     state.loadingModel -> "loading model…"
                     !state.generating -> "No preview yet"

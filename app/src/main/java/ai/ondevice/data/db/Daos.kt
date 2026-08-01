@@ -18,28 +18,7 @@ interface ModelDao {
     @Query("SELECT * FROM models WHERE modality = :modality ORDER BY lastUsedAt DESC")
     fun observeByModality(modality: Modality): Flow<List<ModelEntity>>
 
-    /**
-     * Only models whose bytes have actually arrived.
-     *
-     * The library row is written when a download *starts*, so a resumed job
-     * after a reboot still knows what it is installing — deliberate, and
-     * documented where it happens. The consequence is that [observeAll] and
-     * [observeByModality] include models that are still downloading, and every
-     * picker in the app was offering them: a half-written GGUF selected in chat
-     * fails inside llama.cpp with a header error, which reads like a corrupt
-     * model rather than an impatient user.
-     *
-     * These four queries used to answer that with `NOT EXISTS (an active
-     * download_jobs row)`. It was one source of truth and no migration, and it
-     * was also the absence of evidence doing the work of evidence: every model
-     * with no job row at all — because history was cleared, because a write
-     * failed, because the queue was pruned — passed the test. The failure mode
-     * was silent and pointed at the wrong culprit, since what the user saw was
-     * llama.cpp rejecting a header.
-     *
-     * `completedAt` is now written by the downloader when the last file
-     * verifies, so the question is asked of a fact rather than of a gap.
-     */
+    /** Only models whose bytes have actually arrived. */
     @Query(
         """
         SELECT * FROM models
@@ -89,15 +68,7 @@ interface ModelDao {
     )
     fun observePendingModelIds(): Flow<List<String>>
 
-    /**
-     * The same set, read once.
-     *
-     * Orphan cleanup needs it: a row is written when a download *starts*, and
-     * the bytes land in a `.part` until the checksum passes, so a model that is
-     * three per cent downloaded has a record whose `localPath` does not exist
-     * yet. Judged on the file alone it looks like a record whose file has gone,
-     * and "Clean up" would delete the row out from under the running download.
-     */
+    /** The same set, read once. */
     @Query(
         """
         SELECT modelId FROM download_jobs
@@ -148,12 +119,7 @@ interface ModelDao {
 
 @Dao
 interface PresetDao {
-    /**
-     * Seed order, not alphabetical. The built-in text presets read
-     * Precise → Balanced → Creative because that is a progression the user can
-     * reason about; sorting them by name would scramble it to
-     * Balanced, Creative, Precise and lose the meaning.
-     */
+    /** Seed order, not alphabetical. */
     @Query("SELECT * FROM presets WHERE modality = :modality ORDER BY isBuiltIn DESC, rowid")
     fun observeFor(modality: Modality): Flow<List<PresetEntity>>
 
@@ -253,11 +219,7 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY createdAt ASC")
     suspend fun getFor(conversationId: String): List<MessageEntity>
 
-    /**
-     * Every message, oldest first, for the library's per-thread counts and
-     * previews. Ordered ascending so "the first line of the thread" is the first
-     * match rather than the last.
-     */
+    /** Every message, oldest first, for the library's per-thread counts and previews. */
     @Query("SELECT * FROM messages ORDER BY createdAt ASC")
     fun observeAllOrdered(): Flow<List<MessageEntity>>
 
@@ -327,13 +289,7 @@ interface PredictionRunDao {
     @Query("SELECT * FROM prediction_runs ORDER BY startedAt DESC")
     fun observeAll(): Flow<List<PredictionRunEntity>>
 
-    /**
-     * Every run for one artifact, oldest first.
-     *
-     * A list rather than a single row because a chat turn is not always one
-     * generation: a reply that calls tools generates again after each result,
-     * and each of those rounds is its own run against the same conversation.
-     */
+    /** Every run for one artifact, oldest first. */
     @Query("SELECT * FROM prediction_runs WHERE artifactId = :artifactId ORDER BY startedAt")
     fun observeFor(artifactId: String): Flow<List<PredictionRunEntity>>
 
@@ -376,28 +332,14 @@ interface DownloadDao {
     @Query("SELECT COUNT(*) FROM download_jobs WHERE state IN ('QUEUED','RUNNING','VERIFYING')")
     fun observeActiveCount(): Flow<Int>
 
-    /**
-     * Jobs that believe they are in flight.
-     *
-     * Spelled with literals rather than a bound `IN (:states)` list: binding a
-     * list of enums through the type converter silently matched nothing here,
-     * and a resume query that quietly returns zero rows is indistinguishable
-     * from "there was nothing to resume" — which is exactly the failure it
-     * exists to prevent.
-     */
+    /** Jobs that believe they are in flight. */
     @Query("SELECT * FROM download_jobs WHERE state IN ('QUEUED','RUNNING','VERIFYING') ORDER BY createdAt")
     suspend fun getActive(): List<DownloadJobEntity>
 
     @Query("SELECT * FROM download_jobs WHERE state IN ('QUEUED','RUNNING','PAUSED','VERIFYING') ORDER BY createdAt")
     suspend fun getUnfinished(): List<DownloadJobEntity>
 
-    /**
-     * Clear finished history. Safe for the library, and the reason is the
-     * [observeInstalled] query above: "installed" is the *absence* of an active
-     * job, never the presence of a completed one. Deleting these rows removes a
-     * receipt, not a model — which is also why FAILED goes with COMPLETE, since
-     * neither state holds anything open.
-     */
+    /** Clear finished history. */
     @Query("DELETE FROM download_jobs WHERE state IN ('COMPLETE','FAILED')")
     suspend fun clearFinished()
 }

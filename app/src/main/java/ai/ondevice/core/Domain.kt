@@ -1,9 +1,6 @@
 package ai.ondevice.core
 
-/**
- * What kind of thing a model is. Classified from architecture and file shape,
- * never from the repo name (SPEC §3.2 step 3).
- */
+/** What kind of thing a model is. */
 enum class Modality {
     TEXT,
     VISION,
@@ -34,23 +31,13 @@ enum class Capability { TEXT, VISION, TOOLS, EMBEDDING, DIFFUSION, TRANSCRIBE, S
 /** Detected at boot. SPEC §8.1 — Vulkan is deliberately out of v1. */
 enum class BackendId {
     OPENCL,
-    HEXAGON,
     CPU,
     ;
 
-    /**
-     * The piece of silicon, which is the question a user is actually asking.
-     *
-     * These were named for their APIs — "OpenCL", "Hexagon HTP" — and that is
-     * the wrong axis to offer a choice on: nobody wants OpenCL, they want the
-     * GPU, and OpenCL is one of several ways to get there. The API is still
-     * worth showing where the subject really is the build (see [api] and the
-     * Runtimes screen); it is not what a settings list should ask.
-     */
+    /** The piece of silicon, which is the question a user is actually asking. */
     val label: String
         get() = when (this) {
             OPENCL -> "GPU"
-            HEXAGON -> "NPU"
             CPU -> "CPU"
         }
 
@@ -58,27 +45,12 @@ enum class BackendId {
     val api: String
         get() = when (this) {
             OPENCL -> "OpenCL"
-            HEXAGON -> "Hexagon HTP"
             CPU -> "CPU"
         }
 
-    /**
-     * What ggml's own registry calls this, which is none of the three above.
-     *
-     * The Hexagon backend registers as **"HTP"** — not "Hexagon", not "NPU" —
-     * and that is also the string sd.cpp's `--backend` accepts and whisper
-     * matches its device list against. It was worth finding out rather than
-     * assuming: with only [name], [api] and [label] to match on, a registered
-     * NPU would have gone unrecognised and the setting stayed dimmed on a build
-     * that had one.
-     *
-     * More than one per backend because upstream is free to rename, and a list
-     * degrades to "unrecognised" rather than to a wrong answer.
-     */
     val registryNames: List<String>
         get() = when (this) {
             OPENCL -> listOf("OpenCL")
-            HEXAGON -> listOf("HTP", "Hexagon")
             CPU -> listOf("CPU")
         }
 
@@ -90,15 +62,7 @@ enum class BackendId {
             registered.equals(label, ignoreCase = true)
 }
 
-/**
- * SPEC §3.3. Six verdicts, computed before any download.
- *
- * The design canvas is explicit that these carry no red or green: the palette
- * is mono, so [FAST] is an accent tag, the two warnings are accent outlines,
- * and the three refusals are a neutral disc with a slash. Weight comes from the
- * mark, not the hue — which is why this enum carries a [tone] rather than a
- * colour.
- */
+/** SPEC §3.3. */
 enum class Verdict {
     FAST,
     WORKS_SLOWER,
@@ -131,11 +95,7 @@ enum class Verdict {
 /** Accent means runnable; an accent outline means caveat; neutral means no. */
 enum class VerdictTone { AFFIRMATIVE, CAVEAT, REFUSAL }
 
-/**
- * The speed class shown next to each quant variant. Q4_0 is the only quant with
- * an Adreno OpenCL kernel, so everything else falls to CPU — the canvas says so
- * in as many words under the variant list.
- */
+/** The speed class shown next to each quant variant. */
 enum class SpeedClass {
     OPENCL_FAST,
     CPU_PATH,
@@ -166,15 +126,7 @@ enum class RuntimeState { NOT_INSTALLED, INSTALLED, UPDATE_AVAILABLE, ROLLED_BAC
 
 enum class MessageRole { USER, ASSISTANT, SYSTEM, TOOL_CALL, TOOL_RESULT }
 
-/**
- * What a recorded run produced.
- *
- * Four kinds because there are four things this device makes and four places an
- * artifact row is written. It is deliberately not [Modality]: a modality
- * describes a *model*, and one model can be driven by two different runs —
- * whisper transcribes both a file and a live recording, and the distinction that
- * matters to a stored run is which artifact table its id points into.
- */
+/** What a recorded run produced. */
 enum class PredictionKind {
     CHAT,
     IMAGE,

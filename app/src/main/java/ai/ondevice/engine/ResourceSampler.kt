@@ -18,21 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-/**
- * What a prediction cost, sampled while it ran.
- *
- * The app has always reported *throughput* — tokens per second, seconds per
- * step, an audio-seconds-per-wall-second realtime factor — and never what the
- * device paid to reach it. On a phone those are the questions that decide
- * whether a model is usable at all: did it saturate the cores, and how close did
- * it come to the memory ceiling. Both are recorded here, per run, so the answer
- * survives the run instead of being a thing you had to be watching for.
- *
- * Three parallel arrays rather than a list of point objects, and megabytes and
- * whole percent rather than bytes and floats. A trace is stored as JSON in every
- * row, so its size is a per-artifact cost paid forever; this shape is about four
- * times smaller than the obvious one and loses nothing anybody reads.
- */
+/** What a prediction cost, sampled while it ran. */
 @Serializable
 data class ResourceTrace(
     /** Milliseconds between samples. Doubles each time the trace is decimated. */
@@ -44,20 +30,7 @@ data class ResourceTrace(
     val rssMb: List<Int>,
     /** What the whole device had free, in MB. */
     val availMb: List<Int>,
-    /**
-     * GPU busy, 0..100, or empty when this device does not expose it.
-     *
-     * Empty and zero are different answers and are kept different: a run with
-     * no GPU series means "nobody could tell you", a run of zeroes means "the
-     * GPU sat idle". Defaulted so traces written before this existed still
-     * parse — they are the first case, and correctly so.
-     *
-     * Device-wide, not this process': the counter is the kernel's, and it
-     * counts every client of the GPU including the compositor drawing this
-     * screen. On a phone running one heavy job that is close enough to be
-     * useful and dishonest to present as exact, which is why the caption says
-     * "device" and not "app".
-     */
+    /** GPU busy, 0..100, or empty when this device does not expose it. */
     val gpuPercent: List<Int> = emptyList(),
     /** RSS before the run started, so the model's own footprint is legible. */
     val baselineRssMb: Int,
@@ -74,11 +47,7 @@ data class ResourceTrace(
     val peakGpuPercent: Int? get() = gpuPercent.maxOrNull()
     val meanGpuPercent: Int? get() = if (gpuPercent.isEmpty()) null else gpuPercent.average().toInt()
 
-    /**
-     * The lowest memory reading of the run, and the bottom of the graph's RAM
-     * axis. Not [baselineRssMb]: the baseline is taken before the run starts and
-     * a run that *frees* memory would draw below the floor.
-     */
+    /** The lowest memory reading of the run, and the bottom of the graph's RAM axis. */
     val floorRssMb: Int get() = rssMb.minOrNull() ?: 0
     val minAvailMb: Int get() = availMb.minOrNull() ?: 0
 
@@ -89,21 +58,7 @@ data class ResourceTrace(
 
     fun toJson(): String = JSON.encodeToString(serializer(), this)
 
-    /**
-     * The same run at half the resolution.
-     *
-     * Adjacent samples merge and the interval doubles, so the window the trace
-     * covers is unchanged — only how finely it is described. Which of the three
-     * series takes which reduction is the part that matters: CPU averages,
-     * because a percentage over a longer window *is* a mean; RSS takes the
-     * maximum and free RAM the minimum, because those two are read for their
-     * worst moment. Averaging a 4 GB spike between two 1 GB samples would report
-     * 2.5 GB and erase the near-miss on the memory ceiling, which is the single
-     * most useful thing a trace can record.
-     *
-     * A trailing unpaired sample is carried through rather than dropped, so the
-     * end of a run never disappears.
-     */
+    /** The same run at half the resolution. */
     fun halved(): ResourceTrace = copy(
         intervalMillis = intervalMillis * 2,
         cpuPercent = cpuPercent.mergePairs { a, b -> (a + b) / 2 },
@@ -152,30 +107,10 @@ private fun List<Int>.mergePairs(combine: (Int, Int) -> Int): List<Int> {
 /** 500 ms — fine enough to show a load ramp, coarse enough to cost nothing. */
 const val SAMPLE_INTERVAL_MILLIS = 500
 
-/**
- * The most points a trace will ever hold.
- *
- * Without a cap, a long image batch or a twenty-minute transcription writes
- * thousands of points into a database row that is read on a list screen. With a
- * naive cap — stop sampling at N — the graph would silently describe only the
- * first ninety seconds of a run and look complete. So the trace halves its own
- * resolution instead: adjacent samples merge and the interval doubles, which
- * keeps the whole run in view at a bounded size.
- */
+/** The most points a trace will ever hold. */
 const val MAX_TRACE_POINTS = 180
 
-/**
- * File a finished run.
- *
- * One definition rather than a private copy in each of the four view models that
- * calls it: the summary columns are derived from the trace, and four places
- * deriving them independently is four chances for a peak on a list screen to
- * disagree with the peak on the graph beside it.
- *
- * An empty trace is dropped. A run shorter than a single sample tick has nothing
- * to say, and a row of zeroes would read as "this used no CPU" rather than "this
- * was too quick to measure".
- */
+/** File a finished run. */
 suspend fun PredictionRunDao.record(
     kind: PredictionKind,
     artifactId: String,
@@ -204,23 +139,10 @@ suspend fun PredictionRunDao.record(
     )
 }
 
-/**
- * Samples the process while something is generating.
- *
- * Everything in this app runs in one process — there is no `android:process` on
- * any component in the manifest — so llama.cpp, sd.cpp, whisper and ONNX Runtime
- * all land in the same counters and one recorder covers all four.
- */
+/** Samples the process while something is generating. */
 class ResourceRecorder(private val capabilities: DeviceCapabilities) {
 
-    /**
-     * A run in progress.
-     *
-     * [stop] deliberately does not suspend. Chat's teardown runs inside a
-     * `withContext(NonCancellable)` after a Stop press and Image's runs in a
-     * `finally` right after cancelling the native loop; a suspending stop in
-     * either place would be skipped exactly when the run was most interesting.
-     */
+    /** A run in progress. */
     interface Handle {
         /** Updated every tick, for the graph drawn while the run is still going. */
         val live: StateFlow<ResourceTrace>
@@ -288,11 +210,6 @@ class ResourceRecorder(private val capabilities: DeviceCapabilities) {
             if (cpu.size > MAX_TRACE_POINTS) decimate()
         }
 
-        /**
-         * Halve the resolution in place, by the rules [ResourceTrace.halved]
-         * states — one definition, so what the recorder does and what the tests
-         * check cannot drift apart.
-         */
         private fun decimate() {
             val halved = snapshot().halved()
             cpu.replaceWith(halved.cpuPercent)
@@ -322,18 +239,7 @@ class ResourceRecorder(private val capabilities: DeviceCapabilities) {
     }
 
     private companion object {
-        /**
-         * Resident set size, from this process' own `/proc` entry.
-         *
-         * RSS rather than Java heap or native heap on purpose: llama.cpp mmaps
-         * the GGUF, so the gigabytes that actually decide whether a model runs
-         * appear in neither heap figure. `Debug.getPss()` would be more precise
-         * about shared pages and walks `smaps` to get there, which is tens of
-         * milliseconds — far too expensive twice a second. This is one short
-         * read of a single line.
-         *
-         * Field 2 of `statm` is resident pages.
-         */
+        /** Resident set size, from this process' own `/proc` entry. */
         fun readRssBytes(): Long = runCatching {
             val fields = java.io.File("/proc/self/statm").readText().trim().split(' ')
             fields[1].toLong() * PAGE_SIZE
@@ -343,23 +249,7 @@ class ResourceRecorder(private val capabilities: DeviceCapabilities) {
             .getOrDefault(4096L)
             .takeIf { it > 0 } ?: 4096L
 
-        /**
-         * Adreno's own busy counter, in the only place an app can read it.
-         *
-         * `gpubusy` holds two microsecond figures — busy and total — accumulated
-         * *since the last read*, and reading resets them. That makes it exactly
-         * a utilisation over the sampling interval, and also means two readers
-         * would steal each other's numbers; there is one sampler in this process
-         * and it is the only thing here that opens the file.
-         *
-         * `/sys/class/kgsl` is unreadable to `adb shell` on this device and
-         * readable to the app, which is the reverse of the usual arrangement and
-         * worth writing down — the check that matters is the one run as the app.
-         *
-         * Null on a device with no Adreno, no counter, or no permission: the
-         * series stays empty and the graph says the GPU was not measured rather
-         * than drawing a flat zero.
-         */
+        /** Adreno's own busy counter, in the only place an app can read it. */
         fun readGpuBusyPercent(): Int? = runCatching {
             val parts = java.io.File(GPU_BUSY_PATH).readText().trim().split(WHITESPACE)
             val busy = parts[0].toLong()

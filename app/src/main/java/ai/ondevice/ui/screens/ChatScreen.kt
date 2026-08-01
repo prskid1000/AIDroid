@@ -64,14 +64,7 @@ import ai.ondevice.ui.vm.ChatState
 import ai.ondevice.ui.vm.ChatViewModel
 import ai.ondevice.ui.vm.StreamingMessage
 
-/**
- * **S6 — Chat**, with **S7** as its settings sheet.
- *
- * Everything the canvas annotates is real here: the thinking block is
- * collapsible and shows its own token count and elapsed time, the footer
- * carries live tok/s, images declare their token cost before they are sent, and
- * the send button becomes a stop that actually cancels.
- */
+/** **S6 — Chat**, with **S7** as its settings sheet. */
 @Composable
 fun ChatScreen(
     currentRoute: String?,
@@ -86,10 +79,7 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     var sheetOpen by rememberSaveable { mutableStateOf(false) }
 
-    // One picker for all three kinds. `OpenDocument` rather than the photo
-    // picker because the composer accepts documents too, and making the user
-    // guess which of two "attach" buttons handles their file is worse than one
-    // that takes everything and says what it did with it.
+    // One picker for all three kinds.
     val context = LocalContext.current
     val attachLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
@@ -104,12 +94,7 @@ fun ChatScreen(
             viewModel.attach(it)
         }
     }
-    // What this model can actually receive, not everything the composer knows
-    // how to file. Images are offered only to a vision model that has its
-    // projector; audio is offered to nobody, because `attach` refuses every
-    // audio file there is — it has to be transcribed first, which is the Voice
-    // tab's job. A picker that leads to a refusal is several taps spent to be
-    // told no.
+    // What this model can actually receive, not everything the composer knows how to file.
     val pickAttachment = {
         attachLauncher.launch(
             buildList {
@@ -121,9 +106,7 @@ fun ChatScreen(
         )
     }
 
-    // Import takes a zip written by this app's export. Markdown is deliberately
-    // not offered here: it is lossy by design and re-parsing it would produce a
-    // conversation missing exactly the parameters that made it reproducible.
+    // Import takes a zip written by this app's export.
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri -> uri?.let(viewModel::import) }
@@ -217,9 +200,7 @@ fun ChatScreen(
                         )
                     }
                 }
-                // A tool call can take seconds against a network the user
-                // believed was never touched. Naming the tool while it runs is
-                // the only moment that fact is actionable.
+                // A tool call can take seconds against a network the user believed was never touched.
                 state.runningTool?.let { name ->
                     item(key = "running-tool") {
                         Row(
@@ -252,24 +233,13 @@ fun ChatScreen(
                 onSelectPersona = viewModel::setPersona,
                 onSystemPromptChange = viewModel::setSystemPrompt,
                 onLiveParam = viewModel::setLiveParam,
-                // Not dismissed on the way out: the screen leaves composition
-                // when Parameters is pushed, and `rememberSaveable` puts the
-                // sheet back when Back returns here.
                 onOpenParametersAtTier = onOpenParameters,
             )
         }
     }
 }
 
-/**
- * Model name, preset, and the live backend/context readout.
- *
- * Two actions, the same two every generating screen has: start a new one, and
- * open the settings for this one. There used to be a third — a hamburger
- * labelled "Conversations" that opened the very same sheet as the sliders beside
- * it. Past threads now have somewhere real to live, so the affordance that
- * promised them and delivered a duplicate is gone.
- */
+/** Model name, preset, and the live backend/context readout. */
 @Composable
 private fun ChatToolbar(
     state: ChatState,
@@ -289,12 +259,7 @@ private fun ChatToolbar(
                 NDot(color = if (state.generating) NocturneColors.Accent else NocturneColors.Neutral500)
                 Text(
                     buildString {
-                        // What is *running*, not a guess. Before anything is
-                        // loaded there is no answer, so say so and name the
-                        // preference instead of asserting a backend — the old
-                        // hardcoded "OpenCL" was wrong on any device that chose
-                        // differently, and wrong on every device until the
-                        // first load.
+                        // What is *running*, not a guess.
                         append(
                             state.loadedBackend?.label
                                 ?: state.model?.backendOverride?.label
@@ -309,12 +274,7 @@ private fun ChatToolbar(
             }
         },
     ) {
-        // A new conversation, not a wiped one — the old thread stays whole in
-        // the library, which is why this is a plus rather than a bin.
-        // Import sits beside the plus because it makes a conversation too,
-        // just from a file rather than from a model. Its counterpart moved to
-        // Library, where every artifact is saved the same way — a conversation
-        // saved there as .zip is the archive this reads back.
+        // A new conversation, not a wiped one — the old thread stays whole in the library, which is why this is a plus rather than a bin.
         ToolbarAction(NIcons.Import, "Import a conversation", onImport)
         ToolbarAction(NIcons.Plus, "New conversation", onNewConversation)
         ToolbarAction(NIcons.Settings, "Chat settings", onOpenSettings)
@@ -395,10 +355,7 @@ private fun MessageBubble(
             }
         }
 
-        // A tool result is not the assistant speaking. Rendering it as one would
-        // let a third party's output wear the model's voice, which is exactly
-        // the confusion the tool package's "results are data, not instruction"
-        // rule exists to prevent — so it gets its own, visibly different block.
+        // A tool result is not the assistant speaking.
         MessageRole.TOOL_RESULT -> ToolResultBlock(message, expanded, onToggleThinking)
 
         else -> Column(
@@ -437,15 +394,7 @@ private fun MessageBubble(
     }
 }
 
-/**
- * What the model asked for, before anything ran it.
- *
- * Collapsed to one line, because a call the user expected is noise; but the
- * arguments are one tap away and never summarised away, because a tool call is
- * the point where a local-first app can start talking to something that isn't
- * local, and "searched the web" without the query is not enough to tell whether
- * that was the right thing to send.
- */
+/** What the model asked for, before anything ran it. */
 @Composable
 private fun ToolCallList(toolCallsJson: String?) {
     val calls = remember(toolCallsJson) { parseToolCalls(toolCallsJson) }
@@ -563,9 +512,6 @@ private fun ToolResultBlock(
                 tint = if (isError) NocturneColors.Neutral300 else NocturneColors.Accent,
                 modifier = Modifier.size(13.dp),
             )
-            // The first line rather than a character count: collapsed is the
-            // state this spends most of its life in, and "returned 47 chars"
-            // answers a question nobody asked.
             Text(
                 if (isError) "$name failed" else message.content.lineSequence().firstOrNull()
                     ?.takeIf { it.isNotBlank() } ?: "$name returned nothing",
@@ -591,14 +537,7 @@ private fun ToolResultBlock(
     }
 }
 
-/**
- * Hand the exported file to the chooser.
- *
- * The file is already written to `exports/`, which is a normal browsable
- * folder — the share sheet is a convenience on top of that, not the only way
- * to reach it. §13's point is that the conversation exists outside this app
- * whether or not anyone taps share.
- */
+/** Hand the exported file to the chooser. */
 internal fun shareFile(context: android.content.Context, file: java.io.File, mime: String) {
     val uri = androidx.core.content.FileProvider.getUriForFile(
         context,
@@ -673,9 +612,7 @@ private fun StreamingBubble(
                 )
             }
         }
-        // Live: expandable while it runs, because the moment a graph of what a
-        // model is doing to the device is worth watching is while it is doing
-        // it. The row reads the latest sample rather than the peak so far.
+        // Live: expandable while it runs, because the moment a graph of what a model is doing to the device is worth watching is while it is doing it.
         trace?.let {
             var traceExpanded by rememberSaveable { mutableStateOf(false) }
             ResourceBlock(
@@ -688,10 +625,7 @@ private fun StreamingBubble(
     }
 }
 
-/**
- * The collapsed reasoning block. SPEC §4.4 — thinking is parsed out of the
- * configured tag pair and rendered collapsed, with its cost stated.
- */
+/** The collapsed reasoning block. */
 @Composable
 private fun ThinkingBlock(
     thinking: String,
@@ -781,13 +715,7 @@ private fun MessageActions(
     }
 }
 
-/**
- * The attached files, before sending.
- *
- * An image shows itself; a document shows its name and how much of the context
- * it will occupy. Both are removable, because an attachment you cannot take
- * back is a trap — especially a 40 000-token one.
- */
+/** The attached files, before sending. */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun AttachmentStrip(

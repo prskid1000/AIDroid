@@ -41,13 +41,7 @@ import ai.ondevice.ui.theme.NocturneType
 import ai.ondevice.ui.theme.ruleBelow
 import ai.ondevice.ui.vm.SettingsViewModel
 
-/**
- * Settings root. Backend, network, token, parameter tiering, and the way through
- * to Tools and Runtimes (S15).
- *
- * The closing line is a load-bearing claim rather than marketing: SPEC §13 —
- * no account, no telemetry, and no network at all after download.
- */
+/** Settings root. */
 @Composable
 fun SettingsScreen(
     currentRoute: String?,
@@ -60,9 +54,6 @@ fun SettingsScreen(
     val state by viewModel.settings.collectAsStateWithLifecycle()
 
     PhoneScaffold(
-        // Models opens from here now rather than from a sixth tab, next to
-        // Runtimes and Tools — the other two screens about what is installed
-        // rather than about what you are making.
         toolbar = {
             RootToolbar("Settings") {
                 NIconButton(
@@ -88,26 +79,11 @@ fun SettingsScreen(
                 InfoRow("Models on disk", Fmt.bytes(state.storageUsedBytes))
             }
 
-            // Three devices, named as devices.
-            //
-            // The list used to open with "Auto" and then name APIs — OpenCL,
-            // Hexagon HTP — which asked the wrong question twice over. Nobody
-            // wants OpenCL; they want the GPU, and OpenCL is one route to it.
-            // And auto was never a choice: it meant "the first backend
-            // registered", an ordering dressed up as a decision.
-            //
-            // All three are always shown, including ones this phone cannot
-            // reach, because "the NPU is not an option here" is information and
-            // a missing segment is not. An unreachable one is dimmed, unselectable,
-            // and named underneath (§1.2 — a refusal names what went wrong).
+            // Two devices, named as devices.
             SectionKicker("Compute device", Modifier.padding(top = 20.dp, bottom = 8.dp))
-            val devices = listOf(BackendId.HEXAGON, BackendId.OPENCL, BackendId.CPU)
+            val devices = listOf(BackendId.OPENCL, BackendId.CPU)
             val available = state.availableBackends
             NCard(gap = 7.dp) {
-                // One row rather than three stacked radios: three one-word
-                // labels naming three pieces of the same chip are a single
-                // choice, and reading them as a column made them look like
-                // three separate settings.
                 NSeg(
                     options = devices.map { it.label },
                     selectedIndex = devices.indexOfFirst { it.name == state.backendMode }
@@ -117,16 +93,12 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            // A dimmed segment says "not here" but not why, and the row has no
-            // space for the reason — so the reason goes underneath, naming the
-            // devices rather than leaving the user to work out which one is grey.
             val missing = devices.filterNot { it in available }
             NHelp(
                 "What ggml registered on this phone, not what the build contains: a backend " +
                     "compiled in still needs the silicon and the driver behind it. The GPU runs " +
-                    "through OpenCL, the NPU through Hexagon — and the NPU only has kernels for " +
-                    "Q4_0, Q4_1, Q8_0, IQ4_NL and MXFP4 weights, so a K-quant model selects it " +
-                    "and then does its arithmetic on the CPU regardless." +
+                    "through OpenCL. Voice models are ONNX rather than ggml and always run on " +
+                    "the CPU — ONNX Runtime ships no GPU provider for Android." +
                     if (missing.isEmpty()) {
                         ""
                     } else {
@@ -137,17 +109,11 @@ fun SettingsScreen(
                 Modifier.padding(top = 8.dp),
             )
 
-            // No thermal policy card. The kernel governor throttles a hot SoC on
-            // its own, and the four settings that used to sit here mostly did
-            // nothing — `n_threads` cannot be changed on a live llama.cpp
-            // context, so two of them were inert and a third was mislabelled.
+            // No thermal policy card.
 
             SectionKicker("Network", Modifier.padding(top = 20.dp, bottom = 8.dp))
             NCard(gap = 10.dp) {
-                // One toggle, because there is one thing that goes over the
-                // network. The manifest-update toggle that used to sit beside it
-                // gated a fetch that does not exist: nothing writes the manifest
-                // table, so the "newer than bundled" path can never be taken.
+                // One toggle, because there is one thing that goes over the network.
                 ToggleRow("Wi-Fi only downloads", state.wifiOnly, viewModel::setWifiOnly)
             }
 
@@ -172,10 +138,7 @@ fun SettingsScreen(
                 )
             }
 
-            // No "Show all parameters" here. It was a second copy of the All tab
-            // that already sits on the parameters screen, one tap from the list
-            // it filters — a global preference for a per-screen choice, set in a
-            // different screen from the one it changes.
+            // No "Show all parameters" here.
 
             NButton(
                 "Tools and MCP servers →",

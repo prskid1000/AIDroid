@@ -8,18 +8,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 
-/**
- * Files the user attaches to a conversation.
- *
- * Everything is **copied** into the app's own directory, never referenced by
- * content URI. Two reasons, and both are the kind of thing that only bites
- * later: a picker's read grant dies with the process, so a conversation would
- * lose its images on the next launch; and an export (see [ConversationArchive])
- * cannot bundle a file it has no durable handle to.
- *
- * The directory is under `getExternalFilesDir`, so SPEC §13 still holds — these
- * are ordinary files the user can open in any file manager, not a private store.
- */
+/** Files the user attaches to a conversation. */
 class AttachmentStore(
     private val context: Context,
     private val storage: ModelStorage,
@@ -52,14 +41,7 @@ class AttachmentStore(
         )
     }
 
-    /**
-     * Pull readable text out of a document so it can go into the prompt.
-     *
-     * Plain text and the text-ish formats are read directly. A PDF is *not*
-     * parsed here: doing it properly needs a real layout-aware extractor, and a
-     * naive one silently produces scrambled column order that the model then
-     * confidently answers questions about. Saying so is better than that.
-     */
+    /** Pull readable text out of a document so it can go into the prompt. */
     suspend fun extractText(attachment: Attachment): TextExtraction = withContext(Dispatchers.IO) {
         val file = File(attachment.path)
         if (!file.exists()) {

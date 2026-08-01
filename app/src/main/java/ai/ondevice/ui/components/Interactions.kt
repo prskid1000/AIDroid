@@ -8,16 +8,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 
-/**
- * The one clickable used across the system, so that hover/press/focus behaviour
- * is defined once. The readme is explicit: interactive states are themed, never
- * browser (or platform) defaults — pressed states come from the accent ramp and
- * keyboard focus is the 2px accent ring.
- *
- * Callers that paint their own pressed tint pass their own [interactionSource]
- * and get no ripple on top; callers that don't get the accent ripple from
- * [LocalIndication], which `NocturneTheme` sets.
- */
+/** The one clickable used across the system, so that hover/press/focus behaviour is defined once. */
 fun Modifier.nClickable(
     enabled: Boolean = true,
     interactionSource: MutableInteractionSource? = null,

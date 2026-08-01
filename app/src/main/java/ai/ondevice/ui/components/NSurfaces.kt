@@ -37,14 +37,7 @@ import ai.ondevice.ui.theme.fadingRule
 import ai.ondevice.ui.theme.ring
 import ai.ondevice.ui.theme.ruleBelow
 
-/**
- * `.card` — a surface-filled content card at `--space-3` padding with
- * `--space-2` between children.
- *
- * [ring] replaces the elevation ring when set, which is how the canvas marks
- * state: accent-700 for the loaded model and the running download, neutral-700
- * for a refusal, accent-800 for the escape hatch.
- */
+/** `.card` — a surface-filled content card at `--space-3` padding with `--space-2` between children. */
 @Composable
 fun NCard(
     modifier: Modifier = Modifier,
@@ -110,11 +103,7 @@ fun NMetaText(text: String, modifier: Modifier = Modifier, color: Color = Noctur
     Text(text, style = NocturneType.Meta, color = color, modifier = modifier)
 }
 
-/**
- * The mono section rule that heads every group on every screen. Not `.h6` —
- * the canvas uses a monospace 10px semibold in neutral-500, which is a
- * different mark from the stylesheet's `h6`.
- */
+/** The mono section rule that heads every group on every screen. */
 @Composable
 fun SectionKicker(
     text: String,
@@ -138,12 +127,7 @@ fun NHelp(text: String, modifier: Modifier = Modifier, color: Color = NocturneCo
     Text(text, style = NocturneType.Help, color = color, modifier = modifier)
 }
 
-/**
- * `.hr` — the Nocturne signature rule, fading to transparent over 48px an end.
- *
- * Present, but the system prefers whitespace and the readme says to avoid it;
- * the phone screens use [NRowRule] instead. Kept because the system defines it.
- */
+/** `.hr` — the Nocturne signature rule, fading to transparent over 48px an end. */
 @Composable
 fun NHr(modifier: Modifier = Modifier) {
     Box(modifier.fillMaxWidth().height(1.dp).fadingRule())
@@ -155,10 +139,7 @@ fun NRowRule(modifier: Modifier = Modifier) {
     Box(modifier.fillMaxWidth().height(1.dp).background(NocturneColors.Divider))
 }
 
-/**
- * A list row that carries its own bottom rule — the shape used by the parameter
- * list, the transcript segments and the companions list.
- */
+/** A list row that carries its own bottom rule — the shape used by the parameter list, the transcript segments and the companions list. */
 @Composable
 fun NRuledRow(
     modifier: Modifier = Modifier,
@@ -175,11 +156,7 @@ fun NRuledRow(
     )
 }
 
-/**
- * `.table` — themed header and row rules. The rules are drawn at row level, not
- * cell level, so the 48px end-fade spans the whole row exactly as the CSS
- * background-gradient does.
- */
+/** `.table` — themed header and row rules. */
 @Composable
 fun NTable(
     modifier: Modifier = Modifier,
@@ -230,30 +207,7 @@ fun NTableHeaderCell(
     )
 }
 
-/**
- * A modal: the card, and nothing behind it.
- *
- * There is no backdrop wash, by two deliberate removals.
- *
- * Ours was `Neutral900` at 50 %, drawn into a `fillMaxSize` box — and both
- * halves were wrong. `Neutral900` is `#292B31`, the darkest step of the neutral
- * *ramp* but lighter than [NocturneColors.Bg] at `#161826`, which the ramp does
- * not reach; so it lifted the screen towards grey instead of pushing it back.
- * And `fillMaxSize` filled the dialog *window*, which Compose sizes to the
- * platform's dialog width unless told otherwise, so the wash came out as a pale
- * rectangle floating in the middle of a dark screen — dimming a strip either
- * side of the card and nothing else.
- *
- * The platform's own `FLAG_DIM_BEHIND` is cleared for the same reason. On a
- * scheme this dark the app behind is already near-black; a second darkening
- * buys no separation and reads as the screen having gone wrong. Elevation and a
- * ring do the work instead, which is what they are for.
- *
- * `usePlatformDefaultWidth = false` stays, so the invisible dismiss region is
- * the whole display rather than a strip: tapping anywhere outside the card
- * closes it. The card keeps its own `widthIn(max = 440)`, so nothing about its
- * size depended on the window being narrow.
- */
+/** A modal: the card, and nothing behind it. */
 @Composable
 fun NDialog(
     onDismissRequest: () -> Unit,
@@ -315,11 +269,7 @@ fun NDialogActions(content: @Composable RowScope.() -> Unit) {
     )
 }
 
-/**
- * A thin progress bar. The canvas draws these as a neutral-900 track with an
- * accent-500 fill — 5px in download cards, 4px over the TAESD preview, 7px in
- * the storage meter.
- */
+/** A thin progress bar. */
 @Composable
 fun NProgressBar(
     fraction: Float,
@@ -343,10 +293,7 @@ fun NProgressBar(
     }
 }
 
-/**
- * The multi-segment storage meter on the Models screen — one strip, several
- * ramp steps, no gaps.
- */
+/** The multi-segment storage meter on the Models screen — one strip, several ramp steps, no gaps. */
 @Composable
 fun NStackedBar(
     segments: List<Pair<Float, Color>>,

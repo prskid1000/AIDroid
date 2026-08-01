@@ -23,12 +23,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
 import javax.inject.Inject
 
-/**
- * S8/S9 — the manifest renderer's state, and the escape hatch.
- *
- * There is nothing parameter-specific in here either: it holds a manifest, a
- * sparse value map and a tier, and asks the repository what to show.
- */
+/** S8/S9 — the manifest renderer's state, and the escape hatch. */
 @HiltViewModel
 class ParamsViewModel @Inject constructor(
     private val repository: ParamRepository,
@@ -41,16 +36,7 @@ class ParamsViewModel @Inject constructor(
     private val _state = MutableStateFlow(ParamsState())
     val state: StateFlow<ParamsState> = _state.asStateFlow()
 
-    /**
-     * The load in flight, so a newer one can cancel it.
-     *
-     * This screen is activity-scoped and its default load races the runtime the
-     * caller actually asked for: the Voice screen's "Advanced" would open, ask
-     * for kokoro, and then have llama.cpp's 74 parameters land on top of
-     * Kokoro's eight because the default load started first and finished last.
-     * The symptom was a screen titled "llama.cpp" full of samplers, reached
-     * from a button that promised the phonemiser.
-     */
+    /** The load in flight, so a newer one can cancel it. */
     private var loadJob: Job? = null
 
     init {
@@ -62,13 +48,7 @@ class ParamsViewModel @Inject constructor(
         loadJob = viewModelScope.launch { load(runtimeId) }
     }
 
-    /**
-     * The screen is not llama-only. S11's "Advanced" button opens this same
-     * renderer against stable-diffusion.cpp, and the manifest already carries
-     * every runtime's parameters — so the only thing that changes is which
-     * `runtimes[…]` block is read and which model's overrides are edited.
-     * Nothing about the renderer knows a runtime name.
-     */
+    /** The screen is not llama-only. */
     fun setRuntime(runtimeId: String) {
         if (_state.value.runtimeId == runtimeId && _state.value.allSpecs.isNotEmpty()) return
         startLoad(runtimeId)
@@ -82,9 +62,6 @@ class ParamsViewModel @Inject constructor(
             bundledVersion = repository.bundledVersion(),
             runtimeId = runtimeId,
             buildTag = registry.buildTag(runtimeId),
-            // What the runtime reports it accepts, described by the manifest
-            // where the manifest has something to say — not what the manifest
-            // claims on the runtime's behalf.
             allSpecs = repository.specsFor(manifest, runtimeId),
             values = SparseParams.parse(model?.paramOverridesJson),
             modality = (model?.modality ?: modalityOf(runtimeId)).name.lowercase(),
@@ -100,20 +77,7 @@ class ParamsViewModel @Inject constructor(
         recompute()
     }
 
-    /**
-     * Whose overrides this screen edits.
-     *
-     * The loaded model is preferred, because the build gate and the context
-     * readout should describe what is actually in memory. But it cannot be the
-     * *only* answer: nothing is loaded until the first message, so opening
-     * Settings → Advanced parameters from a cold start left this null, and with
-     * it null [persist] returned early and **every edit was silently
-     * discarded** — the screen showed the new value, the database kept the old
-     * one, and n_ctx set to 2048 came back as 8192 on the next load.
-     *
-     * So fall back to the model that *would* be loaded: the most recently used
-     * one of the right modality, which is what the chat picks too.
-     */
+    /** Whose overrides this screen edits. */
     private suspend fun modelFor(runtimeId: String) = when (runtimeId) {
         RuntimeRegistry.LLAMA ->
             engines.state.value.loaded?.modelId?.let { db.models().get(it) }
@@ -121,21 +85,7 @@ class ParamsViewModel @Inject constructor(
         else -> db.models().observeInstalledByModality(modalityOf(runtimeId)).first().firstOrNull()
     }
 
-    /**
-     * Every installed file a `path` parameter could legitimately name.
-     *
-     * Taken from the library rather than by scanning the filesystem, so what is
-     * offered is exactly what the app knows it downloaded and can vouch for.
-     *
-     * Labelled by filename, not by role. The role used to be the label, on the
-     * reasoning that it is what the user chooses by — but each dropdown is
-     * already filtered to one role, so "ControlNet" under the control_net field
-     * only repeats the field's own name, and two installed ControlNets both
-     * read "ControlNet" with nothing to tell them apart. The filename is the
-     * part that differs: repo-derived display names collide too, since every
-     * ControlNet in comfyanonymous/ControlNet-v1-1_fp16_safetensors shares one.
-     * [PathChoice.detail] still carries the display name and size underneath.
-     */
+    /** Every installed file a `path` parameter could legitimately name. */
     private suspend fun installedFiles(): List<ai.ondevice.params.PathChoice> =
         db.models().getInstalled().mapNotNull { model ->
             val file = java.io.File(model.localPath)
@@ -169,21 +119,13 @@ class ParamsViewModel @Inject constructor(
         recompute()
     }
 
-    /**
-     * Screen state, not a preference. It used to be persisted globally and set
-     * from a toggle on the Settings screen as well as from the tab here — two
-     * controls for one thing, one of them nowhere near the list it filtered.
-     */
+    /** Screen state, not a preference. */
     fun setShowAll(showAll: Boolean) {
         _state.value = _state.value.copy(showAll = showAll)
         recompute()
     }
 
-    /**
-     * A value edit. Parameters that need a reload are *batched* — collected in
-     * [ParamsState.pendingReloadKeys] and applied once, rather than thrashing
-     * the model on every slider tick (SPEC §9).
-     */
+    /** A value edit. */
     fun setValue(key: String, value: Any?) {
         val spec = _state.value.allSpecs.firstOrNull { it.key == key }
         val updated = if (value == null) {
@@ -200,9 +142,6 @@ class ParamsViewModel @Inject constructor(
             },
         )
         recompute()
-        // Only the text engine is warm; a diffusion or transcription parameter
-        // is stored now and passed at the next run, so it must not be pushed
-        // into the loaded llama context.
         if (spec?.requiresReload != true && _state.value.runtimeId == RuntimeRegistry.LLAMA) {
             viewModelScope.launch {
                 val report = engines.llama?.applyParams(SparseParams.of(key to value))
@@ -228,11 +167,7 @@ class ParamsViewModel @Inject constructor(
         persist()
     }
 
-    /**
-     * SPEC §16.6 — arbitrary JSON straight through to the runtime. Unknown keys
-     * are reported, never fatal, so anything the loaded `.so` supports is
-     * always reachable even if manifest generation missed it.
-     */
+    /** SPEC §16.6 — arbitrary JSON straight through to the runtime. */
     fun setRawJson(json: String) {
         _state.value = _state.value.copy(rawJson = json)
     }
@@ -256,16 +191,7 @@ class ParamsViewModel @Inject constructor(
         }
     }
 
-    /**
-     * S9 — the sampler chain.
-     *
-     * Two lists, deliberately. The *display* order keeps every sampler so a
-     * disabled one stays on screen, greyed, with an "off" badge — the canvas is
-     * explicit that tapping a row disables it rather than deleting it, and a
-     * row that vanishes gives the user no way to bring it back. What goes over
-     * the wire in `samplers` is that order minus the disabled entries, because
-     * that is the chain the runtime should actually build.
-     */
+    /** S9 — the sampler chain. */
     fun setSamplerOrder(order: List<String>) {
         _state.value = _state.value.copy(samplerOrder = order)
         writeChain()
@@ -322,14 +248,7 @@ class ParamsViewModel @Inject constructor(
         )
     }
 
-    /**
-     * Write the overrides to the model row.
-     *
-     * If there is nothing to write them to, say so. This used to `return`
-     * quietly, which turned the whole screen into a very convincing no-op —
-     * sliders moved, values updated, nothing was saved. An edit that cannot be
-     * stored is a refusal, and §1.2 says a refusal names itself.
-     */
+    /** Write the overrides to the model row. */
     private fun persist() {
         val modelId = _state.value.modelId
         if (modelId == null) {

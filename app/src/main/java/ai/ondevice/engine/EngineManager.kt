@@ -16,19 +16,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-/**
- * Owns residency: which model is loaded, on which backend, and when it must go.
- *
- * SPEC §3.5's residency policy in one place —
- *  - one model at a time by default;
- *  - an explicit "keep loaded" pin;
- *  - unload on `onTrimMemory` pressure;
- *  - warm-swap: the old model is unloaded *before* the new one loads, so the
- *    app never holds two at once.
- *
- * It also registers as a [ComponentCallbacks2] so §8.4's memory-pressure rule
- * is enforced by the system rather than by remembering to call something.
- */
+/** Owns residency: which model is loaded, on which backend, and when it must go. */
 class EngineManager(
     private val context: Context,
     private val registry: RuntimeRegistry,
@@ -64,10 +52,7 @@ class EngineManager(
 
     val llama: InferenceEngine? get() = engineFor(RuntimeRegistry.LLAMA)
 
-    /**
-     * Load a model, honouring the per-model backend override and otherwise
-     * taking the backend from [resolveBackend].
-     */
+    /** Load a model, honouring the per-model backend override and otherwise taking the backend from [resolveBackend]. */
     suspend fun load(model: ModelEntity, paramOverrides: SparseParams = SparseParams.EMPTY): Result<LoadedModel> =
         loadMutex.withLock {
             val engine = llama ?: return Result.failure(
@@ -77,14 +62,6 @@ class EngineManager(
             val backend = resolveBackend(model)
 
             // Already loaded, and on the device the settings now ask for.
-            //
-            // The backend half of that test is new and is the whole of what
-            // made Settings → Compute device look broken: the model id matched,
-            // this returned early, and the context stayed on whatever device it
-            // was built for. Switching from GPU to NPU changed a stored string
-            // and nothing else until the process died — the setting only ever
-            // appeared to work because the first load after a cold start
-            // happened to read it.
             if (engine.loadedModelId == model.id && _state.value.backend == backend) {
                 return _state.value.loaded?.let { Result.success(it) }
                     ?: Result.failure(IllegalStateException("Inconsistent load state"))
@@ -96,18 +73,6 @@ class EngineManager(
             if (engine.isLoaded) engine.unload()
 
             // The device choice, turned into the one number llama.cpp acts on.
-            //
-            // Registering a GPU backend does nothing by itself: llama.cpp puts
-            // every layer on the CPU unless `n_gpu_layers` says otherwise, so
-            // without this the setting would change a badge and nothing else.
-            // 999 means "all of them" upstream — it clamps to the model's layer
-            // count — and a GPU that cannot hold them falls back per layer,
-            // which is the hybrid split rather than a failure.
-            //
-            // An explicit per-model override still wins: someone who has typed
-            // a number into the parameter screen has said something more
-            // specific than the global setting, and this is applied first so
-            // that overlay can overwrite it.
             val params = SparseParams.of("n_gpu_layers" to if (backend == BackendId.CPU) 0 else 999)
                 .overlaidWith(SparseParams.parse(model.paramOverridesJson))
                 .overlaidWith(paramOverrides)
@@ -137,21 +102,11 @@ class EngineManager(
         _state.value = EngineState()
     }
 
-    /**
-     * Which device runs this model: a per-model override, else the setting.
-     *
-     * The resolution itself lives in [ComputeDevice], because it is the same
-     * question on all three tabs and the answer has to match. This used to be
-     * six lines here and nowhere else, which is precisely why transcribe and
-     * image ignored a setting that looked global.
-     */
+    /** Which device runs this model: a per-model override, else the setting. */
     private suspend fun resolveBackend(model: ModelEntity): BackendId =
         computeDevice.chosen(RuntimeRegistry.LLAMA, model.backendOverride)
 
-    /**
-     * SPEC §8.4 — a native allocation failure surfaces as a real message with
-     * numbers and a suggestion, never a bare crash.
-     */
+    /** SPEC §8.4 — a native allocation failure surfaces as a real message with numbers and a suggestion, never a bare crash. */
     private fun describeFailure(error: Throwable): EngineError {
         val message = error.message.orEmpty()
         return when {

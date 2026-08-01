@@ -52,14 +52,7 @@ import ai.ondevice.ui.theme.ring
 import ai.ondevice.ui.theme.ruleBelow
 import ai.ondevice.ui.vm.ChatState
 
-/**
- * **S7 — Chat settings.**
- *
- * A sheet, not a screen: model, persona, system prompt, preset, and the Basic
- * tier inline. The header says "reload not required" because everything on this
- * sheet is live-editable — parameters that *do* need a reload are batched on
- * the All-parameters screen instead (SPEC §9).
- */
+/** **S7 — Chat settings.** A sheet, not a screen: model, persona, system prompt, preset, and the Basic tier inline. */
 @Composable
 fun ChatSettingsSheet(
     state: ChatState,
@@ -71,9 +64,7 @@ fun ChatSettingsSheet(
     onLiveParam: (String, Any?) -> Unit,
     onOpenParametersAtTier: (Tier) -> Unit,
 ) {
-    // The same chrome Image and Voice use. It was written inline here first,
-    // which is how all three ended up drawing their last row underneath the
-    // navigation bar — one of them fixed is one of them fixed.
+    // The same chrome Image and Voice use.
     NBottomSheet("This conversation", onDismiss, note = "reload not required") {
                     // — model —
                     SectionKicker("Model", Modifier.padding(bottom = 8.dp))
@@ -98,9 +89,7 @@ fun ChatSettingsSheet(
                             Text(
                                 listOfNotNull(
                                     state.model?.quant,
-                                    // Only claim "loaded" when the engine
-                                    // actually holds it. The conversation's
-                                    // preferred model is not the resident one.
+                                    // Only claim "loaded" when the engine actually holds it.
                                     when {
                                         state.loadingModel -> "loading…"
                                         state.model != null && state.loadedModelId == state.model.id -> "loaded"
@@ -239,17 +228,6 @@ fun ChatSettingsSheet(
                         }
                     }
 
-                    // — export and import —
-                    //
-                    // On the sheet rather than behind a menu because SPEC §13
-                    // makes getting a conversation *out* a first-class action,
-                    // not an advanced one.
-                    // Export left this sheet. It wrote into app-private
-                    // storage and called that a save; Library saves every
-                    // artifact the same way, into a folder you picked, and a
-                    // conversation saved there as .zip is the archive Import
-                    // reads back. Import itself is now a toolbar action, beside
-                    // the plus, because it makes a conversation too.
                     state.importSummary?.let { summary ->
                         NHelp(summary, Modifier.padding(top = 20.dp))
                     }
@@ -338,12 +316,7 @@ fun ChatSettingsSheet(
     }
 }
 
-/**
- * The inline slider row from S7. It looks like a parameter row but is not one:
- * the real rows are generated from the manifest on S8. This is the Basic tier's
- * hand-placed surface, which §9 explicitly allows ("inline in the generation
- * screen") — it still reads and writes through the same sparse map.
- */
+/** The inline slider row from S7. */
 @Composable
 private fun BasicParamSlider(
     label: String,

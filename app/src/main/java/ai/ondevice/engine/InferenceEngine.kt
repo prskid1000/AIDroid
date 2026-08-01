@@ -4,20 +4,7 @@ import ai.ondevice.core.BackendId
 import ai.ondevice.core.SparseParams
 import kotlinx.coroutines.flow.Flow
 
-/**
- * The boundary between the app and a native runtime.
- *
- * **The parameter contract is a string-keyed map, and it is that way from the
- * very first call** (SPEC §16.7, Appendix A #10). A typed struct across JNI
- * would mean every upstream parameter addition becomes a Kotlin code change,
- * which defeats §1.5 entirely. The native side maps keys onto `common_params`
- * and the sampler chain through a generated dispatch table, reports the keys it
- * didn't recognise, and never crashes on one.
- *
- * That is also why [applyParams] returns a report rather than Unit: the escape
- * hatch in §16.6 lets a user pass arbitrary JSON straight through, and they are
- * owed an answer about what the runtime actually accepted.
- */
+/** The boundary between the app and a native runtime. */
 interface InferenceEngine {
 
     val descriptor: RuntimeDescriptor
@@ -26,33 +13,18 @@ interface InferenceEngine {
 
     val loadedModelId: String?
 
-    /**
-     * Load a model. [params] carries the §4.1 load-time parameters — the ones
-     * that need a reload to change — as raw keys.
-     */
+    /** Load a model. */
     suspend fun load(request: LoadRequest): Result<LoadedModel>
 
     suspend fun unload()
 
-    /**
-     * Apply live parameters. Returns which keys were taken and which were not
-     * recognised; unknown keys are never fatal.
-     */
+    /** Apply live parameters. */
     suspend fun applyParams(params: SparseParams): ParamReport
 
-    /**
-     * Generate. The Flow is cold and cancellable; **cancellation must free
-     * native memory**, not merely detach the callback (Appendix A #7), which is
-     * why implementations do their teardown in `onCompletion`/`finally` rather
-     * than relying on the consumer.
-     */
+    /** Generate. */
     fun generate(request: GenerateRequest): Flow<GenerationEvent>
 
-    /**
-     * The exact string that will reach the tokenizer, plus its token
-     * boundaries. This powers the prompt inspector (SPEC §4.4), which is the
-     * single most useful debugging affordance for a local LLM app.
-     */
+    /** The exact string that will reach the tokenizer, plus its token boundaries. */
     suspend fun renderPrompt(request: GenerateRequest): RenderedPrompt
 
     suspend fun tokenCount(text: String): Int
@@ -74,24 +46,14 @@ data class LoadedModel(
     val layers: Int,
     val embeddingLength: Int,
     val embeddingLengthKv: Int,
-    /**
-     * Query heads, as the GGUF declares them.
-     *
-     * Needed to price the attention scores when flash attention is off,
-     * where they are a real f32 tensor that grows with the context. The
-     * native side has always reported it; nothing carried it up.
-     */
+    /** Query heads, as the GGUF declares them. */
     val heads: Int = 0,
     val chatTemplate: String?,
     val stopSequences: List<String>,
     val loadMillis: Long,
 )
 
-/**
- * What the runtime did with the keys it was handed. `rejected` is information,
- * not an error — a preset written under a newer engine can legitimately carry
- * keys this build doesn't have, and §11 requires we keep them anyway.
- */
+/** What the runtime did with the keys it was handed. */
 data class ParamReport(
     val applied: List<String> = emptyList(),
     val rejected: List<String> = emptyList(),
@@ -107,11 +69,7 @@ data class GenerateRequest(
     val imagePaths: List<String> = emptyList(),
     val grammar: String? = null,
     val seed: Long = -1,
-    /**
-     * Tools offered to the model this turn. They go into the chat template,
-     * which is the only place that knows a given family's tool-call syntax —
-     * the app never formats one itself.
-     */
+    /** Tools offered to the model this turn. */
     val tools: List<ToolSpec> = emptyList(),
 )
 
@@ -166,19 +124,12 @@ sealed interface GenerationEvent {
         val backend: BackendId,
     ) : GenerationEvent
 
-    /**
-     * The model asked for a tool. Lifted out of the raw text by upstream's own
-     * chat parser, so this arrives already separated from the visible reply
-     * whatever syntax the model family uses.
-     */
+    /** The model asked for a tool. */
     data class ToolCall(val name: String, val argumentsJson: String, val id: String) : GenerationEvent
 
     data class Done(val stopReason: StopReason, val generatedTokens: Int, val elapsedMillis: Long) : GenerationEvent
 
-    /**
-     * A native failure surfaced as a real message with numbers, per SPEC §8.4 —
-     * an OOM must never present as a bare crash.
-     */
+    /** A native failure surfaced as a real message with numbers, per SPEC §8.4 — an OOM must never present as a bare crash. */
     data class Failed(val message: String, val suggestion: String?) : GenerationEvent
 }
 

@@ -4,18 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * The commit schedule, pinned to the run that was listened to and approved.
- *
- * The unmasking loop was ported from `models/omnivoice.py` by hand, and the
- * schedule is the part where a transcription slip is silent: a curve that is
- * merely close still fills the grid, still produces audio, and still sounds
- * wrong in a way no exception reports. So the expected values here are not
- * derived from the same formula a second time — they are what the Python
- * implementation printed for the two clips that were checked by ear, which
- * makes this a comparison against a different implementation rather than
- * against itself.
- */
+/** The commit schedule, pinned to the run that was listened to and approved. */
 class OmniVoiceScheduleTest {
 
     private val engine = OmniVoiceEngine()
@@ -47,12 +36,7 @@ class OmniVoiceScheduleTest {
         assertEquals(130 * OmniVoiceEngine.CODEBOOKS, schedule.sum())
     }
 
-    /**
-     * The property the vocoder depends on. MASK is 1024, outside the codec's
-     * 0..1023 range, and a single one reaching the vocoder is a hard failure
-     * rather than a degraded frame — so the schedule has to account for every
-     * slot at every grid size, not merely most of them.
-     */
+    /** The property the vocoder depends on. */
     @Test
     fun `always fills the grid exactly`() {
         for (frames in listOf(1, 2, 7, 50, 130, 373, 750)) {
@@ -73,10 +57,7 @@ class OmniVoiceScheduleTest {
         }
     }
 
-    /**
-     * A shift of 1.0 is upstream's "no shift", and it should spread the commits
-     * evenly rather than being a special case in the arithmetic.
-     */
+    /** A shift of 1.0 is upstream's "no shift", and it should spread the commits evenly rather than being a special case in the arithmetic. */
     @Test
     fun `an unshifted schedule is even`() {
         val schedule = engine.buildSchedule(frames = 64, steps = 32, shift = 1f)
@@ -85,11 +66,6 @@ class OmniVoiceScheduleTest {
         assertEquals(64 * OmniVoiceEngine.CODEBOOKS, schedule.sum())
     }
 
-    /**
-     * Out-of-range values arrive from a text field, and the low end is the one
-     * that matters: the schedule's denominator is `1 + (shift − 1)·t`, which
-     * collapses towards zero as the shift does.
-     */
     @Test
     fun `clamps a shift the user could type`() {
         for (shift in listOf(-1f, 0f, 0.0001f, 2f, Float.NaN)) {

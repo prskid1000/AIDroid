@@ -1,17 +1,4 @@
 // The llama.cpp side of SPEC §16.7.
-//
-// **The parameter contract is a string-keyed map, and it is that way from the
-// very first call.** Everything below is built around that one decision: the
-// Kotlin side hands over JSON, `param_table()` maps keys onto `common_params`
-// through a dispatch table, and anything unrecognised comes back in a report
-// instead of taking the process down. Adding an upstream parameter of an
-// existing type is a manifest edit and a table row — never a signature change,
-// which is what would force every layer above to move in lockstep.
-//
-// Streaming is pull-based on purpose. A native thread calling back into the JVM
-// has to attach, and it makes cancellation a race between two runtimes; here the
-// Kotlin flow asks for the next token and cancellation is simply the flow not
-// asking again, with the teardown running in its `finally`.
 
 #include <jni.h>
 
@@ -41,25 +28,7 @@
 
 using json = nlohmann::ordered_json;
 
-/**
- * JSON on its way out to Kotlin, with invalid UTF-8 replaced rather than thrown at.
- *
- * `dump()` defaults to `error_handler_t::strict`, which throws on a byte
- * sequence that is not valid UTF-8 — and across a JNI boundary an uncaught C++
- * exception is not an error, it is SIGABRT. The whole process dies with no
- * message anything in Kotlin can catch.
- *
- * Which is reachable from ordinary use, because every one of these runtimes
- * emits text a *piece* at a time: whisper's segments and llama's tokens are
- * byte-level, so a multi-byte character routinely arrives split across two of
- * them and each half is invalid on its own. Observed as exactly that — whisper
- * transcribing a noisy recording, `invalid UTF-8 byte at index 0: 0xA2`, and
- * the app gone.
- *
- * `replace` substitutes U+FFFD for the bad bytes. A replacement character in a
- * transcript is a cosmetic flaw in one word; the alternative is losing the
- * conversation, the recording and the run.
- */
+/** JSON on its way out to Kotlin, with invalid UTF-8 replaced rather than thrown at. */
 static std::string dump_json(const json & value) {
     return value.dump(-1, ' ', false, json::error_handler_t::replace);
 }
@@ -98,15 +67,7 @@ struct od_engine {
     int64_t                  t_gen_start   = 0;
     std::vector<std::string> stops;
     common_chat_params       chat_params;
-    // The compiled form of `chat_params.parser`. Upstream keeps the PEG grammar
-    // in the applied params as a *serialised string*, and
-    // `common_chat_parser_params(const common_chat_params &)` copies only the
-    // format and the generation prompt — not that. Whoever parses has to load
-    // it, which is what the server does before it hands a request to a slot.
-    // Left empty, `common_chat_peg_parse` quietly falls back to "everything is
-    // content", so <think> and <tool_call> arrive as literal text and no tool
-    // is ever called. Deserialising is not free, so it happens once per applied
-    // template rather than once per token.
+    // The compiled form of `chat_params.parser`.
     common_peg_arena         chat_parser;
     common_chat_msg          last_msg;
     bool                     saw_stop      = false;
@@ -129,14 +90,7 @@ od_engine * as_engine(jlong handle) {
     return reinterpret_cast<od_engine *>(handle);
 }
 
-// --------------------------------------------------------------------------
-// Value coercion.
-//
-// The manifest declares a type per parameter, but a preset written by hand —
-// or by an older build — may carry a number where a string is expected. §11
-// says an unknown or oddly-typed value is kept, not dropped, so every read is
-// lenient and only a genuinely unusable value is reported as rejected.
-// --------------------------------------------------------------------------
+// -------------------------------------------------------------------------- Value coercion.
 
 bool as_bool(const json & v, bool fallback) {
     if (v.is_boolean()) return v.get<bool>();
@@ -196,13 +150,7 @@ ggml_type as_cache_type(const json & v, ggml_type fallback) {
     return fallback;
 }
 
-// --------------------------------------------------------------------------
-// The dispatch table.
-//
-// One row per manifest key. `reload` marks the ones that cannot take effect
-// without rebuilding the context — the Kotlin side batches those and applies
-// them once (SPEC §9) rather than thrashing the model on every slider tick.
-// --------------------------------------------------------------------------
+// -------------------------------------------------------------------------- The dispatch table.
 
 struct param_row {
     bool reload;
@@ -220,9 +168,6 @@ const std::map<std::string, param_row> & param_table() {
         { "n_threads_batch", { true,  [](od_engine & e, const json & v) { e.params.cpuparams_batch.n_threads = as_int(v, e.params.cpuparams_batch.n_threads); } } },
         { "n_parallel",      { true,  [](od_engine & e, const json & v) { e.params.n_parallel = as_int(v, e.params.n_parallel); } } },
         { "main_gpu",        { true,  [](od_engine & e, const json & v) { e.params.main_gpu = as_int(v, e.params.main_gpu); } } },
-        // `use_mmap` and `use_mlock` are two manifest keys over one upstream
-        // enum, so each has to preserve what the other set rather than
-        // overwrite it — otherwise the order they arrive in changes the result.
         { "use_mmap",        { true,  [](od_engine & e, const json & v) {
               const bool mlock = e.params.load_mode == LLAMA_LOAD_MODE_MLOCK ||
                                  e.params.load_mode == LLAMA_LOAD_MODE_MMAP_MLOCK;
@@ -324,26 +269,7 @@ const std::map<std::string, param_row> & param_table() {
     return table;
 }
 
-// --------------------------------------------------------------------------
-// What upstream's own defaults are.
-//
-// Every setter above already reads the live value as its fallback — `as_int(v,
-// e.params.n_ctx)` — so llama.cpp's default for each key is sitting in a
-// default-constructed common_params. Nothing was reporting it, so the app's
-// manifest hand-asserted "default": 0.8 for temp and so on, which is a second
-// copy of a number upstream is free to change.
-//
-// This reads them back so the manifest does not have to claim them. It is
-// deliberately a *separate* table rather than a getter bolted onto every row:
-// param_table has entries with real logic in them — samplers, grammar,
-// logit_bias, the two keys that share load_mode — and rewriting fifty-seven
-// working setters to bolt a getter onto four dozen of them is a large edit
-// whose only failure mode is a silent typo in a setter that currently works.
-//
-// A key absent here reports no default and the manifest's description stands,
-// which is the honest fallback: a value nobody can read back is one we should
-// not claim to have read.
-// --------------------------------------------------------------------------
+// -------------------------------------------------------------------------- What upstream's own defaults are.
 
 const std::map<std::string, json (*)(const common_params &)> & default_table() {
     static const std::map<std::string, json (*)(const common_params &)> table = {
@@ -397,12 +323,7 @@ const std::map<std::string, json (*)(const common_params &)> & default_table() {
     return table;
 }
 
-/**
- * Apply a JSON object of parameters. Returns the report SPEC §16.6 promises:
- * what was taken, and what this build did not recognise. An unknown key is
- * never fatal — a preset written under a newer engine legitimately carries keys
- * this one has never heard of, and §11 requires we keep them anyway.
- */
+/** Apply a JSON object of parameters. */
 json apply_params(od_engine & engine, const json & values, bool * needs_reload) {
     json applied  = json::array();
     json rejected = json::array();
@@ -491,9 +412,7 @@ Java_ai_ondevice_engine_LlamaBridge_nativeInit(JNIEnv *, jobject) {
             if (text == nullptr) {
                 return;
             }
-            // The loader emits a progress bar as a stream of single-character
-            // continuation writes. On a phone that is hundreds of logcat lines
-            // per load, and it drowns the messages that matter.
+            // The loader emits a progress bar as a stream of single-character continuation writes.
             if (level == GGML_LOG_LEVEL_CONT) {
                 return;
             }
@@ -509,14 +428,7 @@ Java_ai_ondevice_engine_LlamaBridge_nativeInit(JNIEnv *, jobject) {
                                     "ondevice.llama", text);
                 return;
             }
-            // Two INFO lines are worth the exception, because they answer a
-            // question nothing else can: where the weights actually went.
-            //
-            // "backend=HEXAGON" only says which device was *asked* for. A model
-            // whose layers do not fit, or whose quant the device has no kernels
-            // for, loads on that backend and computes on the CPU — and the only
-            // difference visible anywhere is these lines. There are roughly ten
-            // per load and none per token.
+            // Two INFO lines are worth the exception, because they answer a question nothing else can: where the weights actually went.
             if (std::strstr(trimmed, "offloade") != nullptr ||
                 std::strstr(trimmed, "buffer size") != nullptr ||
                 std::strncmp(trimmed, "ggml-hex", 8) == 0) {
@@ -526,31 +438,6 @@ Java_ai_ondevice_engine_LlamaBridge_nativeInit(JNIEnv *, jobject) {
         common_log_pause(common_log_main());
         llama_backend_init();
     });
-}
-
-/**
- * Where the DSP loader should look for `libggml-htp-v<NN>.so`.
- *
- * The Hexagon backend asks fastRPC for `file:///libggml-htp-v81.so` and lets
- * the DSP resolve the name, which it does against ADSP_LIBRARY_PATH — a
- * variable, not an argument, because the search happens on the other processor.
- * Nothing in ggml sets it; upstream's own scripts export it from the shell
- * before running llama-cli, and an app has no shell.
- *
- * It has to be set before the first ggml call of any kind: the registry builds
- * itself once, and the Hexagon registration opens its session then. That is why
- * this is called from Application.onCreate rather than from an engine.
- *
- * setenv is process-wide, so one call covers whisper and diffusion too — they
- * share this ggml.
- */
-JNIEXPORT void JNICALL
-Java_ai_ondevice_engine_LlamaBridge_nativeSetDspSearchPath(JNIEnv * env, jobject, jstring path) {
-    const std::string value = jni_to_string(env, path);
-    if (value.empty()) {
-        return;
-    }
-    setenv("ADSP_LIBRARY_PATH", value.c_str(), 1);
 }
 
 JNIEXPORT jstring JNICALL
@@ -586,28 +473,10 @@ Java_ai_ondevice_engine_LlamaBridge_nativeSystemInfo(JNIEnv * env, jobject) {
     return jni_from_string(env, dump_json(info));
 }
 
-/**
- * Every parameter key this binary will actually act on, with the reload flag
- * that only the table knows.
- *
- * The parameter screen used to take that list from the shipped manifest and
- * gate it with a hand-written `sinceBuild` string. That is a claim about the
- * `.so` made by a JSON file that has never met it, and the two drift in both
- * directions: a key upstream removed keeps rendering a control that silently
- * does nothing, and a key upstream added stays invisible until someone
- * remembers to edit the manifest.
- *
- * The table below is the same one `apply_params` dispatches through, so this is
- * not a description of the runtime — it is the runtime. No handle is needed
- * because the table is static, which matters: the screen opens long before any
- * model is loaded.
- */
+/** Every parameter key this binary will actually act on, with the reload flag that only the table knows. */
 JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_LlamaBridge_nativeSupportedParams(JNIEnv * env, jobject) {
-    // Aggregate-initialised: common_params has no user-provided default
-    // constructor, so `const common_params defaults;` will not compile. The
-    // members still get their in-class initialisers, which is exactly the set
-    // of upstream defaults being reported.
+    // Aggregate-initialised: common_params has no user-provided default constructor, so `const common_params defaults;` will not compile.
     const common_params defaults = {};
     const auto & readers = default_table();
 
@@ -623,10 +492,7 @@ Java_ai_ondevice_engine_LlamaBridge_nativeSupportedParams(JNIEnv * env, jobject)
     return jni_from_string(env, dump_json(out));
 }
 
-/**
- * Load a model. Every load-time parameter arrives as JSON — nothing about this
- * signature has to change when upstream adds one.
- */
+/** Load a model. */
 JNIEXPORT jlong JNICALL
 Java_ai_ondevice_engine_LlamaBridge_nativeLoad(JNIEnv * env, jobject, jstring jpath, jstring jparams) {
     const auto path       = jni_to_string(env, jpath);
@@ -634,26 +500,13 @@ Java_ai_ondevice_engine_LlamaBridge_nativeLoad(JNIEnv * env, jobject, jstring jp
 
     auto * engine = new od_engine();
 
-    // The app has already run §3.3's fit arithmetic and shown the user the
-    // numbers. Letting upstream silently pick a different context behind that
-    // promise would make the whole compatibility gate a lie.
+    // The app has already run §3.3's fit arithmetic and shown the user the numbers.
     engine->params.fit_params = false;
     engine->params.n_ctx      = 4096;
     engine->params.n_batch    = 512;
     engine->params.n_ubatch   = 256;
     engine->params.n_gpu_layers = 0;
     // Every core but one.
-    //
-    // This was `hardware_concurrency() / 2` — half the machine, on a constant
-    // that no screen showed and no setting reached. The Kotlin side computes a
-    // performance-core count and reports it in Settings, which made it look as
-    // though that number was what ran; it was never passed to anything. A
-    // caller can still override via the `n_threads` parameter, which is
-    // reload-only in llama.cpp and documented as such.
-    //
-    // One core is left free so the UI thread still has somewhere to draw the
-    // progress it is being asked to show — a device with nothing left to
-    // schedule the compositor on reads as hung rather than as busy.
     engine->params.cpuparams.n_threads =
         std::max(1, static_cast<int>(std::thread::hardware_concurrency()) - 1);
     engine->params.cpuparams_batch.n_threads = engine->params.cpuparams.n_threads;
@@ -699,10 +552,7 @@ Java_ai_ondevice_engine_LlamaBridge_nativeFree(JNIEnv *, jobject, jlong handle) 
     delete as_engine(handle);
 }
 
-/**
- * What the model actually says about itself. Everything here is read from GGUF
- * metadata — SPEC §1.3, no `when (modelName)` anywhere.
- */
+/** What the model actually says about itself. */
 JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_LlamaBridge_nativeInfo(JNIEnv * env, jobject, jlong handle) {
     auto * e = as_engine(handle);
@@ -722,9 +572,6 @@ Java_ai_ondevice_engine_LlamaBridge_nativeInfo(JNIEnv * env, jobject, jlong hand
     info["contextLoaded"] = static_cast<int32_t>(llama_n_ctx(e->ctx));
     info["layers"]        = llama_model_n_layer(e->model);
     info["embeddingLength"]   = n_embd;
-    // GQA: the KV projection is narrower than the model's embedding whenever
-    // there are fewer KV heads than query heads, and the whole KV-cache
-    // estimate on the model sheet depends on getting this right.
     info["embeddingLengthKv"] = n_head > 0 ? (n_embd / n_head) * std::max(1, n_head_kv) : n_embd;
     info["heads"]         = n_head;
     info["headsKv"]       = n_head_kv;
@@ -765,11 +612,7 @@ Java_ai_ondevice_engine_LlamaBridge_nativeApplyParams(JNIEnv * env, jobject, jlo
     return jni_from_string(env, dump_json(report));
 }
 
-/**
- * Render the chat template. This is what the prompt inspector shows and what
- * the tokenizer receives — the same string, produced once, never two code
- * paths that could drift (SPEC §4.4).
- */
+/** Render the chat template. */
 JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_LlamaBridge_nativeFormatPrompt(
         JNIEnv * env, jobject, jlong handle, jstring jmessages, jstring jtools, jboolean addGenerationPrompt) {
@@ -780,13 +623,7 @@ Java_ai_ondevice_engine_LlamaBridge_nativeFormatPrompt(
         common_chat_templates_inputs inputs;
         inputs.use_jinja             = true;
         inputs.add_generation_prompt = addGenerationPrompt == JNI_TRUE;
-        // Must match what the parser is given, and it was not: this defaults to
-        // NONE, so the applied template resolved to a format with no notion of
-        // reasoning. Setting it only on the parser was not enough — the format
-        // is decided here, at template-apply time, and a format that does not
-        // know about thinking cannot split it out however the parser is
-        // configured. The visible symptom was <think> sitting raw in the
-        // streamed reply instead of collapsing into its own block.
+        // Must match what the parser is given, and it was not: this defaults to NONE, so the applied template resolved to a format with no notion of reasoning.
         inputs.reasoning_format      = COMMON_REASONING_FORMAT_DEEPSEEK;
         inputs.enable_thinking       = true;
 
@@ -867,13 +704,7 @@ Java_ai_ondevice_engine_LlamaBridge_nativeTokenCount(JNIEnv * env, jobject, jlon
     return static_cast<jint>(common_tokenize(e->vocab, jni_to_string(env, jtext), true, true).size());
 }
 
-/**
- * Begin a generation.
- *
- * The prompt cache is the reason this returns a cache-hit count: a follow-up
- * turn shares its whole prefix with the last one, and re-decoding it would cost
- * seconds of visible latency on a phone for no reason.
- */
+/** Begin a generation. */
 JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_LlamaBridge_nativeStartGeneration(
         JNIEnv * env, jobject, jlong handle, jstring jprompt, jstring jstops) {
@@ -949,11 +780,7 @@ Java_ai_ondevice_engine_LlamaBridge_nativeStartGeneration(
     }));
 }
 
-/**
- * One step. Returns the raw piece plus the *parsed* deltas — upstream's own
- * chat parser separates reasoning from content and lifts tool calls out, so the
- * app never has to know a model's thinking tags or tool-call syntax.
- */
+/** One step. */
 JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_LlamaBridge_nativeNextToken(JNIEnv * env, jobject, jlong handle) {
     auto * e = as_engine(handle);
@@ -983,21 +810,7 @@ Java_ai_ondevice_engine_LlamaBridge_nativeNextToken(JNIEnv * env, jobject, jlong
         e->generated_tokens.push_back(token);
         e->n_generated++;
 
-        // Parse the whole partial reply each step. Upstream's parser is the one
-        // that knows every model family's reasoning tags and tool-call shapes;
-        // reimplementing that in Kotlin is exactly the model-specific knowledge
-        // SPEC §1.3 forbids.
-        //
-        // `generation_prompt` is deliberately left as the applied template set
-        // it. The generated grammar opens with `literal(generation_prompt)` and
-        // `common_chat_peg_parse` prepends the same string to the input so that
-        // literal has something to match; clearing it makes the very first rule
-        // fail, the parse throw, and the catch below hand back the whole raw
-        // reply. It was cleared for a while because the assistant header leaked
-        // into the output — but that was the *content-only fallback* parser,
-        // which has no literal to consume the prefix with, and it only ran at
-        // all because the arena above was never loaded. With a real parser the
-        // literal is consumed, not emitted.
+        // Parse the whole partial reply each step.
         common_chat_parser_params pparams(e->chat_params);
         pparams.parser           = e->chat_parser;
         pparams.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
@@ -1088,9 +901,6 @@ Java_ai_ondevice_engine_LlamaBridge_nativeNextToken(JNIEnv * env, jobject, jlong
             }
             out["toolCalls"] = calls;
         } catch (const std::exception & ex) {
-            // Loud, because this is what a silent failure looks like: the whole
-            // reply — thinking tags, tool-call syntax and all — handed back as
-            // if the model had written it as prose, and no tool ever run.
             LOGE("%s parse failed, falling back to raw text: %s",
                  common_chat_format_name(e->chat_params.format), ex.what());
             out["content"] = e->generated;

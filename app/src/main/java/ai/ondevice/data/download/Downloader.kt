@@ -27,22 +27,7 @@ import java.security.MessageDigest
 import kotlin.math.min
 import kotlin.math.pow
 
-/**
- * SPEC §3.4 — the downloader.
- *
- * The rules that shape it:
- *  - **Resume across app kill and reboot.** Byte offsets are persisted in Room
- *    after every flush, not held in memory.
- *  - **Integrity is checked, not assumed.** Every file is hashed against the
- *    repo's `lfs.oid` and rejected on mismatch — the S4 failure card shows both
- *    hashes rather than saying "something went wrong".
- *  - **Sharded models are one job.** N parts complete atomically or not at all.
- *  - **Companions are auto-queued** beside the primary file.
- *  - **Revision pinning**: files are fetched at the resolved commit, never at a
- *    moving `main`, so an upstream change is detected rather than silently
- *    swapped in.
- *  - Partial files are removed on cancel and swept on boot.
- */
+/** SPEC §3.4 — the downloader. */
 class Downloader(
     private val context: Context,
     private val client: OkHttpClient,
@@ -71,17 +56,7 @@ class Downloader(
         activeJobs[jobId] = scope.launch(Dispatchers.IO) { runJob(jobId) }
     }
 
-    /**
-     * Pick up jobs whose process died mid-flight.
-     *
-     * SPEC §3.4 promises a download survives the app being killed, and the
-     * foreground service covers the ordinary cases — but a crash, a force-stop
-     * or a reinstall leaves a row saying RUNNING with nothing running. Without
-     * this the job sits at 87% forever and the promise is false. Restarting is
-     * cheap because the `.part` is still there and the Range request resumes
-     * from its length; if the file went too, it starts over rather than
-     * trusting a byte count nothing backs up.
-     */
+    /** Pick up jobs whose process died mid-flight. */
     suspend fun resumeInterrupted() {
         val stalled = db.downloads().getActive()
         android.util.Log.i(TAG, "resumeInterrupted: ${stalled.size} stalled job(s)")
@@ -114,16 +89,6 @@ class Downloader(
             db.downloads().deleteById(jobId)
 
             // The library row goes too, unless the model was already installed.
-            //
-            // "Installed" is the *absence* of an active job, and the row is
-            // written before the first byte so a reboot knows what it was
-            // fetching. Deleting only the job therefore promoted a cancelled
-            // download to a finished install: the files had just been removed
-            // above, and the model still appeared in the library, never used,
-            // at its full advertised size.
-            //
-            // Guarded on the primary file, because cancelling a *re*-download of
-            // something already on disk must not delete the copy that works.
             val model = db.models().get(job.modelId)
             if (model != null && !File(model.localPath).exists()) {
                 db.models().deleteById(job.modelId)
@@ -167,11 +132,6 @@ class Downloader(
                 }.onFailure { throwable ->
                     lastError = classify(throwable)
                     attempt++
-                    // A checksum failure after a *resume* is far more often a
-                    // bad resume than a bad file on the server, and the partial
-                    // has already been deleted — so one clean attempt from zero
-                    // is worth making before telling the user the repo is
-                    // wrong. A second failure is reported as-is.
                     if (attempt == 1 && lastError?.kind == DownloadErrorKind.CHECKSUM_MISMATCH) {
                         android.util.Log.w(TAG, "${file.filename}: checksum failed, retrying from zero")
                         files[index] = files[index].copy(bytesDone = 0)
@@ -227,10 +187,7 @@ class Downloader(
         activeJobs.remove(jobId)
     }
 
-    /**
-     * One file, resuming from its persisted offset via an HTTP Range request,
-     * then verified against the expected sha256 before the `.part` is promoted.
-     */
+    /** One file, resuming from its persisted offset via an HTTP Range request, then verified against the expected sha256 before the `.part` is promoted. */
     private suspend fun downloadFile(
         jobId: String,
         file: DownloadFile,
@@ -241,16 +198,6 @@ class Downloader(
             partFile.parentFile?.mkdirs()
 
             // A finished file already at the destination is not re-fetched.
-            // Only a `.part` was ever resumed, so anything that had completed
-            // and then lost its library row — a wiped database, a cleared
-            // history, an app reinstall over kept files — cost a full download
-            // to get back, with the bytes sitting on disk the whole time.
-            //
-            // The size has to match and, where the repo publishes one, so does
-            // the checksum: "a file of the right name exists" is not evidence
-            // that it is this file. Where there is no published checksum the
-            // size is all there is, which is weaker, and still better than
-            // fetching a gigabyte to arrive at the same bytes.
             val dest = File(file.destPath)
             if (dest.isFile && file.sizeBytes > 0 && dest.length() == file.sizeBytes) {
                 val trustworthy = file.expectedSha256?.let {
@@ -280,12 +227,7 @@ class Downloader(
                 }
                 val body = response.body ?: throw java.io.IOException("Empty body")
 
-                // A Range request that comes back 200 instead of 206 is the
-                // whole file, not the tail. Writing it at the resume offset
-                // produces a file of the right *length* whose middle is
-                // garbage — which then fails the sha256 check with no clue why.
-                // A redirect or a proxy can drop the header, so this is checked
-                // rather than assumed.
+                // A Range request that comes back 200 instead of 206 is the whole file, not the tail.
                 val resumed = startAt > 0 && response.code == 206
                 val writeFrom = if (resumed) startAt else 0L
                 if (startAt > 0 && !resumed) {
@@ -395,14 +337,8 @@ class Downloader(
         return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
     }
 
-    /**
-     * SPEC §3.4 — orphan sweep on boot. Two directions: `.part` files with no
-     * job row, and job rows whose files have vanished.
-     */
+    /** SPEC §3.4 — orphan sweep on boot. */
     suspend fun sweepOrphans(modelsDir: File): List<File> = withContext(Dispatchers.IO) {
-        // Same literal-query reason as the resume above: a bound enum list
-        // matched nothing, which would have made this sweep delete the partial
-        // file of every *live* download it was supposed to protect.
         val known = db.downloads().getUnfinished()
             .flatMap { it.toJob().files.map { f -> f.destPath + PART_SUFFIX } }
             .toSet()

@@ -9,18 +9,13 @@ import ai.ondevice.data.db.PersonaEntity
 import ai.ondevice.data.db.PresetEntity
 import ai.ondevice.data.db.RuntimeBundleEntity
 import ai.ondevice.di.ApplicationScope
-import ai.ondevice.engine.HexagonSkels
 import ai.ondevice.engine.RuntimeRegistry
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/**
- * SPEC §13 — offline-first, no telemetry, no account, no crash reporting that
- * transmits content. There is deliberately nothing to initialise here beyond
- * seeding the local database.
- */
+/** SPEC §13 — offline-first, no telemetry, no account, no crash reporting that transmits content. */
 @HiltAndroidApp
 class OnDeviceApp : Application() {
 
@@ -36,31 +31,15 @@ class OnDeviceApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        // Before anything can touch ggml. Its backend registry builds itself
-        // once, on the first call from any of the three runtimes, and the NPU
-        // opens its DSP session while registering — so the search path for the
-        // DSP's own code has to already be set by then. Synchronous for the
-        // same reason: a coroutine would race the first Chat screen.
-        HexagonSkels.stage(this)
-        // A context is built for one device and cannot move, so changing the
-        // Compute device has to drop what is loaded rather than leave it
-        // resident on the device the user just stopped using.
         computeDeviceSwitch.start(scope)
         scope.launch {
             seed()
-            // A download interrupted by a crash, a force-stop or a reinstall
-            // leaves a row saying RUNNING with nothing behind it. §3.4 promises
-            // downloads survive the app being killed, so picking those up is
-            // part of keeping that promise rather than a nicety.
+            // A download interrupted by a crash, a force-stop or a reinstall leaves a row saying RUNNING with nothing behind it.
             downloader.resumeInterrupted()
         }
     }
 
-    /**
-     * Built-in presets and personas per SPEC §10 — all editable and deletable,
-     * nothing locked. Runtime rows mirror the CI-generated registry so the
-     * Runtimes screen has something real to show before the first update check.
-     */
+    /** Built-in presets and personas per SPEC §10 — all editable and deletable, nothing locked. */
     private suspend fun seed() {
         if (db.presets().count() == 0) {
             db.presets().insertAll(builtInPresets())

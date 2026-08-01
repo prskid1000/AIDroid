@@ -48,14 +48,7 @@ import ai.ondevice.ui.theme.NocturneType
 import ai.ondevice.ui.theme.Radius
 import ai.ondevice.ui.theme.ring
 
-/**
- * **S12 — Mask editor.**
- *
- * SPEC §5.3 asks for a real in-app brush editor for inpainting: brush size,
- * hardness, erase, invert, clear, undo. This is a working canvas, not a
- * placeholder — strokes accumulate, undo/redo walk the stack, and the mask is
- * saved with the generation so the result can be reproduced.
- */
+/** **S12 — Mask editor.** SPEC §5.3 asks for a real in-app brush editor for inpainting: brush size, hardness, erase, invert, clear, undo. */
 @Composable
 fun MaskEditorScreen(
     onCancel: () -> Unit,
@@ -129,9 +122,7 @@ fun MaskEditorScreen(
                     )
                 },
         ) {
-            // The real source the Image screen picked. Painting a mask over a
-            // stand-in would be busywork — the point of the brush is that you
-            // can see what you are confining the denoise to.
+            // The real source the Image screen picked.
             sourceUri?.let {
                 coil3.compose.AsyncImage(
                     model = it,
@@ -153,10 +144,7 @@ fun MaskEditorScreen(
                 }
             }
 
-            // The mask is composited off-screen so that erasing punches a hole
-            // in the overlay and reveals the source underneath. Painting the
-            // eraser in the background colour would work only over a stand-in;
-            // over a real photo it would smear grey across the image.
+            // The mask is composited off-screen so that erasing punches a hole in the overlay and reveals the source underneath.
             Canvas(
                 Modifier
                     .fillMaxSize()

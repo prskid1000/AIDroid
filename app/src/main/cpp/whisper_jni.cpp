@@ -1,11 +1,4 @@
 // whisper.cpp behind the same string-keyed contract as llama (SPEC §16.7).
-//
-// Transcription differs from generation in one way that shapes this file:
-// whisper works on a *window of audio*, not a token at a time. So the boundary
-// is "hand me float samples, get back segments", and the streaming behaviour
-// lives on the Kotlin side, which owns the microphone and decides how often to
-// re-decode. That keeps the audio path — where the latency actually is — in a
-// language that can talk to AudioRecord.
 
 #include <jni.h>
 
@@ -27,25 +20,7 @@
 
 using json = nlohmann::ordered_json;
 
-/**
- * JSON on its way out to Kotlin, with invalid UTF-8 replaced rather than thrown at.
- *
- * `dump()` defaults to `error_handler_t::strict`, which throws on a byte
- * sequence that is not valid UTF-8 — and across a JNI boundary an uncaught C++
- * exception is not an error, it is SIGABRT. The whole process dies with no
- * message anything in Kotlin can catch.
- *
- * Which is reachable from ordinary use, because every one of these runtimes
- * emits text a *piece* at a time: whisper's segments and llama's tokens are
- * byte-level, so a multi-byte character routinely arrives split across two of
- * them and each half is invalid on its own. Observed as exactly that — whisper
- * transcribing a noisy recording, `invalid UTF-8 byte at index 0: 0xA2`, and
- * the app gone.
- *
- * `replace` substitutes U+FFFD for the bad bytes. A replacement character in a
- * transcript is a cosmetic flaw in one word; the alternative is losing the
- * conversation, the recording and the run.
- */
+/** JSON on its way out to Kotlin, with invalid UTF-8 replaced rather than thrown at. */
 static std::string dump_json(const json & value) {
     return value.dump(-1, ' ', false, json::error_handler_t::replace);
 }
@@ -80,7 +55,8 @@ struct od_whisper {
     int32_t max_context     = -1;
     int32_t offset_ms       = 0;
     int32_t duration_ms     = 0;
-    int32_t threads         = std::max(1, (int) (std::thread::hardware_concurrency() / 2));
+    // Every core but one.
+    int32_t threads         = std::max(1, (int) std::thread::hardware_concurrency() - 1);
     float   temperature     = 0.0f;
     float   temperature_inc = 0.2f;
     float   entropy_thold   = 2.4f;
@@ -126,11 +102,6 @@ std::string as_string(const json & v) {
     return v.is_string() ? v.get<std::string>() : dump_json(v);
 }
 
-/**
- * The dispatch table, one row per manifest key — the same shape as llama's, for
- * the same reason: adding an upstream parameter must never be a signature
- * change.
- */
 struct row { void (*apply)(od_whisper &, const json &); };
 
 const std::map<std::string, row> & table() {
@@ -164,13 +135,7 @@ const std::map<std::string, row> & table() {
     return t;
 }
 
-// Every setter above reads the live value as its fallback, so a
-// default-constructed od_whisper holds this build's default for each key. The
-// manifest used to assert them separately; it now only describes.
-//
-// Three keys are named differently on the two sides — offset_t, duration and
-// prompt are offset_ms, duration_ms and initial_prompt on the struct — which is
-// the reason this maps by key rather than deriving anything from field names.
+// Every setter above reads the live value as its fallback, so a default-constructed od_whisper holds this build's default for each key.
 const std::map<std::string, json (*)(const od_whisper &)> & default_table() {
     static const std::map<std::string, json (*)(const od_whisper &)> t = {
         { "language",         [](const od_whisper & e) { return json(e.language); } },
@@ -203,9 +168,7 @@ const std::map<std::string, json (*)(const od_whisper &)> & default_table() {
 }
 
 whisper_full_params build_params(od_whisper & e) {
-    // Beam search when a beam size was asked for, greedy otherwise. whisper
-    // treats these as different parameter shapes, so the choice has to be made
-    // before the struct exists rather than as a field on it.
+    // Beam search when a beam size was asked for, greedy otherwise.
     whisper_full_params p = whisper_full_default_params(
         e.beam_size > 1 ? WHISPER_SAMPLING_BEAM_SEARCH : WHISPER_SAMPLING_GREEDY);
 
@@ -249,20 +212,7 @@ whisper_full_params build_params(od_whisper & e) {
     return p;
 }
 
-/**
- * whisper's log, forwarded to logcat — which llama has had and whisper has not.
- *
- * The line worth having is ggml's placement report: how many of the encoder's
- * layers a backend took and how many came back to the CPU. Without it,
- * "transcribe on the NPU" is a setting whose effect can only be inferred from a
- * stopwatch, and a backend that quietly declined every layer looks exactly like
- * one that took them.
- *
- * DEBUG is dropped rather than forwarded. whisper logs per-decode detail at that
- * level and the capture loop decodes every few seconds, so passing it through
- * would bury the load-time lines this exists for. CONT is a continuation of the
- * line before it, so it keeps that line's level rather than being discarded.
- */
+/** whisper's log, forwarded to logcat — which llama has had and whisper has not. */
 void forward_log(ggml_log_level level, const char * text, void *) {
     if (text == nullptr) return;
     const char * trimmed = text;
@@ -284,12 +234,7 @@ void forward_log(ggml_log_level level, const char * text, void *) {
 
 extern "C" {
 
-/**
- * The keys this binary will act on. See the note on llama's copy of this: the
- * parameter screen asks the runtime rather than trusting a manifest that has
- * never met it. Nothing here needs a reload — whisper's parameters are read
- * afresh for each transcription — so every row says so.
- */
+/** The keys this binary will act on. */
 JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_WhisperBridge_nativeSupportedParams(JNIEnv * env, jobject) {
     const od_whisper defaults = {};
@@ -307,14 +252,7 @@ Java_ai_ondevice_engine_WhisperBridge_nativeSupportedParams(JNIEnv * env, jobjec
     return jni_from_string(env, dump_json(out));
 }
 
-/**
- * What ggml registered in *this* binary — the same question llama and sd are
- * asked, and it was the one runtime with no way to answer.
- *
- * That gap was not cosmetic. With no answer, the registry fell back to the
- * manifest, which lists what CMake compiles rather than what the phone has, so
- * the Compute device list on a whisper model was a statement about the APK.
- */
+/** What ggml registered in *this* binary — the same question llama and sd are asked, and it was the one runtime with no way to answer. */
 JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_WhisperBridge_nativeSystemInfo(JNIEnv * env, jobject) {
     json backends = json::array();
@@ -336,17 +274,6 @@ Java_ai_ondevice_engine_WhisperBridge_nativeLoad(JNIEnv * env, jobject, jstring 
 
     whisper_context_params cparams = whisper_context_default_params();
     // The Compute device setting, in the two fields whisper offers.
-    //
-    // This was a hardcoded `use_gpu = true` with a comment arguing it was safe
-    // because the device loop finds nothing when no GPU registered. True, and
-    // beside the point: once two accelerators register, "the GPU" is a choice,
-    // and a constant makes it silently — whisper takes the *first* device of
-    // GPU type, which is an ordering, not a decision. The NPU registers as a
-    // GPU-type device too, so on this build that constant would have picked
-    // whichever backend happened to register first.
-    //
-    // `gpu_device` counts only devices of GPU or IGPU type, so the index has to
-    // be counted the same way rather than taken from the full device list.
     cparams.use_gpu = false;
     if (!backend.empty() && !jni_iequals(backend, "CPU")) {
         int gpu_index = 0;
@@ -369,10 +296,7 @@ Java_ai_ondevice_engine_WhisperBridge_nativeLoad(JNIEnv * env, jobject, jstring 
     WLOGI("load %s on %s", path.c_str(),
           cparams.use_gpu ? backend.c_str() : "CPU");
 
-    // A failed load is an exception on the Kotlin side, never an abort. ggml
-    // throws on a truncated or malformed file rather than returning null, and
-    // an uncaught C++ exception crossing JNI is SIGABRT — the whole process,
-    // with no message anything in Kotlin can catch.
+    // A failed load is an exception on the Kotlin side, never an abort.
     auto * engine = new od_whisper();
     try {
         engine->ctx = whisper_init_from_file_with_params(path.c_str(), cparams);
@@ -443,13 +367,7 @@ Java_ai_ondevice_engine_WhisperBridge_nativeInfo(JNIEnv * env, jobject, jlong ha
     return jni_from_string(env, dump_json(info));
 }
 
-/**
- * Transcribe a block of mono 16 kHz float samples.
- *
- * Per-segment confidence is averaged from the token probabilities rather than
- * invented: the live view fades text by it, and a fade that does not track the
- * decoder's actual certainty would be decoration pretending to be information.
- */
+/** Transcribe a block of mono 16 kHz float samples. */
 JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_WhisperBridge_nativeTranscribe(
         JNIEnv * env, jobject, jlong handle, jfloatArray jsamples) {
@@ -466,10 +384,7 @@ Java_ai_ondevice_engine_WhisperBridge_nativeTranscribe(
     std::lock_guard<std::mutex> lock(e->mutex);
     whisper_full_params params = build_params(*e);
 
-    // A decode that throws is a failed transcription, not a dead app. ggml
-    // allocates inside this call and reports failure by throwing, and an
-    // uncaught C++ exception crossing JNI is SIGABRT — the app disappears with
-    // nothing in the log but a signal.
+    // A decode that throws is a failed transcription, not a dead app.
     int64_t t0 = 0;
     try {
         t0 = whisper_full(e->ctx, params, samples.data(), (int) samples.size());

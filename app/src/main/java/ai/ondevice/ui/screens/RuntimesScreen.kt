@@ -41,18 +41,7 @@ import ai.ondevice.ui.theme.NocturneType
 import ai.ondevice.ui.theme.Radius
 import ai.ondevice.ui.vm.SettingsViewModel
 
-/**
- * **S15 — Settings → Runtimes.**
- *
- * SPEC §17: engines are versioned, replaceable, separately installable
- * artifacts. What this screen has to communicate honestly is the constraint
- * behind them — Android's W^X enforcement makes true in-process `.so` hot-swap
- * impossible (§1.6, §17.1), so an update is a signed package delivered by the
- * package manager, not a downloaded library.
- *
- * §17.7 also insists update notes state what actually changed — engine version,
- * new parameters, new architectures — never "improvements and bug fixes".
- */
+/** **S15 — Settings → Runtimes.** SPEC §17: engines are versioned, replaceable, separately installable artifacts. */
 @Composable
 fun RuntimesScreen(
     onBack: () -> Unit,
@@ -105,10 +94,7 @@ fun RuntimesScreen(
                     Text("v${manifest.version}", style = NocturneType.CardTitleSm, modifier = Modifier.weight(1f))
                     NTag("bundled", style = NTagStyle.Neutral)
                 }
-                // No "Ed25519 ✓" and no "Auto-check · Wi-Fi only". Both described
-                // an over-the-air update path that does not exist: nothing writes
-                // the manifest table, so the app only ever reads the copy shipped
-                // inside it, and there is no signature check to pass.
+                // No "Ed25519 ✓" and no "Auto-check · Wi-Fi only".
                 Text(
                     "Ships inside the app. Data, not code — it can retier, relabel and reveal " +
                         "parameters the installed engine already supports. It cannot add capability " +
@@ -243,8 +229,5 @@ private fun RuntimeCard(runtime: RuntimeBundleEntity, viewModel: SettingsViewMod
 }
 
 private fun backendLabel(raw: String): String = runCatching {
-    // The API rather than the device, because this screen is about what the
-    // build contains — "OpenCL" says which of several routes to the GPU was
-    // compiled, and that is the distinction a runtime card exists to draw.
     ai.ondevice.core.BackendId.valueOf(raw.trim()).api
 }.getOrDefault(raw.trim())

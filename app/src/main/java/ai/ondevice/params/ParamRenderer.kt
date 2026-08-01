@@ -27,29 +27,8 @@ import ai.ondevice.ui.theme.NocturneType
 import ai.ondevice.ui.theme.ruleBelow
 import kotlinx.serialization.json.JsonPrimitive
 
-/**
- * SPEC §16.4 — the renderer.
- *
- * **There is exactly one composable per [ParamType], and none per parameter.**
- * Adding a new upstream parameter of an existing type requires no code here at
- * all; the only legitimate reason to touch this file is introducing a new
- * *type*. If you find yourself adding a `when (spec.key)`, stop — the parameter
- * belongs in the manifest (Appendix A #9).
- *
- * Every row shows, per §9: its current value, a modified-from-default marker, a
- * reload badge when the parameter needs one, the inline help, and a reset
- * affordance.
- */
-/**
- * One installed file a `path` parameter can point at.
- *
- * A path parameter names a *file on this device*, and the only files that are
- * certainly there are the ones the app downloaded. Offering a free text box
- * asked the user to type an absolute path from memory — for a file in an
- * app-private external directory they have no reason to know the name of — and
- * accepted anything, including a path that does not exist, with the failure
- * arriving later from the runtime. So the choices are the installed models.
- */
+/** SPEC §16.4 — the renderer. */
+/** One installed file a `path` parameter can point at. */
 data class PathChoice(
     val label: String,
     val detail: String,
@@ -181,21 +160,9 @@ private fun ParamControl(
 
         ParamType.PATH -> {
             val v = values.string(spec.key) ?: (spec.default as? JsonPrimitive)?.content.orEmpty()
-            // A path parameter names one *kind* of file, and the manifest key
-            // already says which: AttachmentRole carries the key the runtime
-            // takes each role under, so `control_net` can offer ControlNets and
-            // nothing else. Where no role claims the key — a bare
-            // `diffusion_model`, say — everything installed is offered, because
-            // guessing narrower would hide a legitimate choice.
             val wanted = ai.ondevice.core.AttachmentRole.entries
                 .firstOrNull { it.paramKey == spec.key }
-            // When the role is known and nothing installed matches it, the
-            // answer is "nothing" — not "everything". An earlier version fell
-            // back to the full list on the reasoning that a narrow guess might
-            // hide a legitimate choice, and the result was CLIP-L offering a
-            // whisper model and two LLMs. None of those is a text encoder, and
-            // pointing clip_l at one produces a load failure inside sd.cpp with
-            // nothing to connect it back to this control.
+            // When the role is known and nothing installed matches it, the answer is "nothing" — not "everything".
             val choices = when (wanted) {
                 null -> pathChoices
                 else -> pathChoices.filter { it.role == wanted }
@@ -207,19 +174,7 @@ private fun ParamControl(
                         "inside the runtime.",
                 )
             } else {
-                // Same shape as the chat model picker: choose from what is
-                // installed. "None" is first because clearing it must be as easy
-                // as setting it.
-                // A dropdown rather than pills: these labels are model names and
-                // filenames, which wrap into a paragraph as chips and stop making
-                // the current value obvious.
-                // NDropdown reports the chosen *label*, and the selection is
-                // resolved by looking that string back up — so two choices that
-                // render identically would both resolve to whichever came
-                // first, silently setting the wrong path. Labels are filenames
-                // now and rarely collide, but two roles' worth of files can
-                // live in different directories under the same name, so make
-                // uniqueness a property of the list rather than a hope.
+                // Same shape as the chat model picker: choose from what is installed.
                 val labels = listOf("None") + choices.mapIndexed { index, choice ->
                     if (choices.count { it.label == choice.label } > 1) {
                         "${choice.label}  (${index + 1})"
@@ -287,9 +242,7 @@ private fun ParamControl(
         }
 
         ParamType.ORDERED_LIST -> {
-            // The sampler chain gets its own full screen (S9) because ordering
-            // materially changes output and a row here can't carry a drag
-            // handle. This is the entry point to it.
+            // The sampler chain gets its own full screen (S9) because ordering materially changes output and a row here can't carry a drag handle.
             val order = values.stringList(spec.key)
                 ?: (spec.default as? kotlinx.serialization.json.JsonArray)
                     ?.mapNotNull { (it as? JsonPrimitive)?.content }
@@ -327,10 +280,7 @@ private fun NumericField(
     )
 }
 
-/**
- * Sliders are step-snapped when the manifest gives a step, so a value the user
- * drags to is one the runtime will actually accept.
- */
+/** Sliders are step-snapped when the manifest gives a step, so a value the user drags to is one the runtime will actually accept. */
 private fun discreteSteps(spec: ParamSpec): Int {
     val min = spec.min ?: return 0
     val max = spec.max ?: return 0

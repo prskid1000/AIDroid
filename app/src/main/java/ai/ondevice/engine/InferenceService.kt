@@ -21,25 +21,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/**
- * SPEC §2.1 — the inference host. It survives backgrounding and owns
- * memory-pressure negotiation and the wake-lock.
- *
- * Two rules from the spec are enforced here rather than in the UI, because the
- * UI is not guaranteed to exist while generation runs:
- *  - the wake-lock is held **only** while generating, and released on
- *    completion;
- *  - generation is cancellable at every stage, and cancelling frees native
- *    memory rather than merely detaching the callback.
- *
- * There is deliberately no thermal policy. The kernel governor already throttles
- * a hot SoC, and the app's own layer over it did not work: three of the four
- * settings wrote `n_threads` into a struct that a live llama.cpp context never
- * re-reads (it is reload-only), so "reduce threads" and "downshift to CPU"
- * changed nothing at all, and the policy was sampled once with `first()` so
- * editing it did nothing until the service restarted. A control that reads as
- * protection and provides none is worse than admitting the platform handles it.
- */
+/** SPEC §2.1 — the inference host. */
 @AndroidEntryPoint
 class InferenceService : LifecycleService() {
 

@@ -13,13 +13,7 @@ import kotlinx.coroutines.flow.map
 
 private val Context.dataStore by preferencesDataStore(name = "ondevice_prefs")
 
-/**
- * Everything on the Settings screen that isn't a row in the database.
- *
- * There is deliberately no analytics opt-in and no account here: SPEC §13 —
- * no telemetry, no login. The HF token is the one secret and it lives in the
- * Keystore, not in this store.
- */
+/** Everything on the Settings screen that isn't a row in the database. */
 class AppPrefs(private val context: Context) {
 
     private object Keys {
@@ -39,21 +33,7 @@ class AppPrefs(private val context: Context) {
         val enabledToolProviders = androidx.datastore.preferences.core.stringSetPreferencesKey("enabled_tool_providers")
     }
 
-    /**
-     * Which piece of silicon to run on: one of [BackendId], by name.
-     *
-     * There is no "auto" any more, and its history is the argument against it.
-     * It first meant benchmark-driven selection, which sounded better than it
-     * was — llama.cpp registered one backend, so the benchmark compared CPU
-     * with itself. It then meant "the first backend registered", which is not a
-     * choice, it is an ordering. A device with three real options deserves to
-     * be asked, and every answer is clamped to what actually registered, so a
-     * wrong one degrades rather than fails.
-     *
-     * CPU is the default because it is the one that always works. Anything
-     * stored by an older build — including the literal string "auto" — reads
-     * back as CPU.
-     */
+    /** Which piece of silicon to run on: one of [BackendId], by name. */
     val backendMode: Flow<String> = context.dataStore.data.map { stored ->
         val raw = stored[Keys.backendMode]
         BackendId.entries.firstOrNull { it.name == raw }?.name ?: BackendId.CPU.name
@@ -79,26 +59,13 @@ class AppPrefs(private val context: Context) {
 
     val lastConversationId: Flow<String?> = context.dataStore.data.map { it[Keys.lastConversationId] }
 
-    /**
-     * The SAF tree the user picked for exports, as a URI string.
-     *
-     * Stored rather than asked for every time, because a picker on every
-     * save is the reason people stop using export. [ai.ondevice.data.ExportStore]
-     * re-checks the grant before trusting this.
-     */
+    /** The SAF tree the user picked for exports, as a URI string. */
     val exportFolder: Flow<String?> = context.dataStore.data.map { it[Keys.exportFolder] }
 
-    /**
-     * Tool use is off until asked for. A model that is never told tools exist
-     * cannot call one, and that is the safe default when some of them reach a
-     * third-party server.
-     */
+    /** Tool use is off until asked for. */
     val toolsEnabled: Flow<Boolean> = context.dataStore.data.map { it[Keys.toolsEnabled] ?: false }
 
-    /**
-     * Which providers are offered. The built-in set is pre-selected because it
-     * touches nothing but this device; an MCP server has to be ticked by hand.
-     */
+    /** Which providers are offered. */
     val enabledToolProviders: Flow<Set<String>> = context.dataStore.data.map {
         it[Keys.enabledToolProviders] ?: setOf(ai.ondevice.tools.BuiltInToolProvider.ID)
     }

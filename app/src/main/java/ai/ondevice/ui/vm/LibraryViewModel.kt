@@ -31,15 +31,7 @@ data class ConversationSummary(
     val preview: String,
 )
 
-/**
- * Everything this device has produced.
- *
- * Three of the four kinds were already being written and only one could be read
- * back: images had a gallery, conversations were reachable only as "whichever
- * one was open last", transcripts accumulated in a table nothing queried, and
- * rendered speech was not recorded at all. The work was never the storage — it
- * was that nothing enumerated it.
- */
+/** Everything this device has produced. */
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
     private val db: OnDeviceDatabase,
@@ -48,12 +40,6 @@ class LibraryViewModel @Inject constructor(
     private val _section = MutableStateFlow(LibrarySection.CHATS)
     val section: StateFlow<LibrarySection> = _section.asStateFlow()
 
-    /**
-     * Counts and previews come from the messages table rather than the
-     * conversation row, because the row has no idea what is in it — a thread
-     * listed by title alone is unrecognisable once the titles are all "New
-     * conversation".
-     */
     val conversations: StateFlow<List<ConversationSummary>> =
         combine(
             db.conversations().observeAll(),
@@ -62,10 +48,7 @@ class LibraryViewModel @Inject constructor(
             val byThread = messages.groupBy { it.conversationId }
             threads.mapNotNull { thread ->
                 val theirs = byThread[thread.id].orEmpty()
-                // A conversation row exists from the moment Chat opens, before
-                // anything has been said. That is not history, it is the empty
-                // page you are standing on — listing it put "Empty conversation
-                // · 0 messages" at the top of the library every time.
+                // A conversation row exists from the moment Chat opens, before anything has been said.
                 if (theirs.isEmpty()) return@mapNotNull null
                 ConversationSummary(
                     conversation = thread,
@@ -89,15 +72,7 @@ class LibraryViewModel @Inject constructor(
         _section.value = section
     }
 
-    /**
-     * Deletes take the file and the recorded run with them.
-     *
-     * Leaving the WAV or the PNG behind would turn every removal into an orphan
-     * the storage meter still counts and no screen can reach — the exact state
-     * the orphan report exists to clean up after. A `prediction_runs` row is the
-     * same problem in the database: a record of what it cost to make something
-     * that no longer exists, which nothing will ever look up again.
-     */
+    /** Deletes take the file and the recorded run with them. */
     fun deleteImage(image: GeneratedImageEntity) {
         viewModelScope.launch {
             runCatching { java.io.File(image.path).delete() }
@@ -114,10 +89,7 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
-    /**
-     * A transcript's source is the user's own recording or a file they chose, so
-     * only the record goes.
-     */
+    /** A transcript's source is the user's own recording or a file they chose, so only the record goes. */
     fun deleteTranscript(transcript: TranscriptEntity) {
         viewModelScope.launch {
             db.predictionRuns().deleteForArtifact(transcript.id)
@@ -125,15 +97,7 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
-    /**
-     * A thread, its messages and every run they recorded.
-     *
-     * Moved off the shared chat view model, which the library used to reach into
-     * purely to borrow this function. That coupling meant the library held a
-     * whole chat session — its loaded model, its streaming state — to delete a
-     * row. The chat screen keeps its own copy for the thread it is *in*, where
-     * it also has to pick a replacement conversation; this one only removes.
-     */
+    /** A thread, its messages and every run they recorded. */
     fun deleteConversation(id: String) {
         viewModelScope.launch {
             db.messages().getFor(id).forEach { db.predictionRuns().deleteForArtifact(it.id) }

@@ -13,11 +13,7 @@ import ai.ondevice.core.ModelFormat
 import ai.ondevice.core.PredictionKind
 import ai.ondevice.core.RuntimeState
 
-/**
- * Enums are stored by name, not ordinal. An ordinal column silently
- * reinterprets itself the moment someone inserts a value into the middle of an
- * enum; the name survives that.
- */
+/** Enums are stored by name, not ordinal. */
 class Converters {
     @TypeConverter fun modalityTo(v: Modality?): String? = v?.name
     @TypeConverter fun modalityFrom(v: String?): Modality? = v?.let { runCatching { Modality.valueOf(it) }.getOrNull() }
@@ -81,49 +77,17 @@ abstract class OnDeviceDatabase : RoomDatabase() {
     abstract fun mcpServers(): McpServerDao
     abstract fun predictionRuns(): PredictionRunDao
 
-    /**
-     * Versions, with a guard so a bump stays deliberate.
-     *
-     * The schema had reached v4 through three migrations, each written to carry
-     * an installed base that does not exist: this app has never shipped, and the
-     * only databases in the world are on development devices that are wiped
-     * whenever the model set changes anyway. Three migration scripts, three
-     * exported schema files and a backfill whose correctness nobody could check
-     * against real data — all of it maintenance for a population of zero. So the
-     * schema was restated once, at v1, and grows from there.
-     *
-     * The danger was never v1. It was v2: a destructive fallback that is correct
-     * today reads exactly the same on the day someone's conversations are in
-     * here, and nothing would have failed to warn about it. The fallback is now
-     * debug-only, so a version bump without a matching entry in [MIGRATIONS]
-     * throws on a release build instead of quietly emptying the database.
-     * `OnDeviceDatabaseMigrationTest` fails sooner still, at compile-and-test
-     * time, which is where this should be caught.
-     */
+    /** Versions, with a guard so a bump stays deliberate. */
     companion object {
         const val NAME = "ondevice.db"
 
-        /**
-         * One [Migration] per version step, in order, from 1 to
-         * [DATABASE_VERSION]. Empty while the schema has never changed.
-         *
-         * Adding a migration is not optional once the app has shipped: Room only
-         * consults this list, and anything it cannot find a path for is a
-         * refusal on release builds.
-         */
+        /** One [Migration] per version step, in order, from 1 to [DATABASE_VERSION]. */
         val MIGRATIONS: Array<androidx.room.migration.Migration> =
             arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
     }
 }
 
-/**
- * v2 — `syntheses`.
- *
- * Speak already wrote its WAV to disk; nothing recorded that it had. A new table
- * only, so there is no data to carry and nothing to get wrong: the migration
- * creates it and the index Room expects, and every existing row in every other
- * table is untouched.
- */
+/** v2 — `syntheses`. */
 private val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
     override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
         db.execSQL(
@@ -147,30 +111,14 @@ private val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
     }
 }
 
-/**
- * v3 — which tools on an MCP server the user has switched off.
- *
- * A column with a default, so existing rows land on "nothing disabled", which
- * is what they meant before the column existed. `lastToolsJson` changes meaning
- * in the same release — from a comma-joined list of names to a JSON array of
- * name and description — but its *type* does not, and the reader accepts both,
- * so there is nothing to rewrite here.
- */
+/** v3 — which tools on an MCP server the user has switched off. */
 private val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
     override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE `mcp_servers` ADD COLUMN `disabledToolsJson` TEXT NOT NULL DEFAULT '[]'")
     }
 }
 
-/**
- * v4 — what each prediction cost.
- *
- * A new table only, so nothing existing is touched and there is no backfill to
- * get wrong: runs recorded from this version on have traces, and everything
- * generated before simply has none, which is the truth. The two indices match
- * what Room derives from the entity's `@Index` declarations, and they have to,
- * or Room's own schema validation rejects the migrated database on open.
- */
+/** v4 — what each prediction cost. */
 private val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
     override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
         db.execSQL(
@@ -203,29 +151,11 @@ private val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
     }
 }
 
-/**
- * Drop `benchmarks`.
- *
- * The table stored one row per model per backend, and llama.cpp registers one
- * backend in this build — so every row it ever held was a measurement of CPU
- * against itself, and the selection it fed then picked the only candidate. The
- * rows are not worth carrying and there is nothing to migrate them into.
- *
- * `DROP TABLE IF EXISTS` rather than `DROP TABLE`, because a database created at
- * v4 by a build that had already been rebuilt without the entity has no such
- * table, and a migration that fails on a database it was meant to repair is
- * worse than the schema drift it fixes.
- */
+/** Drop `benchmarks`. */
 private val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
     override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
         db.execSQL("DROP TABLE IF EXISTS `benchmarks`")
     }
 }
 
-/**
- * Named rather than written into the annotation so a test can compare it with
- * [OnDeviceDatabase.MIGRATIONS] — an annotation argument is not readable at
- * runtime, and the pair only means anything when they are checked against each
- * other.
- */
 internal const val DATABASE_VERSION = 5

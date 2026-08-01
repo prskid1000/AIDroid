@@ -1,14 +1,4 @@
 // Grapheme-to-phoneme, via espeak-ng.
-//
-// Kokoro does not read text. Its input is a sequence of IPA symbols drawn from
-// a fixed 115-entry vocabulary, and something has to turn "read aloud" into
-// /ɹˈiːd ɐlˈaʊd/ before the model sees it. That something is espeak-ng, which
-// is also what Kokoro's own training pipeline used — so this is not an
-// approximation of the reference implementation, it is the same front end.
-//
-// espeak has global state and is not thread-safe, so every entry point here
-// takes one lock. Phonemisation is microseconds against a model inference of
-// hundreds of milliseconds, so serialising it costs nothing worth measuring.
 
 #include <jni.h>
 
@@ -26,18 +16,7 @@ std::mutex        g_mutex;
 bool              g_ready = false;
 std::string       g_voice;
 
-/**
- * Punctuation espeak consumes but Kokoro wants to see.
- *
- * `espeak_TextToPhonemes` stops at a clause boundary and swallows the mark that
- * ended it. That mark is not decoration: Kokoro's vocabulary contains `.`, `?`
- * and `,` precisely because they carry the prosody, and a paragraph phonemised
- * without them comes back as one flat unbroken breath. So the consumed span is
- * inspected after each call and the terminator put back.
- *
- * Only the marks actually in the model's vocabulary are restored — anything
- * else would tokenise to nothing and just be dropped downstream.
- */
+/** Punctuation espeak consumes but Kokoro wants to see. */
 const char * const KEPT_PUNCTUATION = ";:,.!?";
 
 /** The last kept punctuation mark in [begin, end), or 0 if there is none. */
@@ -55,13 +34,7 @@ char trailing_punctuation(const char * begin, const char * end) {
 
 extern "C" {
 
-/**
- * Point espeak at its data and load a voice.
- *
- * [dataParent] is the directory *containing* `espeak-ng-data`, which is how
- * espeak's own path convention works. The app unpacks that tree out of assets
- * on first run, because espeak reads it with stdio and an asset is not a file.
- */
+/** Point espeak at its data and load a voice. */
 JNIEXPORT void JNICALL
 Java_ai_ondevice_speech_PhonemizerBridge_nativeInit(
         JNIEnv * env, jobject, jstring jdataParent, jstring jvoice) {
@@ -71,9 +44,7 @@ Java_ai_ondevice_speech_PhonemizerBridge_nativeInit(
     const auto voice       = jni_to_string(env, jvoice);
 
     if (!g_ready) {
-        // DONT_EXIT matters: espeak's default failure mode is to call exit(),
-        // which on Android takes the whole app down with no message. With the
-        // flag it returns an error and we can say what happened.
+        // DONT_EXIT matters: espeak's default failure mode is to call exit(), which on Android takes the whole app down with no message.
         const int rate = espeak_Initialize(
             AUDIO_OUTPUT_SYNCHRONOUS, 0, data_parent.c_str(), espeakINITIALIZE_DONT_EXIT);
         if (rate == EE_INTERNAL_ERROR) {
@@ -94,13 +65,7 @@ Java_ai_ondevice_speech_PhonemizerBridge_nativeInit(
     }
 }
 
-/**
- * Text in, IPA out.
- *
- * espeak returns one clause per call and advances the pointer, so this loops
- * until the pointer comes back null. Phoneme mode 0x02 is "IPA, no separator",
- * which is exactly the alphabet Kokoro's tokeniser indexes.
- */
+/** Text in, IPA out. */
 JNIEXPORT jstring JNICALL
 Java_ai_ondevice_speech_PhonemizerBridge_nativePhonemize(
         JNIEnv * env, jobject, jstring jtext) {

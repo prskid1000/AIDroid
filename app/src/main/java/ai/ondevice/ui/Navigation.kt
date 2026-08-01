@@ -31,14 +31,7 @@ import ai.ondevice.ui.screens.ToolsScreen
 import ai.ondevice.ui.screens.VoiceScreen
 import ai.ondevice.ui.theme.NIcons
 
-/**
- * Routes.
- *
- * The canvas' own framing: SPEC §12's ten screens collapse into three modalities
- * plus history and system config, so there are six bottom destinations — Chat,
- * Image, Voice, Library, Models, Settings — and everything else is a push or a
- * sheet inside one of them.
- */
+/** Routes. */
 object Routes {
     const val CHAT = "chat"
     const val IMAGE = "image"
@@ -55,15 +48,7 @@ object Routes {
     const val ALL_PARAMETERS = "params/all?tier={tier}&runtime={runtime}"
     const val SAMPLER_CHAIN = "params/samplers"
 
-    /**
-     * One parameter screen, told which tier and which runtime to render.
-     *
-     * `runtime` has no default on purpose. It used to fall back to llama.cpp,
-     * and the model detail screen never passed one — so Parameters on a Kokoro,
-     * whisper, diffusion or OmniVoice model opened llama.cpp's sampler list. A
-     * default that is right for one caller and silently wrong for the next is
-     * worse than an argument every caller has to state.
-     */
+    /** One parameter screen, told which tier and which runtime to render. */
     fun parameters(
         tier: ai.ondevice.core.Tier = ai.ondevice.core.Tier.BASIC,
         runtime: String,
@@ -71,39 +56,20 @@ object Routes {
     const val PROMPT_INSPECTOR = "chat/prompt"
     const val MASK_EDITOR = "image/mask"
 
-    /**
-     * One library item, opened. Under Library and not under the tab that made
-     * it: `NBottomBar` highlights by route prefix, so an image detail routed
-     * under `image/` would light the Image tab while the user is standing in a
-     * screen they reached from the library — the mistake the old gallery route
-     * made before it was moved here.
-     */
+    /** One library item, opened. */
     const val LIBRARY_ITEM = "library/item/{kind}/{id}"
 
-    /**
-     * The id is a UUID for three of the four kinds and a conversation id for the
-     * fourth, so nothing here needs escaping today — but it is escaped anyway,
-     * for the same reason [modelDetail] has to: an unescaped separator turns one
-     * argument into two path segments and the router simply fails to match.
-     */
     fun libraryItem(kind: PredictionKind, id: String) =
         "library/item/${kind.name}/${android.net.Uri.encode(id)}"
 
     const val RUNTIMES = "settings/runtimes"
     const val TOOLS = "settings/tools"
 
-    /**
-     * A model id is `owner/repo:quant`, so it carries both a slash and a colon.
-     * Both have to be escaped or the router reads them as extra path segments
-     * and cannot match the destination at all.
-     */
+    /** A model id is `owner/repo:quant`, so it carries both a slash and a colon. */
     fun modelDetail(modelId: String) = "models/detail/${android.net.Uri.encode(modelId)}"
 }
 
-/**
- * Three things this device makes, then the two that describe it: what it has
- * made, and what it can make things with.
- */
+/** Three things this device makes, then the two that describe it: what it has made, and what it can make things with. */
 val BottomDestinations = listOf(
     NavDestination("Chat", NIcons.Chat, Routes.CHAT),
     NavDestination("Image", NIcons.Image, Routes.IMAGE),
@@ -111,11 +77,7 @@ val BottomDestinations = listOf(
     NavDestination("Library", NIcons.Library, Routes.LIBRARY),
     NavDestination("Settings", NIcons.Settings, Routes.SETTINGS),
 )
-// Models is no longer one of these. Six tabs across a phone left each one
-// narrower than its own label, and the library is not somewhere you go while
-// working — it is where you go to install something, once, and then leave. It
-// now opens from the Settings toolbar, alongside Runtimes and Tools, which is
-// the company it actually keeps.
+// Models is no longer one of these.
 
 @Composable
 fun OnDeviceApp(
@@ -169,9 +131,7 @@ fun OnDeviceApp(
             VoiceScreen(
                 currentRoute = currentRoute,
                 onNavigate = { navController.navigateToRoot(it) },
-                // The engine decides which parameter set opens. Hardcoding
-                // Kokoro here is what put its voice list and its 510-token
-                // chunk note in front of OmniVoice.
+                // The engine decides which parameter set opens.
                 onOpenAdvanced = { runtime ->
                     navController.navigate(
                         Routes.parameters(tier = ai.ondevice.core.Tier.ADVANCED, runtime = runtime),
@@ -268,10 +228,6 @@ fun OnDeviceApp(
             )
         }
         composable(Routes.LIBRARY_ITEM) {
-            // Each "open in" pops back to the library first, so the tab the user
-            // lands on is the top of its own stack rather than a detail screen
-            // waiting underneath it — pressing Back from Chat would otherwise
-            // return to the description of the thread they are already reading.
             fun openTab(route: String) {
                 navController.popBackStack()
                 navController.navigateToRoot(route)
@@ -292,10 +248,7 @@ fun OnDeviceApp(
     }
 }
 
-/**
- * Root destinations are singletons: switching tabs restores rather than stacks,
- * so the bottom bar never accumulates a back stack of its own.
- */
+/** Root destinations are singletons: switching tabs restores rather than stacks, so the bottom bar never accumulates a back stack of its own. */
 private fun NavHostController.navigateToRoot(route: String) {
     navigate(route) {
         popUpTo(graph.startDestinationId) { saveState = true }

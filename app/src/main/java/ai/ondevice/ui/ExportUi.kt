@@ -9,15 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.core.content.FileProvider
 import ai.ondevice.core.Export
 
-/**
- * The two ways an artifact leaves this app, in one place.
- *
- * There used to be four copies of the share code — `shareFile`, `shareImage`,
- * `shareAudio`, `shareTranscript` — differing only in the chooser title, and
- * every screen that produced anything carried its own. Four copies of a thing
- * is four places for it to drift, and it had: the titles disagreed about what
- * was being sent and one of them said "Send conversation" for a WAV.
- */
+/** The two ways an artifact leaves this app, in one place. */
 
 /** Hand [export] to another app. Not a save: nothing is written where you can find it. */
 fun shareExport(context: Context, export: Export) {
@@ -35,14 +27,7 @@ fun shareExport(context: Context, export: Export) {
     context.startActivity(Intent.createChooser(intent, "Send ${export.suggestedName}"))
 }
 
-/**
- * Ask for a folder to export into, once.
- *
- * `OpenDocumentTree` rather than `CreateDocument` because the answer is reused:
- * a per-file picker on every save is how an export feature becomes one nobody
- * uses. The returned lambda opens the picker; the grant is persisted by
- * [ai.ondevice.data.ExportStore].
- */
+/** Ask for a folder to export into, once. */
 @Composable
 fun rememberFolderPicker(onPicked: (Uri) -> Unit): () -> Unit {
     val launcher = rememberLauncherForActivityResult(

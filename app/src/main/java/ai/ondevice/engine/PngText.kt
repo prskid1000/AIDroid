@@ -3,19 +3,7 @@ package ai.ondevice.engine
 import java.io.ByteArrayOutputStream
 import java.util.zip.CRC32
 
-/**
- * Writes a `tEXt` chunk into an already-encoded PNG.
- *
- * SPEC §5.4 asks that every generated image carry its full parameter set in the
- * file itself, so the picture is reproducible without this app's database — and
- * so another tool can read it. `parameters` is the key the rest of the
- * ecosystem already looks for, which is why it is used verbatim rather than
- * something app-specific.
- *
- * Android's PNG encoder has no API for ancillary chunks, so the chunk is spliced
- * in by hand. It goes immediately before `IEND`, which is legal for `tEXt` and
- * means the pixel data never has to be re-encoded.
- */
+/** Writes a `tEXt` chunk into an already-encoded PNG. */
 internal object PngText {
 
     fun withTextChunk(png: ByteArray, keyword: String, value: String): ByteArray {
@@ -28,11 +16,7 @@ internal object PngText {
         return out.toByteArray()
     }
 
-    /**
-     * `tEXt` is Latin-1 by specification. Anything outside it is escaped rather
-     * than mangled — a parameter set that survives the round trip wrong is worse
-     * than one that is visibly escaped.
-     */
+    /** `tEXt` is Latin-1 by specification. */
     private fun textChunk(keyword: String, value: String): ByteArray {
         val payload = ByteArrayOutputStream()
         payload.write(keyword.toByteArray(Charsets.ISO_8859_1))

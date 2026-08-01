@@ -43,9 +43,7 @@ class ModelsViewModel @Inject constructor(
         filter,
         orphans,
         engines.state,
-        // The downloader's own jobs, not the `download_jobs` rows. The table
-        // records what was asked for; only the live job knows how fast it is
-        // going, and without that there is no time remaining to report.
+        // The downloader's own jobs, not the `download_jobs` rows.
         downloader.observeJobs(),
     ) { models, query, orphanReport, engineState, jobs ->
         val filtered = if (query.isBlank()) {
@@ -66,10 +64,6 @@ class ModelsViewModel @Inject constructor(
             freeStorageBytes = capabilities.freeStorageBytes,
             byModality = models.groupBy { it.modality }.mapValues { (_, v) -> v.sumOf { it.sizeBytes } },
             orphans = orphanReport,
-            // A download that failed used to be invisible from here: the queue
-            // was only reachable from the orphan card, which is not shown when
-            // there are no orphans. A failed install with no way back to it is
-            // the opposite of §1.2's "say what went wrong and offer the remedy".
             activeDownloads = jobs.count {
                 it.state == ai.ondevice.core.DownloadState.RUNNING ||
                     it.state == ai.ondevice.core.DownloadState.QUEUED ||
@@ -77,19 +71,11 @@ class ModelsViewModel @Inject constructor(
             },
             pausedDownloads = jobs.count { it.state == ai.ondevice.core.DownloadState.PAUSED },
             failedDownloads = jobs.count { it.state == ai.ondevice.core.DownloadState.FAILED },
-            // The longest wait among the running jobs, which is when the queue
-            // is done rather than when the next file is. They share the link, so
-            // summing them would overstate it and taking the shortest would
-            // promise a finish that is not one.
+            // The longest wait among the running jobs, which is when the queue is done rather than when the next file is.
             downloadEtaSeconds = jobs
                 .filter { it.state == ai.ondevice.core.DownloadState.RUNNING }
                 .maxOfOrNull { it.etaSeconds } ?: 0L,
-            // The library row is written when a download starts, not when it
-            // finishes, so a model still arriving looked installed and said
-            // "never used". Every picker offered it, and selecting one meant
-            // handing a runtime a half-written file. The pickers now filter on
-            // the same condition; here the row stays visible — you want to see
-            // that it is coming — but says so.
+            // The library row is written when a download starts, not when it finishes, so a model still arriving looked installed and said "never used".
             pending = jobs
                 .filter {
                     it.state == ai.ondevice.core.DownloadState.QUEUED ||
@@ -187,9 +173,7 @@ data class ModelsState(
             if (activeDownloads > 0) add("$activeDownloads in progress")
             if (pausedDownloads > 0) add("$pausedDownloads paused")
             if (failedDownloads > 0) add("$failedDownloads failed")
-            // Only while something is running, and only once a rate exists —
-            // an ETA computed from no throughput is a number with nothing
-            // behind it.
+            // Only while something is running, and only once a rate exists — an ETA computed from no throughput is a number with nothing behind it.
             if (activeDownloads > 0 && downloadEtaSeconds > 0) {
                 add(ai.ondevice.core.Fmt.eta(downloadEtaSeconds))
             }
@@ -212,19 +196,7 @@ class ModelDetailViewModel @Inject constructor(
     private val _state = MutableStateFlow(ModelDetailState())
     val state: StateFlow<ModelDetailState> = _state.asStateFlow()
 
-    /**
-     * The runtime that would actually load this model, for the Parameters button.
-     *
-     * It used to pass no runtime at all, and the route defaulted to llama.cpp —
-     * so opening Parameters on a Kokoro, whisper, diffusion or OmniVoice model
-     * showed llama.cpp's sampler list. Every control was inapplicable and none
-     * of them said so.
-     *
-     * Text-to-speech is the only modality with two engines, and they are not
-     * interchangeable, so the answer comes from the engines themselves rather
-     * than from the modality — [SpeechSynthesizer.providerFor] tests the folder
-     * for each one's file shape.
-     */
+    /** The runtime that would actually load this model, for the Parameters button. */
     private fun runtimeIdFor(model: ModelEntity): String = when (model.modality) {
         Modality.SPEECH_TO_TEXT -> ai.ondevice.engine.RuntimeRegistry.WHISPER
         Modality.DIFFUSION -> ai.ondevice.engine.RuntimeRegistry.STABLE_DIFFUSION
@@ -233,9 +205,6 @@ class ModelDetailViewModel @Inject constructor(
             when (directory?.let(synthesizer::providerFor)) {
                 ai.ondevice.speech.SynthProvider.OMNIVOICE ->
                     ai.ondevice.engine.RuntimeRegistry.OMNIVOICE
-                // Kokoro is the fallback rather than a second test: a voice model
-                // that matches neither shape has no parameters either way, and
-                // Kokoro's screen is the one that explains voice packs.
                 else -> ai.ondevice.engine.RuntimeRegistry.KOKORO
             }
         }
@@ -261,12 +230,6 @@ class ModelDetailViewModel @Inject constructor(
             )
             recompute()
         }
-        // Residency changes from other screens too — loading this model on
-        // Chat, or the memory-pressure unload — and a snapshot taken at bind
-        // would leave Unload offered on a model that is no longer resident, or
-        // hidden on one that is. Its own job, cancelled when the screen binds
-        // to something else, so a stale collector cannot answer for a model
-        // this screen has stopped showing.
         residency?.cancel()
         residency = viewModelScope.launch {
             engines.state.collect { engine ->
@@ -277,17 +240,7 @@ class ModelDetailViewModel @Inject constructor(
 
     private var residency: kotlinx.coroutines.Job? = null
 
-    /**
-     * Everything actually on disk for this model, largest first.
-     *
-     * A model is a directory, and until now no screen said what was in it. That
-     * is the difference between "OmniVoice is installed" and being able to see
-     * that what landed was the audio tokeniser's four graphs and none of the
-     * decoder — a distinction that otherwise only surfaces as a runtime error
-     * naming a file nobody can check. Read from the filesystem rather than from
-     * the download record, because the question being asked is what is there
-     * now, not what was once meant to be.
-     */
+    /** Everything actually on disk for this model, largest first. */
     private fun installedFilesOf(model: ModelEntity): List<InstalledFile> {
         val directory = runCatching { storage.modelDir(model.id) }.getOrNull() ?: return emptyList()
         val root = directory.absolutePath
@@ -304,10 +257,7 @@ class ModelDetailViewModel @Inject constructor(
             .toList()
     }
 
-    /**
-     * The live recompute S2 is built around: drag the slider, the KV term and
-     * the verdict move with it, arithmetic visible.
-     */
+    /** The live recompute S2 is built around: drag the slider, the KV term and the verdict move with it, arithmetic visible. */
     fun setContext(tokens: Int) {
         _state.value = _state.value.copy(contextTokens = tokens)
         recompute()
@@ -350,18 +300,7 @@ class ModelDetailViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Drop this model out of RAM, without deleting a byte of it.
-     *
-     * The counterpart to "Keep loaded", and the screen had one without the
-     * other: a model could be pinned but never released, so the only ways to
-     * free several gigabytes were to load a different model or to kill the app.
-     * Residency and installation are different things, and this is the control
-     * for the first of them.
-     *
-     * Unpins on the way out. A pin means "do not evict this", which is not a
-     * thing to leave set on a model the user has just evicted by hand.
-     */
+    /** Drop this model out of RAM, without deleting a byte of it. */
     fun unload() {
         val model = _state.value.model ?: return
         viewModelScope.launch {
@@ -435,10 +374,6 @@ class DownloadsViewModel @Inject constructor(
     fun cancel(id: String) = downloader.cancel(id)
     fun retry(id: String) = downloader.start(id)
 
-    /**
-     * Forget finished transfers. Nothing is uninstalled and no file is touched:
-     * these rows are a receipt, and "installed" is defined by the absence of an
-     * *active* job rather than the presence of a completed one.
-     */
+    /** Forget finished transfers. */
     fun clearFinished() = viewModelScope.launch { db.downloads().clearFinished() }
 }

@@ -48,15 +48,6 @@ import ai.ondevice.ui.theme.Touch
 import ai.ondevice.ui.theme.ring
 import ai.ondevice.ui.vm.AddModelViewModel
 
-/**
- * **S1 — Add model.**
- *
- * The paste field is the primary affordance and is deliberately first on the
- * screen (Appendix A #8): curated lists are convenience shortcuts and must
- * never be the only path. Below it, the verdict card shows the fit arithmetic
- * before anything is downloaded, and the quant list annotates every variant
- * with its size and speed class.
- */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AddModelScreen(
@@ -86,17 +77,12 @@ fun AddModelScreen(
                         onValueChange = viewModel::onQueryChange,
                         minHeight = 44.dp,
                         textStyle = NocturneType.MonoValue.copy(fontSize = NocturneType.MonoCode.fontSize),
-                        // Shows the shape of a Hugging Face id rather than a
-                        // second copy of one. Taken from the starter list below
-                        // so the example on screen is always one that resolves.
+                        // Shows the shape of a Hugging Face id rather than a second copy of one.
                         placeholder = ai.ondevice.core.StarterModels.ALL.first().repoId,
                     )
                 }
                 NButton(
-                    // A Hugging Face id has a slash in it, so text without one
-                    // can only ever fail to resolve. The button says what it
-                    // will actually do rather than offering to look up
-                    // something that cannot exist.
+                    // A Hugging Face id has a slash in it, so text without one can only ever fail to resolve.
                     text = when {
                         state.resolving || state.searching -> "…"
                         !state.query.contains('/') -> "Search"
@@ -141,9 +127,7 @@ fun AddModelScreen(
                         }
                     }
                 }
-                // Search returns whatever matches the name. Whether any of it
-                // runs here is the resolver's answer, and it only has one once
-                // a repo is picked — so this list promises nothing.
+                // Search returns whatever matches the name.
                 NHelp(
                     "Ranked by downloads. Pick one to resolve it — until then nothing here has been " +
                         "checked against this device or against the bundled runtimes.",
@@ -279,17 +263,12 @@ fun AddModelScreen(
                                 ),
                                 color = if (selected) NocturneColors.Accent200 else NocturneColors.Text,
                             )
-                            // A blocked variant is shown, not hidden — a row
-                            // that vanishes reads as a repo that does not have
-                            // it. What it says is why, and it stops being the
-                            // one pre-selected.
+                            // A blocked variant is shown, not hidden — a row that vanishes reads as a repo that does not have it.
                             NHelp(
                                 quant.blockedReason?.let { "Cannot run here — $it" } ?: quant.note,
                                 Modifier.padding(top = 1.dp),
                             )
-                            // A caution is not a block. It runs; the point is
-                            // that the smallest number on the screen must not
-                            // be the only thing said about it.
+                            // A caution is not a block.
                             quant.cautionReason?.takeIf { quant.blockedReason == null }?.let {
                                 Text(
                                     it,
@@ -318,9 +297,7 @@ fun AddModelScreen(
                     }
                 }
 
-                // The footnote has to describe the runtime that is actually
-                // installed. Promising a GPU fast path on a build with no GPU
-                // backend compiled in is the assertion SPEC §8.2 forbids.
+                // The footnote has to describe the runtime that is actually installed.
                 NHelp(
                     if (resolved.quants.any { it.speedClass == SpeedClass.OPENCL_FAST }) {
                         "Q4_0 hits the Adreno OpenCL fast path on this device. Other quants fall back to CPU."
@@ -411,15 +388,6 @@ fun AddModelScreen(
                 }
 
                 // Type and role, stated rather than guessed.
-                //
-                // The header parse still reads context length, architecture,
-                // chat template and the quant list off the file — those are
-                // facts written into it. What it cannot read is which *slot* a
-                // file fills: `model.safetensors` is a base checkpoint in one
-                // repo and a CLIP vision encoder in another, and a ControlNet
-                // that matched no filename pattern was filed as a diffusion
-                // model and offered as one to generate with. Both answers are
-                // recorded on the row now, so nothing downstream re-guesses.
                 SectionKicker("What this is", Modifier.padding(top = 20.dp, bottom = 8.dp))
 
                 NHelp("Type", Modifier.padding(bottom = 4.dp))
@@ -436,9 +404,6 @@ fun AddModelScreen(
                 )
 
                 NHelp("Role", Modifier.padding(top = 10.dp, bottom = 4.dp))
-                // "Base model" is a role answer, not the absence of one — it is
-                // what makes a checkpoint pickable on the Image and Chat screens
-                // while an add-on stays in the Attachments list.
                 val baseLabel = "Base model — nothing hangs off it"
                 val roleLabels = listOf(baseLabel) + AttachmentRole.entries.map { it.label }
                 NDropdown(
@@ -456,19 +421,9 @@ fun AddModelScreen(
 
                 val selectedQuant = resolved.quants.firstOrNull { it.name == state.selectedQuant }
                 val runnable = state.verdict?.verdict?.runnable == true
-                // The companions are downloaded with the weights, so they belong
-                // in the figure on the button. Kokoro's 55 voice packs are 28 MB
-                // against a 92 MB graph — quoting the weights alone understates
-                // the download by a quarter, and the number a user agrees to
-                // should be the number that gets transferred. Which companions
-                // those are is decided in one place, so this figure and the
-                // enqueue cannot drift apart.
+                // The companions are downloaded with the weights, so they belong in the figure on the button.
                 val downloadBytes = (selectedQuant?.totalBytes ?: 0) + state.companionBytes
-                // A variant can be blocked while the *model* is fine, so this is
-                // a separate question from the verdict. The verdict answers
-                // "does this device have the memory"; blockedReason answers
-                // "can this build open the file at all", and the second one is
-                // not something more RAM or a smaller context fixes.
+                // A variant can be blocked while the *model* is fine, so this is a separate question from the verdict.
                 val blocked = selectedQuant?.blockedReason
                 NButton(
                     text = when {
@@ -511,19 +466,7 @@ private fun EmptyResolveHint() {
     }
 }
 
-/**
- * Somewhere to start.
- *
- * "Paste a Hugging Face ID" assumes you already know one, and for two of the
- * four runtimes that is a genuinely unfair assumption: whisper's weights live
- * in a repo named after the runtime rather than the model, and Kokoro's ONNX
- * export is published by a different owner than the original. Neither is
- * guessable.
- *
- * Tapping a row fills the paste field and resolves it — the same path a typed
- * ID takes, with the same verdict and the same refusals. Nothing here is a
- * shortcut around the fit arithmetic; it only saves the typing.
- */
+/** Somewhere to start. */
 @Composable
 private fun StarterTable(onPick: (String) -> Unit) {
     ai.ondevice.core.StarterModels.BY_MODALITY.forEach { (modality, entries) ->
@@ -596,11 +539,7 @@ private fun StarterRows(
     }
 }
 
-/**
- * The verdict mark. No red, no green — the palette is mono, so "runnable" is an
- * accent tag with a check, "caveat" is an accent outline, and "no" is a neutral
- * disc with a cross. Weight comes from the mark.
- */
+/** The verdict mark. */
 @Composable
 fun VerdictTag(verdict: ai.ondevice.core.Verdict) {
     when (verdict.tone) {

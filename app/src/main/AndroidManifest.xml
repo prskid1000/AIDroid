@@ -50,21 +50,6 @@
         -->
         <uses-native-library android:name="libOpenCL.so" android:required="false" />
 
-        <!--
-            And the same wall again, one processor over. The Hexagon backend
-            reaches the NPU through fastRPC, which it opens by name at runtime —
-            `dlopen("libcdsprpc.so")` in htp-drv.cpp — and that file lives in
-            /vendor/lib64 beside libOpenCL.so, on the same
-            /vendor/etc/public.libraries.txt and behind the same namespace.
-
-            Without this line ggml registered OpenCL and CPU and simply never
-            mentioned the NPU: the registration catches its own failure and
-            returns nothing, so the symptom is a missing device rather than an
-            error. required="false" for the same reason as above — most phones
-            have no DSP an app may talk to, and none of them should fail to
-            install over a backend that was never going to register.
-        -->
-        <uses-native-library android:name="libcdsprpc.so" android:required="false" />
 
         <activity
             android:name=".MainActivity"

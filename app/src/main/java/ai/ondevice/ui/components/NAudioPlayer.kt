@@ -36,19 +36,7 @@ import ai.ondevice.ui.theme.NocturneType
 import ai.ondevice.ui.theme.ring
 import java.io.File
 
-/**
- * Play a finished audio file, with a position you can move.
- *
- * There was no way to hear anything the app had produced without leaving it.
- * Speak played once, as it synthesised, and if you missed it the only replay
- * was to synthesise again — which for OmniVoice is minutes. A rendered WAV in
- * the library could not be played at all, only shared to some other app that
- * could. For a screen whose entire output is audio, that is the wrong shape.
- *
- * `MediaPlayer` rather than ExoPlayer: these are local WAVs of a few seconds to
- * a few minutes, already decoded, and ExoPlayer is several megabytes of
- * dependency to solve a problem this does not have.
- */
+/** Play a finished audio file, with a position you can move. */
 @Composable
 fun NAudioPlayer(
     file: File,
@@ -69,22 +57,14 @@ fun NAudioPlayer(
     }
     var playing by remember(file.path) { mutableStateOf(false) }
     var position by remember(file.path) { mutableIntStateOf(0) }
-    // Kept across files: someone who listens back at 1.5x wants the next take
-    // at 1.5x too, and re-picking it every time is the sort of small friction
-    // that makes a control feel like it does not work.
     var speed by remember { mutableFloatStateOf(1f) }
     val duration = player?.duration ?: 0
 
-    // Released on the way out, and on the way to a *different* file: a
-    // MediaPlayer left open holds an audio focus request and a file descriptor,
-    // and a screen that renders twice would leak one per render.
     DisposableEffect(file.path) {
         onDispose { runCatching { player?.release() } }
     }
 
-    // A one-shot, acknowledged back to the caller. Without that, every
-    // recomposition would restart the clip from the top — and a Speak result
-    // recomposes as soon as you touch the scrubber.
+    // A one-shot, acknowledged back to the caller.
     LaunchedEffect(file.path, autoPlay) {
         if (autoPlay && player != null) {
             runCatching { player.start() }
@@ -93,9 +73,6 @@ fun NAudioPlayer(
         }
     }
 
-    // Polled rather than driven by a listener, because MediaPlayer has no
-    // position callback at all — `setOnSeekCompleteListener` fires for seeks and
-    // nothing fires as it plays.
     LaunchedEffect(playing, file.path) {
         while (playing && player != null) {
             position = runCatching { player.currentPosition }.getOrDefault(0)
@@ -191,10 +168,7 @@ fun NAudioPlayer(
                     onClick = {
                         speed = option
                         val active = player ?: return@SpeedChip
-                        // Assigning playbackParams *starts* a paused player on
-                        // several Android versions, so the pause is reasserted
-                        // rather than assumed. Without it, picking a speed on a
-                        // stopped clip plays it.
+                        // Assigning playbackParams *starts* a paused player on several Android versions, so the pause is reasserted rather than assumed.
                         runCatching {
                             active.playbackParams = active.playbackParams.setSpeed(option)
                             if (!playing) active.pause()
@@ -222,11 +196,7 @@ private fun Skip(millis: Int, description: String, onClick: () -> Unit) {
     }
 }
 
-/**
- * Playback rate. Speech is the case that needs it — a dictated note at 1.5x
- * and a mumbled one at 0.75x — and MediaPlayer resamples without shifting
- * pitch, so the voice stays the voice.
- */
+/** Playback rate. */
 @Composable
 private fun SpeedChip(speed: Float, selected: Boolean, onClick: () -> Unit) {
     Text(
@@ -241,10 +211,7 @@ private fun SpeedChip(speed: Float, selected: Boolean, onClick: () -> Unit) {
     )
 }
 
-/**
- * The track. Dragged as well as tapped, because a three-minute clip you can
- * only jump around by tapping is one you cannot find a word in.
- */
+/** The track. */
 @Composable
 private fun Scrubber(
     fraction: Float,

@@ -31,49 +31,14 @@ import kotlin.concurrent.withLock
 import kotlin.math.abs
 import kotlin.math.min
 
-/**
- * Speech to text, for real (SPEC §6).
- *
- * Recording and transcribing are separate things here, and they used not to be.
- * [listen] captures: microphone in, WAV out, input levels for the waveform, and
- * no decoding at all. [transcribeFile] decodes any container Android can demux,
- * resampled to the 16 kHz mono float whisper requires. The screen records, then
- * transcribes the take.
- *
- * The capture loop used to re-decode a ten-second trailing window every three
- * seconds, whether or not anyone had spoken, to show partial text. It cost about
- * half of eight cores for the whole recording — measured in a silent room — and
- * every word it showed was provisional, because whisper has no incremental
- * decode: each pass was a fresh transcription of overlapping audio, so earlier
- * words kept changing under the reader. Transcribing once, at the end, is
- * cheaper and produces the better transcript: real segment boundaries, which a
- * sliding window can never give.
- *
- * The microphone is opened inside the flow and released in `onCompletion`, so
- * cancelling the recording actually frees the device rather than leaving it hot.
- */
+/** Speech to text, for real (SPEC §6). */
 class Transcriber(
     private val context: Context,
     private val computeDevice: ComputeDevice,
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    /**
-     * Held across every native call, so nothing frees the context while a
-     * decode is inside it.
-     *
-     * `handle` being `@Volatile` made each read current without making the pair
-     * of them atomic: [decode] checked it, and `unload` — on the load path, on
-     * Stop, on a model switch — could free the context in the window before the
-     * native call used the value already read. That is a use-after-free on a
-     * pointer, which is a SIGSEGV rather than an exception: the app vanishes.
-     * Reachable by switching speech model, or reloading, while a take is still
-     * being transcribed.
-     *
-     * A free therefore waits for the decode in flight. With a large model that
-     * is a real pause on the caller's thread, and it is the right trade: the
-     * alternative is not a faster unload, it is a crash.
-     */
+    /** Held across every native call, so nothing frees the context while a decode is inside it. */
     private val nativeLock = java.util.concurrent.locks.ReentrantLock()
 
     @Volatile
@@ -83,15 +48,7 @@ class Transcriber(
     var loadedModelId: String? = null
         private set
 
-    /**
-     * The device the loaded model is actually on, so a changed setting is a
-     * reason to reload rather than a badge nobody acts on.
-     *
-     * Settings → Compute device was read at load and never again, and every
-     * caller skipped the load when the model id had not changed — so switching
-     * from GPU to NPU did nothing at all until the process died. The model id
-     * alone was never the whole question.
-     */
+    /** The device the loaded model is actually on, so a changed setting is a reason to reload rather than a badge nobody acts on. */
     @Volatile
     var loadedBackend: BackendId? = null
         private set
@@ -99,12 +56,7 @@ class Transcriber(
     val available: Boolean get() = WhisperBridge.available
     val isLoaded: Boolean get() = handle != 0L
 
-    /**
-     * Whether the loaded model is the one asked for, *on the device asked for*.
-     *
-     * Callers use this rather than comparing ids, which is the check that let a
-     * changed Compute device go unnoticed.
-     */
+    /** Whether the loaded model is the one asked for, *on the device asked for*. */
     suspend fun isCurrent(modelId: String): Boolean =
         isLoaded && loadedModelId == modelId &&
             loadedBackend == computeDevice.chosen(RuntimeRegistry.WHISPER)
@@ -120,10 +72,6 @@ class Transcriber(
                     WhisperBridge.loadError ?: "The whisper.cpp runtime is not installed in this build."
                 }
                 // Settings → Compute device, asked of whisper's own binary.
-                // whisper offered exactly one way to say this and it was a
-                // hardcoded `true`, which meant "whichever accelerator ggml
-                // registered first" — fine while that was only ever OpenCL, a
-                // silent choice now that the NPU registers alongside it.
                 val device = computeDevice.chosen(RuntimeRegistry.WHISPER)
                 val backend = device.registryNames.first()
 
@@ -168,13 +116,7 @@ class Transcriber(
 
     // — capture —
 
-    /**
-     * Record until cancelled, writing the take to [captureTo].
-     *
-     * Capture only: no model is needed and none is touched. What comes back is
-     * input level, for the waveform and the clock. The transcription happens
-     * once, afterwards, over the finished file.
-     */
+    /** Record until cancelled, writing the take to [captureTo]. */
     @SuppressLint("MissingPermission")
     fun listen(captureTo: java.io.File? = null): Flow<CaptureEvent> = flow {
         if (!hasMicPermission()) {
@@ -216,10 +158,6 @@ class Transcriber(
                 val read = record.read(buffer, 0, buffer.size)
                 if (read <= 0) continue
 
-                // Paused keeps the microphone open and the file honest: the
-                // samples read while paused are thrown away rather than
-                // written, so a pause is a gap in the take rather than a
-                // silence the length of the pause.
                 if (paused) continue
                 writer?.append(buffer, read)
 
@@ -238,16 +176,11 @@ class Transcriber(
                 )
             }
         } finally {
-            // The microphone is a shared, exclusive device. Releasing it here —
-            // rather than trusting a caller to remember — is the difference
-            // between cancelling a recording and hanging every other app that
-            // wants to record.
+            // The microphone is a shared, exclusive device.
             runCatching { record.stop() }
             runCatching { record.release() }
             activeRecord = null
-            // A backstop, not the usual path: [finishCapture] closes the take
-            // the moment Stop is pressed, and both are idempotent. This one
-            // covers the capture ending or failing on its own.
+            // A backstop, not the usual path: [finishCapture] closes the take the moment Stop is pressed, and both are idempotent.
             finishCapture()
             paused = false
         }
@@ -256,17 +189,7 @@ class Transcriber(
         activeRecord = null
     }
 
-    /**
-     * End the take now, without waiting for the loop to unwind.
-     *
-     * Cancelling the capture does not stop it promptly: the collector may be
-     * inside a native decode of the last window, and with a large model that is
-     * tens of seconds during which the header still claims zero samples and the
-     * microphone is still held. So Stop closes the writer and releases the
-     * device itself, and the loop's `finally` finds both already done — both
-     * calls are idempotent. Without this, a three-second recording handed to a
-     * player read 00:00, because the length is written at close.
-     */
+    /** End the take now, without waiting for the loop to unwind. */
     fun finishCapture() {
         val writer = captureWriter
         captureWriter = null
@@ -274,13 +197,7 @@ class Transcriber(
         activeRecord?.let { runCatching { it.stop() } }
     }
 
-    /**
-     * Paused keeps the microphone open rather than releasing it.
-     *
-     * Stopping and restarting AudioRecord loses the device for as long as the
-     * handover takes, and on some phones another app takes it in the gap. A
-     * flag costs one branch per buffer.
-     */
+    /** Paused keeps the microphone open rather than releasing it. */
     /** The take being written, so Stop can close it without waiting. */
     @Volatile
     private var captureWriter: ai.ondevice.speech.WavWriter? = null
@@ -309,15 +226,7 @@ class Transcriber(
             }
         }
 
-    /**
-     * The same decode, at whatever rate the caller needs.
-     *
-     * Exposed for OmniVoice's voice cloning, which wants the reference clip at
-     * 24 kHz rather than whisper's 16. Going through 16 kHz and back up would
-     * throw away everything above 8 kHz and then invent it again, and that band
-     * is a large part of what makes one voice sound different from another —
-     * which is the entire point of the clip.
-     */
+    /** The same decode, at whatever rate the caller needs. */
     suspend fun decodeAudio(file: File, targetRate: Int): Result<FloatArray> =
         withContext(Dispatchers.Default) {
             runCatching {
@@ -327,14 +236,7 @@ class Transcriber(
             }
         }
 
-    /**
-     * Transcribe audio the caller already has in memory, at [sampleRate].
-     *
-     * OmniVoice's voice cloning uses this to work out what a reference clip
-     * says, which it needs before it can copy the voice — and it holds that clip
-     * at 24 kHz, so the rate whisper wants is converted here rather than being
-     * a number the caller has to know.
-     */
+    /** Transcribe audio the caller already has in memory, at [sampleRate]. */
     suspend fun transcribeSamples(
         samples: FloatArray,
         sampleRate: Int,
@@ -373,17 +275,7 @@ class Transcriber(
         }.filter { it.text.isNotBlank() }
     }
 
-    /**
-     * Container → mono float at [targetRate], defaulting to the 16 kHz whisper
-     * is the only consumer of.
-     *
-     * The resample averages the samples falling in each output period. For
-     * speech at 44.1 or 48 kHz down to 16 kHz that is audibly poor but
-     * transcription-equivalent — whisper's own front end throws most of that
-     * bandwidth away building the mel spectrogram — and it is a genuine
-     * low-pass rather than nearest-neighbour, so it holds up for the 24 kHz a
-     * voice clone asks for too.
-     */
+    /** Container → mono float at [targetRate], defaulting to the 16 kHz whisper is the only consumer of. */
     private fun decodeToPcm(file: File, targetRate: Int = SAMPLE_RATE): FloatArray {
         val extractor = MediaExtractor()
         extractor.setDataSource(file.absolutePath)

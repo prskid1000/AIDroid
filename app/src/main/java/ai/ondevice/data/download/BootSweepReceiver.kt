@@ -11,12 +11,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/**
- * SPEC §3.4 — "Cleanup: remove partial files on cancel; orphan sweep on boot."
- *
- * Downloads resume across reboot, so the reboot is exactly when a `.part` with
- * no surviving job row becomes garbage worth reclaiming.
- */
 @AndroidEntryPoint
 class BootSweepReceiver : BroadcastReceiver() {
 

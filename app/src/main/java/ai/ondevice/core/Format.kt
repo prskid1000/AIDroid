@@ -3,13 +3,7 @@ package ai.ondevice.core
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-/**
- * Number and byte formatting, in the shapes the design canvas uses.
- *
- * The canvas is consistent about this: sizes read "2.50 GB", context reads
- * "32K" with the exact token count beside it, throughput reads "14.1 t/s", and
- * the fit arithmetic is shown to two decimals so the addition visibly works out.
- */
+/** Number and byte formatting, in the shapes the design canvas uses. */
 object Fmt {
 
     private const val GB = 1_000_000_000.0
@@ -87,7 +81,6 @@ object Fmt {
         }
     }
 
-    /** "9f2c…41ab" — the truncated hash the checksum-mismatch card shows. */
     fun shortHash(hex: String): String =
         if (hex.length <= 9) hex else "${hex.take(4)}…${hex.takeLast(4)}"
 

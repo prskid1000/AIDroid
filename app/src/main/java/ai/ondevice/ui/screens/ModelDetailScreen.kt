@@ -56,15 +56,7 @@ import ai.ondevice.ui.theme.Radius
 import ai.ondevice.ui.theme.ruleBelow
 import ai.ondevice.ui.vm.ModelDetailViewModel
 
-/**
- * **S2 — Model detail.**
- *
- * The screen the canvas annotates "drag the context slider — the verdict
- * recomputes". That live recompute is the whole point: SPEC §3.3 requires the
- * KV term be recalculated as the user moves the slider and the arithmetic
- * shown, so a "won't fit" is something they can act on rather than a verdict
- * handed down.
- */
+/** **S2 — Model detail.** The screen the canvas annotates "drag the context slider — the verdict recomputes". */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ModelDetailScreen(
@@ -85,11 +77,7 @@ fun ModelDetailScreen(
                 title = model?.let { "${it.displayName} · ${it.quant.orEmpty()}" } ?: "Model",
                 onBack = onBack,
                 trailing = {
-                    // The actions live up here, as icons, the way every other
-                    // push screen in the app puts them. They used to be a row
-                    // of full-width text buttons pinned under the file list —
-                    // reachable only after scrolling past everything, and a
-                    // different shape from the same actions elsewhere.
+                    // The actions live up here, as icons, the way every other push screen in the app puts them.
                     val isAddOn = model?.attachmentRole != null
                     if (model != null && !isAddOn) {
                         NIconButton(
@@ -100,11 +88,7 @@ fun ModelDetailScreen(
                             size = 34.dp,
                             iconSize = 15.dp,
                         )
-                        // Only while there is something to unload. The other
-                        // half of "Keep loaded": until now a model could be
-                        // pinned and never released, and the only ways to get
-                        // several gigabytes back were to load a different model
-                        // or to kill the app.
+                        // Only while there is something to unload.
                         if (state.loaded) {
                             NIconButton(
                                 NIcons.Eject,
@@ -124,12 +108,7 @@ fun ModelDetailScreen(
                             iconSize = 15.dp,
                         )
                     }
-                    // Delete is its own icon rather than a ⋮ menu. The overflow
-                    // held exactly one item, which is a menu that exists to
-                    // hide a button — and as a bare 20 dp Icon it was a smaller
-                    // tap target than everything beside it, so it read as
-                    // decoration whether or not it worked. The confirmation is
-                    // what actually protects the action; the indirection did not.
+                    // Delete is its own icon rather than a ⋮ menu.
                     NIconButton(
                         NIcons.Trash,
                         "Delete model",
@@ -160,13 +139,7 @@ fun ModelDetailScreen(
                 if (model.pinned) NTag("pinned in RAM", style = NTagStyle.Outline)
             }
 
-            // Not every model has every property, and this screen used to act as
-            // though they all did. A ControlNet has no context window and is not
-            // something an engine loads on its own — yet it was offered a context
-            // slider to drag and a "keep loaded" pin, both of which describe a
-            // language model. An add-on is a file another model reads; the only
-            // honest things to say about it are what it is, where it came from
-            // and what is on disk.
+            // Not every model has every property, and this screen used to act as though they all did.
             val isAddOn = model.attachmentRole != null
             val hasContextWindow = !isAddOn &&
                 (model.modality == Modality.TEXT || model.modality == Modality.VISION)
@@ -236,12 +209,6 @@ fun ModelDetailScreen(
                                     "You have ${Fmt.gb(state.availableRamBytes)} GB free of " +
                                         "${Fmt.gb(state.totalRamBytes)} GB.",
                                 )
-                                if (estimate.exceedsHexagonSession) {
-                                    append(
-                                        " Past the ~3.5 GB Hexagon session cap — this needs a layer " +
-                                            "split across HTP sessions, or it falls back to OpenCL.",
-                                    )
-                                }
                             },
                             style = NocturneType.Help,
                             color = verdictInk(tone).copy(alpha = 0.7f),
@@ -317,19 +284,12 @@ fun ModelDetailScreen(
                 )
             }
 
-            // Nothing down here any more. Pin, Unload and Parameters are
-            // toolbar icons; Delete is behind the ⋮ with a confirmation, since
-            // it is the one action on this screen that cannot be undone and
-            // costs a multi-gigabyte re-download — and it used to sit between
-            // two reversible buttons at thumb height with nothing in the way.
+            // Nothing down here any more.
         }
 
         if (confirmingDelete) {
             NDialog(onDismissRequest = { confirmingDelete = false }) {
-                // The name goes in the body, not the title. Repo names run long
-                // and have no spaces to break at, so a title built around one
-                // wraps mid-word — "OmniVoice-Onnx-bidirection / al?" — and the
-                // question stops being readable at the moment it matters most.
+                // The name goes in the body, not the title.
                 NDialogTitle("Delete this model?")
                 // The size is the point of the sentence. "Are you sure?" is a
                 // question nobody can answer; "801 MB, downloaded again" is.

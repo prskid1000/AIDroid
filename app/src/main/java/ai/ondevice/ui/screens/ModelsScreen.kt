@@ -46,13 +46,7 @@ import ai.ondevice.ui.theme.Radius
 import ai.ondevice.ui.theme.ring
 import ai.ondevice.ui.vm.ModelsViewModel
 
-/**
- * **S3 — Models library.**
- *
- * Residency, storage and orphans on one screen. The storage meter is a single
- * strip split by modality using ramp steps rather than distinct hues, which is
- * how a mono palette encodes a category breakdown.
- */
+/** **S3 — Models library.** Residency, storage and orphans on one screen. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ModelsScreen(
@@ -65,9 +59,7 @@ fun ModelsScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
 
     PhoneScaffold(
-        // A push off Settings rather than a sixth tab. Installing a model is
-        // something you do once and then leave, not somewhere you work from,
-        // and six labels across a phone left each tab narrower than its word.
+        // A push off Settings rather than a sixth tab.
         toolbar = {
             PushToolbar(
                 title = "Models",
@@ -96,9 +88,7 @@ fun ModelsScreen(
 
         Column(Modifier.verticalScroll(rememberScrollState())) {
 
-            // The download queue, always reachable. A job that failed its
-            // checksum has a real remedy behind this row, and hiding the way
-            // to it turns a recoverable error into a dead end.
+            // The download queue, always reachable.
             if (state.hasDownloadNews) {
                 Row(
                     Modifier
@@ -131,18 +121,6 @@ fun ModelsScreen(
             }
 
             // Disk usage grouped by modality (SPEC §3.5).
-            //
-            // Vision has its own bucket. It used to be counted as Text, which
-            // made the largest single thing on many devices — a vision model
-            // and its projector — invisible as a category: the meter moved and
-            // no legend entry explained why.
-            //
-            // Everything else lands in "Other" rather than being dropped, so
-            // the legend adds up to the total printed beside it. It was not
-            // arithmetic before: UNKNOWN was in neither bucket, so an
-            // unclassified model counted towards the total and appeared in no
-            // segment, and the two numbers on this row disagreed with no way to
-            // tell which was wrong.
             val byModality = state.byModality
             val textBytes = byModality.filterKeys {
                 it == Modality.TEXT || it == Modality.EMBEDDING
@@ -188,9 +166,7 @@ fun ModelsScreen(
                 StorageLegend("Vision", visionBytes, NocturneColors.Accent300)
                 StorageLegend("Diffusion", diffusionBytes, NocturneColors.Accent700)
                 StorageLegend("Speech", speechBytes, NocturneColors.Neutral700)
-                // Shown only when there is something in it. A permanent
-                // "Other 0 B" is noise; a non-zero one is a model whose
-                // modality nothing worked out, which is worth seeing.
+                // Shown only when there is something in it.
                 if (otherBytes > 0) {
                     StorageLegend("Other", otherBytes, NocturneColors.Neutral500)
                 }

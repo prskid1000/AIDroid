@@ -1,14 +1,6 @@
 package ai.ondevice.engine
 
-/**
- * The whisper.cpp JNI surface.
- *
- * Same discipline as [LlamaBridge]: JSON in, JSON out, no typed parameter
- * struct across the boundary (SPEC §16.7). The one non-string argument is the
- * audio itself, because turning a few hundred thousand floats into JSON to
- * satisfy a rule about *parameters* would be following the letter of the thing
- * and missing its point.
- */
+/** The whisper.cpp JNI surface. */
 object WhisperBridge {
 
     val available: Boolean = runCatching {
@@ -23,17 +15,11 @@ object WhisperBridge {
     var loadError: String? = null
         private set
 
-    /** `{"<key>":{"reload":bool}, …}` — see [LlamaBridge.nativeSupportedParams]. */
     external fun nativeSupportedParams(): String
 
-    /** `{"backends":[…]}` — what ggml registered in this binary. */
     external fun nativeSystemInfo(): String
 
-    /**
-     * @param backend the ggml registry name of the chosen compute device —
-     *   "OpenCL", "HTP", "CPU" — or empty for CPU. See
-     *   [ai.ondevice.core.BackendId.registryNames].
-     */
+    /** @param backend the ggml registry name of the chosen compute device — "OpenCL", "CPU" — or empty for CPU. */
     external fun nativeLoad(path: String, backend: String): Long
 
     external fun nativeFree(handle: Long)

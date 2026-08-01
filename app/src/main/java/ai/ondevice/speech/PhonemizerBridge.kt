@@ -1,13 +1,6 @@
 package ai.ondevice.speech
 
-/**
- * The espeak-ng JNI surface.
- *
- * espeak keeps its state in globals — one initialised library, one selected
- * voice — so unlike the other bridges in this app there is no handle to pass
- * around. The native side takes a lock on every call rather than pretending
- * otherwise.
- */
+/** The espeak-ng JNI surface. */
 object PhonemizerBridge {
 
     val available: Boolean = runCatching {

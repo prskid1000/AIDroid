@@ -4,19 +4,7 @@ import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-/**
- * A real GGUF header parser, used when Hugging Face has not parsed a repo's
- * metadata for us.
- *
- * SPEC §3.1 is explicit that this is a *maintained fallback, not a stub*: the
- * HF `gguf` block is undocumented and may change shape at any time, and if it
- * does the app must keep resolving models rather than degrading to guesswork.
- * Both paths feed the same [GgufMetadata], so the rest of the app cannot tell
- * which one produced it.
- *
- * Format: magic "GGUF", u32 version, u64 tensor_count, u64 metadata_kv_count,
- * then that many key/value pairs. Little-endian throughout.
- */
+/** A real GGUF header parser, used when Hugging Face has not parsed a repo's metadata for us. */
 object GgufHeaderReader {
 
     private const val MAGIC = 0x46554747 // "GGUF" little-endian
@@ -111,12 +99,7 @@ object GgufHeaderReader {
     }
 }
 
-/**
- * Normalised GGUF metadata. Keys are architecture-prefixed upstream
- * (`qwen3.block_count`, `llama.block_count`, …), so the accessors resolve the
- * architecture first and then look under it — which is why nothing here needs
- * a per-model branch.
- */
+/** Normalised GGUF metadata. */
 data class GgufMetadata(
     val version: Int,
     val tensorCount: Long,
@@ -140,12 +123,7 @@ data class GgufMetadata(
     val name: String? get() = kv["general.name"] as? String
     val paramCount: Long? get() = (kv["general.parameter_count"] as? Number)?.toLong()
 
-    /**
-     * `n_embd_kv` — the per-token KV width, which the cache estimate multiplies
-     * by. With grouped-query attention this is `head_dim × n_head_kv`, not
-     * `n_embd`; getting that wrong overstates the cache by the GQA ratio, which
-     * for a modern 4B is a factor of four.
-     */
+    /** `n_embd_kv` — the per-token KV width, which the cache estimate multiplies by. */
     val embeddingLengthKv: Int?
         get() {
             val embd = embeddingLength ?: return null

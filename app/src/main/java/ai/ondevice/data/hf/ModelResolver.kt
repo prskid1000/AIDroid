@@ -10,42 +10,17 @@ import ai.ondevice.engine.RuntimeRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/**
- * SPEC §3.2, the resolution pipeline.
- *
- * The whole point of this class is that it contains **no model-specific
- * knowledge**. It classifies from architecture and file shape, reads templates
- * and context lengths from metadata, and asks the runtime registry — which is
- * generated from pinned upstream source — whether an architecture is supported.
- * If a `when (modelName)` branch ever appears in here, §1.1 and §1.3 have both
- * been violated (Appendix A #2, #3).
- */
+/** SPEC §3.2, the resolution pipeline. */
 class ModelResolver(
     private val api: HfApi,
     private val registry: RuntimeRegistry,
 ) {
 
-    /**
-     * Which architecture strings mean "diffusion".
-     *
-     * Read from the registry rather than written here. §1.3 and Appendix A #3
-     * say the allowlist must come from the source the runtime is built from, and
-     * this file had its own copy of sd.cpp's SDVersion enum — five names kept by
-     * hand, guaranteed to fall behind the day sd.cpp gains a sixth.
-     *
-     * The two additions are not architectures and are not claimed to be: `unet`
-     * and `dit` are the tensor-prefix names a safetensors header exposes when
-     * the repo never states a version at all, so they cannot come from the enum.
-     */
+    /** Which architecture strings mean "diffusion". */
     private val diffusionArchitectures: Set<String> by lazy {
         registry.architecturesFor(RuntimeRegistry.STABLE_DIFFUSION) + setOf("unet", "dit")
     }
 
-    /**
-     * Accepted inputs, per §3.2: `owner/repo`, a huggingface.co URL in any of
-     * its `/tree/` and `/blob/` variants, a direct `.gguf` URL on any host, and
-     * a local `content://` SAF URI.
-     */
     fun normalize(input: String): NormalizedInput? {
         val trimmed = input.trim()
         if (trimmed.isEmpty()) return null
@@ -94,10 +69,7 @@ class ModelResolver(
         }
     }
 
-    /**
-     * Steps 2–7 of §3.2. Returns either a [ResolvedModel] or a [Resolution.Refused]
-     * carrying a specific message and at least one actionable remedy.
-     */
+    /** Steps 2–7 of §3.2. */
     suspend fun resolve(input: String, blockPickle: Boolean = true): Resolution = withContext(Dispatchers.IO) {
         val normalized = normalize(input)
             ?: return@withContext Resolution.Refused(
@@ -154,20 +126,7 @@ class ModelResolver(
         val safetensors = files.filter { it.endsWith(".safetensors", ignoreCase = true) }
         val pickles = files.filter { it.endsWith(".pkl") || it.endsWith(".pt") || it.endsWith(".pth") }
 
-        // The pickle block exists because `torch.load` executes whatever the
-        // file tells it to. This app never calls torch. The one loader that
-        // reads these is sd.cpp's, and it does not execute: it walks the opcodes
-        // and, on REDUCE, pushes a null unless the global is a known
-        // tensor-rebuild — there is no interpreter behind it (see
-        // src/model_io/pickle_io.cpp).
-        //
-        // That distinction matters here and nowhere else, because the ESRGAN
-        // ecosystem is entirely .pth. Fourteen repos surveyed, not one shipping
-        // safetensors — so a blanket block means no upscaler can ever be
-        // installed. The exception is therefore as narrow as it can be: a pickle
-        // is tolerated only when its own filename classifies it as a diffusion
-        // auxiliary, which is also the only route by which it reaches that
-        // non-executing reader. Anything else still refuses.
+        // The pickle block exists because `torch.load` executes whatever the file tells it to.
         val pickleAuxiliaries = pickles.filter { AttachmentRole.classify(it) != null }
         val unsafePickles = pickles - pickleAuxiliaries.toSet()
 
@@ -183,14 +142,6 @@ class ModelResolver(
             )
         }
 
-        // Diffusion auxiliaries are the exception to the GGUF rule, and it is not
-        // a small one: safetensors is the *native* format for a LoRA, a
-        // ControlNet, a VAE, a TAESD decoder or an IP-Adapter, and sd.cpp loads
-        // all of them directly. Refusing them for "needing a desktop to convert"
-        // was advice for a conversion that must not happen — and because every
-        // published auxiliary ships this way, it made the Image screen's
-        // Attachments section impossible to fill by any route. That section
-        // looked unimplemented for exactly this reason.
         val auxiliaries = (
             safetensors +
                 files.filter { it.endsWith(".ckpt", ignoreCase = true) } +
@@ -220,15 +171,6 @@ class ModelResolver(
         }
 
         // Step 7 — pin *first*, then read everything at the pin.
-        //
-        // This ordering is the whole point. "main" is a moving target: a repo
-        // that is re-uploaded keeps its filenames and changes their contents,
-        // so sizes and hashes read at `main` describe a different file from the
-        // one a URL pinned to an older commit will serve. That mismatch does
-        // not fail loudly at resolve time — it fails after a 382 MB download,
-        // as a checksum error blaming the file. Resolving the revision to a
-        // concrete commit once, and using that same commit for paths-info and
-        // for every download URL, is what makes the sha256 check meaningful.
         val pinnedRevision = info.sha?.takeIf { it.isNotBlank() } ?: repoRef.revision
 
         // Step 4/6 — enumerate quant variants, folding shard sets into one entry.
@@ -236,9 +178,7 @@ class ModelResolver(
             ModelFormat.GGUF -> ggufFiles.filterNot { isCompanionFilename(it) }
             ModelFormat.GGML_BIN -> ggmlBins
             ModelFormat.ONNX -> onnxFiles
-            // For an auxiliary pack the "variants" are the individual
-            // auxiliaries — canny, depth, openpose — and picking one is the
-            // point, not a quality trade-off.
+            // For an auxiliary pack the "variants" are the individual auxiliaries — canny, depth, openpose — and picking one is the point, not a quality trade-off.
             else -> refineAuxiliaries(repoId, pinnedRevision, safetensors, auxiliaries)
         }
 
@@ -246,9 +186,7 @@ class ModelResolver(
         // onnxGraphSets. Null for every other shape.
         val graphSets = if (format == ModelFormat.ONNX) onnxGraphSets(onnxFiles) else null
 
-        // The sidecar weight files have to be priced too, or the variant reports
-        // the size of a graph stub. They are asked for alongside the graphs
-        // rather than discovered later, because paths-info is one round trip.
+        // The sidecar weight files have to be priced too, or the variant reports the size of a graph stub.
         val graphFiles = graphSets?.let { (it.runnable + it.unrunnable).values.flatten() }
         val sidecars = (graphFiles ?: primaryFiles).flatMap { onnxSidecars(it, files) }
         val wanted = (
@@ -267,10 +205,6 @@ class ModelResolver(
             allFiles = files,
             preGrouped = graphSets?.runnable,
         ) + graphSets?.unrunnable
-            // Guarded rather than passed through: enumerateQuants treats a null
-            // preGrouped as "group the primary files yourself", so calling it
-            // with an empty foreign set would re-enumerate every variant a
-            // second time.
             ?.takeIf { it.isNotEmpty() }
             ?.let { foreign ->
                 enumerateQuants(
@@ -280,10 +214,7 @@ class ModelResolver(
                     allFiles = files,
                     preGrouped = foreign,
                 ).map {
-                    // Shown, and refused. The provider's own name is the reason,
-                    // so there is no table of explanations to keep current — a
-                    // repo that adds a `webgpu/` folder tomorrow gets a correct
-                    // sentence today.
+                    // Shown, and refused.
                     it.copy(
                         blockedReason = "is built for the ${it.name} execution provider, " +
                             "which this build does not have",
@@ -307,17 +238,12 @@ class ModelResolver(
         )
         val modality = classifyModality(info, format, files, companions)
 
-        // Step 3 continued — the architecture must be one the bundled runtime
-        // knows. The registry's list is generated from upstream source, so this
-        // question has a real answer rather than a maintained guess.
+        // Step 3 continued — the architecture must be one the bundled runtime knows.
         val arch = info.gguf?.architecture ?: inferArchitectureFromTags(info)
         if (format == ModelFormat.GGUF && arch != null && !registry.supportsArchitecture(arch)) {
             return@withContext unsupportedArchRefusal(repoId, arch)
         }
 
-        // Deliberately *not* a per-file `lastCommit.id`: that is the commit
-        // which last touched one particular file, which for a repo uploaded in
-        // several passes is older than the tree the hashes were read from.
         val security = sizeLookup.values.firstNotNullOfOrNull { it.securityFileStatus?.status }
 
         Resolution.Resolved(
@@ -348,11 +274,7 @@ class ModelResolver(
         )
     }
 
-    /**
-     * When HF hasn't parsed a repo's metadata, pull the first megabyte of the
-     * chosen file and read the GGUF header directly. Same output shape, so the
-     * caller can't tell which path produced it.
-     */
+    /** When HF hasn't parsed a repo's metadata, pull the first megabyte of the chosen file and read the GGUF header directly. */
     suspend fun enrichFromHeader(model: ResolvedModel, quant: QuantVariant): ResolvedModel {
         if (model.layers != null && model.contextLength != null && model.chatTemplate != null) return model
         val first = quant.files.firstOrNull() ?: return model
@@ -361,14 +283,7 @@ class ModelResolver(
         val meta = GgufHeaderReader.parse(bytes).getOrNull() ?: return model
         val architecture = model.architecture ?: meta.architecture
 
-        // Learning the architecture can change what the model *is*. The first
-        // classification ran before this file had been read at all, so a repo
-        // whose HF metadata block is empty — which is exactly the case that
-        // brings us here — was classified as text by default. SD-Turbo lands
-        // that way: `sd2` in the header, nothing in the API. Re-deriving the
-        // modality once the header is known is the difference between offering
-        // a diffusion model in the chat picker and offering it on the Image
-        // screen where it can actually run.
+        // Learning the architecture can change what the model *is*.
         val modality = if (model.modality == Modality.TEXT && architecture != null) {
             when (architecture.lowercase()) {
                 in diffusionArchitectures -> Modality.DIFFUSION
@@ -394,12 +309,7 @@ class ModelResolver(
 
     // — classification —
 
-    /**
-     * Modality comes from architecture and file shape. A repo called
-     * "whisper-something" that ships a text GGUF is a text model; a repo with
-     * an `mmproj-*.gguf` beside its weights is a vision model whatever it's
-     * called.
-     */
+    /** Modality comes from architecture and file shape. */
     private fun classifyModality(
         info: HfModelInfo,
         format: ModelFormat,
@@ -409,11 +319,6 @@ class ModelResolver(
         val arch = info.gguf?.architecture?.lowercase()
         return when {
             format == ModelFormat.GGML_BIN || arch == "whisper" -> Modality.SPEECH_TO_TEXT
-            // A safetensors repo that got this far did so because its files
-            // classify as diffusion auxiliaries, so it belongs to the diffusion
-            // runtime — not to whatever its tags claim. h94/IP-Adapter is tagged
-            // text-to-image, which would otherwise file an adapter as a base
-            // model and offer it in the Image screen's model picker.
             format == ModelFormat.SAFETENSORS -> Modality.DIFFUSION
             files.any { it.contains("voices", true) && it.endsWith(".bin") } &&
                 files.any { it.endsWith(".onnx") } -> Modality.TEXT_TO_SPEECH
@@ -421,12 +326,6 @@ class ModelResolver(
             arch != null && arch in diffusionArchitectures -> Modality.DIFFUSION
             files.any { it.equals("model_index.json", true) } -> Modality.DIFFUSION
             files.any { it.contains("unet", true) } && files.any { it.contains("vae", true) } -> Modality.DIFFUSION
-            // A single-file SD/SDXL GGUF has none of the shapes above: no
-            // `model_index.json`, no separate unet, and an architecture string
-            // llama.cpp's enum has never heard of. What it does have is the
-            // repo's declared pipeline, which is metadata rather than a name —
-            // so this stays inside §1.3 while catching the case that would
-            // otherwise install a diffusion model into the chat picker.
             info.pipelineTag == "text-to-image" || info.pipelineTag == "image-to-image" -> Modality.DIFFUSION
             info.tags.any {
                 it.equals("stable-diffusion", true) || it.equals("diffusers", true) ||
@@ -440,31 +339,7 @@ class ModelResolver(
     }
 
     /** Step 5 — auto-pair companions so a multi-file model is never hand-assembled. */
-    /**
-     * Companions are things a model needs *alongside* it — a vision projector, a
-     * TAESD decoder, Kokoro's voice packs. They are never the alternatives the
-     * user is choosing between.
-     *
-     * [variantFiles] is excluded for that reason, and it matters most for an
-     * auxiliary pack: every file in the ControlNet v1.1 repo contains "control"
-     * and ends in .safetensors, so all fifteen matched the companion rule and
-     * were auto-paired behind whichever one was chosen — about 1.9 GB of rival
-     * ControlNets attached to a 723 MB download. Kokoro is unaffected, since its
-     * voice packs are .bin and its variants are .onnx, which is the case
-     * companion detection exists for.
-     *
-     * That exclusion only covers alternatives to the *primary* model, though.
-     * `mmproj-BF16`, `mmproj-F16` and `mmproj-F32` are alternatives to each
-     * other, no variant of anything, and used to be queued together — 2.68 GB
-     * for a model that loads one, of which only one could even be recorded,
-     * since the manifest they end up in is keyed by role. [CompanionGrouping]
-     * is what tells those apart from Kokoro's fifty-five voice packs.
-     *
-     * Note there is deliberately no LoRA or IP-Adapter rule in [companionRole],
-     * though `AttachmentRole.classify` has both: those are models someone
-     * installs and attaches on purpose, not sidecars that belong to another
-     * download.
-     */
+    /** Companions are things a model needs *alongside* it — a vision projector, a TAESD decoder, Kokoro's voice packs. */
     private fun detectCompanions(
         files: List<String>,
         sizes: Map<String, HfPathInfo>,
@@ -487,28 +362,7 @@ class ModelResolver(
         }.distinctBy { it.role to it.file.filename },
     )
 
-    /**
-     * Correct the filename's verdict against the file's own tensor names.
-     *
-     * `madebyollin/taesd` is the case this exists for. It publishes three files
-     * that look installable, and the naming is exactly backwards: the two called
-     * `taesd_encoder`/`taesd_decoder` are standalone `nn.Sequential` dumps whose
-     * tensors are `0.weight`, `1.conv.0.bias`, matching nothing sd.cpp looks
-     * for — and each is half an autoencoder besides — while the one that
-     * actually loads is `diffusion_pytorch_model.safetensors`, whose name says
-     * nothing at all. So the app offered two files that cannot work, side by side
-     * as if they were alternatives, and hid the one that can.
-     *
-     * sd.cpp resolves TAESD by looking for `decoder.layers.*` (see
-     * `src/model/vae/tae.hpp`), so agreeing with it means reading the same names.
-     *
-     * Deliberately narrow. Only files that are unclassified or classified TAESD
-     * are read, and only for repos with a handful of candidates — a probe per
-     * file would otherwise add 29 round trips to resolving the ControlNet pack,
-     * whose role never depended on tensor names in the first place. An
-     * unreadable header leaves the filename's verdict standing: "cannot tell"
-     * must not become "refused".
-     */
+    /** Correct the filename's verdict against the file's own tensor names. */
     private suspend fun refineAuxiliaries(
         repoId: String,
         revision: String,
@@ -556,20 +410,14 @@ class ModelResolver(
 
     private fun isCompanionFilename(name: String) = companionRole(name) != null
 
-    /**
-     * Fold shard sets — `model-00001-of-00003.gguf` and its siblings become one
-     * variant with three files, downloaded as one atomic job.
-     */
+    /** Fold shard sets — `model-00001-of-00003.gguf` and its siblings become one variant with three files, downloaded as one atomic job. */
     private fun enumerateQuants(
         files: List<String>,
         sizes: Map<String, HfPathInfo>,
         info: HfModelInfo,
         /** Every file in the repo, so a graph can find its weight sidecar. */
         allFiles: List<String> = files,
-        /**
-         * Pre-grouped variants, when the repo's shape is not one-file-per-choice.
-         * Keyed by the label to show.
-         */
+        /** Pre-grouped variants, when the repo's shape is not one-file-per-choice. */
         preGrouped: Map<String, List<String>>? = null,
     ): List<QuantVariant> {
         val shardPattern = Regex("""(?i)^(.*)-\d{5}-of-\d{5}(\.gguf)$""")
@@ -584,17 +432,10 @@ class ModelResolver(
             }
         }
 
-        // Captured before the companions below are folded in. Only files the
-        // shard pattern actually collapsed are shards; a graph plus its weight
-        // sidecar plus a tokenizer is three files and one part. Counting after
-        // the fold is what made every Kokoro variant claim "3 shards".
+        // Captured before the companions below are folded in.
         val shardCounts = grouped.mapValues { (_, members) -> members.size }
 
-        // ONNX keeps anything over 2 GB — and in practice anything at all — in a
-        // sibling data file, so the graph alone measures a couple of kilobytes.
-        // Reporting that as the download made a 411 MB model read "2 KB" and
-        // "weights 0.00", and downloading it would have produced a graph with no
-        // weights behind it.
+        // ONNX keeps anything over 2 GB — and in practice anything at all — in a sibling data file, so the graph alone measures a couple of kilobytes.
         grouped.forEach { (label, members) ->
             val sidecars = members.flatMap { onnxSidecars(it, allFiles) }
             members.addAll(sidecars.filterNot { it in members })
@@ -605,11 +446,6 @@ class ModelResolver(
         }
 
         // A quant suffix only identifies a variant when the repo holds one model.
-        // whisper.cpp's repo holds tiny/base/small/medium/large *and* several
-        // quantisations of each, so keying on the suffix alone produced six rows
-        // all labelled "Q5_1" — a list in which you cannot tell base from small,
-        // which is worse than no list. Where the suffix does not distinguish,
-        // fall back to the part of the filename that does.
         val proposed = grouped.keys.associateWith {
             if (preGrouped != null) it else extractQuantName(it, info)
         }
@@ -635,9 +471,7 @@ class ModelResolver(
                 name = quantName,
                 files = remoteFiles,
                 speedClass = speed,
-                // The character note is about the *quantisation*, so it reads
-                // the suffix even when the label had to be widened to stay
-                // unambiguous.
+                // The character note is about the *quantisation*, so it reads the suffix even when the label had to be widened to stay unambiguous.
                 note = quantNote(
                     proposed.getValue(key),
                     speed,
@@ -654,35 +488,14 @@ class ModelResolver(
         }.sortedBy { it.totalBytes }
     }
 
-    /**
-     * The whole filename, minus the noise every file in the repo shares.
-     *
-     * `ggml-base.en-q5_1.bin` → `base.en-q5_1`. Used only when the quant suffix
-     * fails to tell two variants apart, so the label stays short in the common
-     * case and stays *correct* in the awkward one.
-     */
+    /** The whole filename, minus the noise every file in the repo shares. */
     private fun distinguishingName(filename: String): String =
         filename.substringAfterLast('/')
             .removeSuffix(".gguf").removeSuffix(".bin").removeSuffix(".onnx")
             .removePrefix("ggml-")
             .removePrefix("model-")
 
-    /**
-     * The text-side files an ONNX model needs that are not graphs.
-     *
-     * A GGUF carries its vocabulary inside the file; an ONNX model does not, and
-     * ships it beside the graphs as `tokenizer.json`. Collecting only `.onnx`
-     * and its weight sidecars therefore installed OmniVoice complete in every
-     * respect except the one that lets it read a sentence, and the failure
-     * arrived as "onnx-community_OmniVoice-Onnx_int4 has no tokenizer.json"
-     * *after* three quarters of a gigabyte had been fetched.
-     *
-     * Publishers keep a per-precision copy next to each variant — OmniVoice has
-     * `int4/tokenizer.json` and `cuda/tokenizer.json` as well as one at the root
-     * — so prefer the copy belonging to this variant and fall back to the root.
-     * They are picked by name rather than by extension because a repo's `.json`
-     * files also include configs no runtime opens.
-     */
+    /** The text-side files an ONNX model needs that are not graphs. */
     private fun onnxTextCompanions(label: String, allFiles: List<String>): List<String> {
         val directory = label.substringBeforeLast('/', "").takeIf { it.isNotEmpty() } ?: label
         fun pick(name: String): String? =
@@ -699,24 +512,7 @@ class ModelResolver(
         return allFiles.filter { it in candidates }
     }
 
-    /**
-     * Group a multi-graph ONNX model by directory instead of by file.
-     *
-     * Some ONNX "models" are a *set* of graphs that only work together —
-     * OmniVoice is an embedding encoder, a Qwen3 backbone, a codebook head and a
-     * vocoder — and the publisher ships the whole set once per precision, in
-     * sibling folders. Listing the graphs as quant variants asks the user to pick
-     * one of seventeen when they need four, and the three identical
-     * `audio_embeddings_encoder` rows are indistinguishable anyway.
-     *
-     * The signal is structural rather than a filename: **a basename that appears
-     * in more than one directory** means the directories are the alternatives and
-     * the files within one are components. Kokoro, whose eight graphs are genuine
-     * precision variants, keeps them in a single folder under distinct names — so
-     * it does not trip this and still lists eight choices. Verified against both.
-     *
-     * Returns null when the repo is the ordinary one-file-per-choice shape.
-     */
+    /** Group a multi-graph ONNX model by directory instead of by file. */
     private fun onnxGraphSets(onnxFiles: List<String>): GraphSets? {
         if (onnxFiles.size < 2) return null
         val byBase = onnxFiles.groupBy { it.substringAfterLast('/') }
@@ -726,26 +522,15 @@ class ModelResolver(
         if (repeated.isEmpty()) return null
 
         val allDirectories = onnxFiles.groupBy { it.substringBeforeLast('/', "") }
-        // Provider folders are held out of the grouping so a CUDA build cannot
-        // vote on which layout is primary, then added back at the end marked
-        // unrunnable. Dropping them silently reads as a repo that does not have
-        // the variant the Hugging Face page plainly shows.
+        // Provider folders are held out of the grouping so a CUDA build cannot vote on which layout is primary, then added back at the end marked unrunnable.
         val foreign = allDirectories.filterKeys { OnnxProviders.isForeign(it.substringAfterLast('/')) }
         val byDirectory = allDirectories - foreign.keys
         if (byDirectory.isEmpty()) return null
 
-        // Directories are only alternatives to each other when they hold the
-        // *same* graphs. Grouping on "has any .onnx" made OmniVoice's four-graph
-        // Higgs tokenizer — a component every variant needs — appear as two more
-        // variants to choose between, so a five-entry list held two real choices,
-        // two components and a CUDA build.
+        // Directories are only alternatives to each other when they hold the *same* graphs.
         val signature = byDirectory.mapValues { (_, paths) ->
             paths.map { it.substringAfterLast('/') }.toSortedSet()
         }
-        // The publisher puts the model itself at the repo root, so the family
-        // the root belongs to is the one being chosen between; everything else
-        // is a part that gets added to whichever choice is made. With no root
-        // graphs, the family with the most directories is the one with variants.
         val primary = signature[""] ?: signature.values
             .groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
             ?: return null
@@ -754,11 +539,7 @@ class ModelResolver(
         if (alternatives.isEmpty()) return null
         val components = byDirectory.filterKeys { signature[it] != primary }
 
-        // One directory per component family, deepest path first. Depth is how
-        // publishers nest a precision under a component — OmniVoice's tokenizer
-        // is `audio_tokenizer/` with `audio_tokenizer/fp16/` inside it — and the
-        // nested one is both the smaller download and what its own manifest
-        // says is used.
+        // One directory per component family, deepest path first.
         val chosenComponents = components.entries
             .groupBy { (_, paths) -> paths.map { it.substringAfterLast('/') }.toSortedSet() }
             .mapNotNull { (_, dirs) -> dirs.maxByOrNull { it.key.count { c -> c == '/' } } }
@@ -774,14 +555,7 @@ class ModelResolver(
         return GraphSets(runnable, unrunnable)
     }
 
-    /**
-     * The variant directories a multi-graph ONNX repo offers, split by whether
-     * this build could load one.
-     *
-     * [unrunnable] is listed and refused rather than hidden, keyed by the
-     * execution provider whose name the directory carries — which is also the
-     * reason, so the message writes itself without a table of explanations.
-     */
+    /** The variant directories a multi-graph ONNX repo offers, split by whether this build could load one. */
     private data class GraphSets(
         val runnable: Map<String, List<String>>,
         val unrunnable: Map<String, List<String>> = emptyMap(),
@@ -790,14 +564,6 @@ class ModelResolver(
     /** `Qwen2.5-7B-Instruct-Q4_K_M.gguf` → `Q4_K_M`. */
     private fun extractQuantName(filename: String, info: HfModelInfo): String {
         val base = filename.substringAfterLast('/').removeSuffix(".gguf").removeSuffix(".bin").removeSuffix(".onnx")
-        // ONNX exports carry their precision in a convention of their own —
-        // `model_fp16`, `model_uint8`, `model_q4f16`, `model_quantized` — which
-        // the GGUF suffix pattern below cannot read: `fp16` does not end in
-        // `F16`, and `uint8` contains no `Q`. Both therefore fell through to the
-        // whole filename and were then described as full precision, which is
-        // wrong for every one of them. Reading the stem off `model` gives the
-        // precision directly, and leaves a bare `model.onnx` blank so it can be
-        // called what it is rather than guessed at.
         if (filename.endsWith(".onnx", ignoreCase = true)) {
             val stem = base.removePrefix("model").trim('_', '-', '.')
             return if (stem.isBlank()) ORIGINAL_EXPORT else stem.uppercase()
@@ -806,25 +572,7 @@ class ModelResolver(
         return match?.value?.uppercase() ?: base.substringAfterLast('-').ifBlank { base }
     }
 
-    /**
-     * A warning that this variant will run and should probably not be chosen.
-     *
-     * Measured, not looked up. Bits per weight is the download size divided by
-     * the parameter count the repo declares, so it needs no table of quant
-     * names and cannot go stale when a new one appears — an unfamiliar
-     * three-letter suffix is judged by the same arithmetic as a familiar one.
-     *
-     * The thresholds are where the published perplexity curves bend rather than
-     * where they slope: under two bits per weight everything degrades sharply,
-     * and under about two and a half a small model degrades much faster than a
-     * large one, because a large one has redundancy to spend and a 1.7B does
-     * not. Above that, "smaller is worse" is a trade-off the note already
-     * describes and the user is entitled to make.
-     *
-     * Silent when the repo declares no parameter count, which is the honest
-     * answer: the caution is arithmetic, and without both numbers there is none
-     * to do.
-     */
+    /** A warning that this variant will run and should probably not be chosen. */
     private fun quantCaution(totalBytes: Long, parameterCount: Long?): String? {
         if (parameterCount == null || parameterCount <= 0L || totalBytes <= 0L) return null
         val bitsPerWeight = totalBytes.toDouble() * 8.0 / parameterCount.toDouble()
@@ -840,11 +588,7 @@ class ModelResolver(
         }
     }
 
-    /**
-     * The one-line character note under each variant. It must never repeat the
-     * speed class shown on the right — the two columns answer different
-     * questions ("what does this quant cost you?" vs "which backend runs it?").
-     */
+    /** The one-line character note under each variant. */
     private fun quantNote(
         rawQuant: String,
         speed: SpeedClass,
@@ -853,41 +597,19 @@ class ModelResolver(
         onnx: Boolean = false,
         graphSet: Boolean = false,
     ): String = buildString {
-        // A multi-graph ONNX variant is neither quantised by its label nor
-        // sharded. Both of OmniVoice's read "full precision · 14 shards": the
-        // label is a directory name that matches no quant pattern, and the file
-        // count is four graphs plus their weight sidecars plus a tokenizer —
-        // parts of one model, not slices of one file. Shards can be resumed
-        // independently and parts cannot, so the word matters.
+        // A multi-graph ONNX variant is neither quantised by its label nor sharded.
         if (graphSet) {
             append("$fileCount files · one model in parts")
             return@buildString
         }
         val quant = rawQuant.uppercase()
-        // ONNX has its own vocabulary and the GGUF table gets it wrong three
-        // ways on a single Kokoro screen: `model_fp16` and `model_uint8` both
-        // read "full precision", and `model_q4` read "unrecognised quant name"
-        // — a name the app itself had just extracted. None of these are GGUF
-        // quantisations and none of them mean what the GGUF table says.
         if (onnx) {
-            // Half-precision *activations*, which is a different claim from
-            // half-precision weights and the one that decides whether this file
-            // can run here at all. ORT on arm64 — the only ABI this app ships —
-            // uses the CPU's real fp16 arithmetic, and float16 stops at 65504:
-            // a vocoder like Kokoro's runs past that, overflows to infinity, and
-            // returns NaN for every sample. It is not slow or lossy, it is
-            // silent. The same file computes fine on an x86 emulator, which has
-            // no fp16 kernels and falls back to fp32 — which is exactly how this
-            // shipped: tested on an emulator, mute on every phone.
+            // Half-precision *activations*, which is a different claim from half-precision weights and the one that decides whether this file can run here at all.
             val halfPrecisionMaths = Regex("(F16|FP16)$").containsMatchIn(quant)
             append(
                 when {
                     quant == ORIGINAL_EXPORT.uppercase() -> "as published"
                     quant.startsWith("QUANTIZED") -> "8-bit, dynamically quantised"
-                    // Ordered before the bare Q8/INT4 cases on purpose: Q8F16
-                    // starts with Q8 and used to be described as plain "8-bit
-                    // weights", so the half-precision part — the part that makes
-                    // it produce nothing — was never mentioned at all.
                     halfPrecisionMaths && quant.contains("8") -> "8-bit weights, half-precision maths"
                     halfPrecisionMaths && quant.contains("4") -> "4-bit weights, half-precision maths"
                     quant.startsWith("UINT8") || quant.startsWith("INT8") || quant.startsWith("Q8") ->
@@ -919,9 +641,7 @@ class ModelResolver(
                 quant.startsWith("IQ1") || quant.startsWith("IQ2") -> "very small, real quality cost"
                 quant.startsWith("IQ") -> "small, quality cost"
                 quant.startsWith("Q2") || quant.startsWith("Q3") -> "small, quality cost"
-                // Q4_0/Q4_1/Q5_0/Q5_1 — the pre-K quantisations. Still common
-                // in whisper.cpp's own repo, so they need a real description
-                // rather than falling through to "unrecognised".
+                // Q4_0/Q4_1/Q5_0/Q5_1 — the pre-K quantisations.
                 quant.matches(Regex("""Q[45]_[01]""")) -> "legacy quant"
                 quant.endsWith("_1") || quant.endsWith("_0") -> "legacy quant"
                 // No quant suffix at all: whisper's plain `ggml-base.bin` and
@@ -1035,22 +755,13 @@ class ModelResolver(
     }
 
     private companion object {
-        /**
-         * The label for a bare `model.onnx` when the filename says nothing about
-         * precision. Naming it after what we know — that it is the export the
-         * publisher put there first — beats guessing fp32 and being wrong on the
-         * repos that export fp16 under that name.
-         */
+        /** The label for a bare `model.onnx` when the filename says nothing about precision. */
         const val ORIGINAL_EXPORT = "original"
 
         /** Below this, a heavy quantisation has no redundancy to eat into. */
         const val SMALL_MODEL_PARAMS = 4_000_000_000L
 
-        /**
-         * How many safetensors a repo may hold before header probing is skipped.
-         * One request per file is fine for an autoencoder repo and absurd for a
-         * fifteen-ControlNet pack, whose roles never needed probing anyway.
-         */
+        /** How many safetensors a repo may hold before header probing is skipped. */
         const val HEADER_PROBE_LIMIT = 8
 
         /** What sd.cpp's TinyDecoder block is named — `src/model/vae/tae.hpp`. */

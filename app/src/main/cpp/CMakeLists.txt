@@ -141,65 +141,6 @@ endif()
 add_subdirectory("${VENDOR_DIR}/llama.cpp" "${CMAKE_CURRENT_BINARY_DIR}/llama.cpp" EXCLUDE_FROM_ALL)
 
 # ---------------------------------------------------------------------------
-# Hexagon — the NPU, added by hand rather than with GGML_HEXAGON=ON.
-#
-# Upstream's own ggml-hexagon/CMakeLists.txt cannot run here, and not for a
-# reason a flag can fix: it drives two compilers this machine does not have.
-# `qaic` generates the fastRPC stub from an IDL file, and hexagon-clang builds
-# libggml-htp-v<NN>.so, which is DSP code and shares no instruction set with
-# anything the NDK targets. Both ship only inside Qualcomm's Hexagon SDK, and
-# that SDK is behind a developer account.
-#
-# tools/build-hexagon.sh runs those two compilers once, inside llama.cpp's
-# public toolchain image, and leaves the results in native/hexagon/. What is
-# left over — one .cpp, one .c and a stub — is ordinary arm64 code, so it is
-# compiled here with everything else. The block below is `ggml_add_backend` and
-# `ggml_add_backend_library` written out longhand for that one backend; the
-# definition on `ggml` is what makes ggml-backend-reg.cpp call
-# ggml_backend_hexagon_reg(), and without it the sources would compile into a
-# library nothing ever asks for.
-#
-# Absent native/hexagon/, the build is exactly what it was before: NPU stays
-# unregistered, Settings keeps saying so, and nothing else changes.
-# ---------------------------------------------------------------------------
-
-set(ONDEVICE_HEXAGON_DIR "${VENDOR_DIR}/hexagon")
-
-if (ANDROID_ABI STREQUAL "arm64-v8a" AND EXISTS "${ONDEVICE_HEXAGON_DIR}/generated/htp_iface_stub.c")
-    set(GGML_HEXAGON_SRC "${VENDOR_DIR}/llama.cpp/ggml/src/ggml-hexagon")
-
-    add_library(ggml-hexagon STATIC
-        "${GGML_HEXAGON_SRC}/ggml-hexagon.cpp"
-        "${GGML_HEXAGON_SRC}/htp-drv.cpp"
-        "${ONDEVICE_HEXAGON_DIR}/generated/htp_iface_stub.c"
-    )
-
-    target_include_directories(ggml-hexagon PRIVATE
-        "${ONDEVICE_HEXAGON_DIR}/incs"
-        "${ONDEVICE_HEXAGON_DIR}/incs/stddef"
-        "${ONDEVICE_HEXAGON_DIR}/generated"
-        "${GGML_HEXAGON_SRC}"
-        "${GGML_HEXAGON_SRC}/htp"
-        "${VENDOR_DIR}/llama.cpp/ggml/src"
-    )
-
-    set_property(TARGET ggml-hexagon PROPERTY POSITION_INDEPENDENT_CODE ON)
-    # Vendored code built under our warning set, not upstream's.
-    target_compile_options(ggml-hexagon PRIVATE -Wno-everything)
-    # libcdsprpc.so is opened by name at runtime rather than linked: a phone
-    # with no DSP simply fails to register the backend, which is the outcome
-    # this build wants on every other device.
-    target_link_libraries(ggml-hexagon PRIVATE ggml-base log dl)
-
-    target_link_libraries(ggml PUBLIC ggml-hexagon)
-    target_compile_definitions(ggml PUBLIC GGML_USE_HEXAGON)
-
-    message(STATUS "ondevice: Hexagon backend from ${ONDEVICE_HEXAGON_DIR}")
-else()
-    message(STATUS "ondevice: no Hexagon backend (run tools/build-hexagon.sh to add one)")
-endif()
-
-# ---------------------------------------------------------------------------
 # whisper.cpp
 #
 # It vendors its own ggml. Pointing it at llama.cpp's copy instead avoids

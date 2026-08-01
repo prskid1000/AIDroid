@@ -29,20 +29,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 
-/**
- * llama.cpp, for real.
- *
- * The whole of this class is translation: Kotlin data classes to JSON, JSON back
- * to [GenerationEvent]. It contains no knowledge of any model — the chat
- * template, the reasoning tags, the tool-call syntax and the stop sequences all
- * come from the GGUF via upstream's own parsers (SPEC §1.3). There is no
- * `when (modelName)` here and there is not supposed to be.
- *
- * Streaming is pull-based: the flow asks the native side for the next token, so
- * cancellation is simply the flow stopping, and the teardown in `onCompletion`
- * is what actually frees the sampler and the KV — which is Appendix A #7's
- * requirement that cancelling frees memory rather than detaching a callback.
- */
+/** llama.cpp, for real. */
 class LlamaEngine(
     override val descriptor: RuntimeDescriptor,
 ) : InferenceEngine {
@@ -86,9 +73,7 @@ class LlamaEngine(
                 embeddingLengthKv = info.int("embeddingLengthKv") ?: 0,
                 heads = info.int("heads") ?: 0,
                 chatTemplate = info.string("chatTemplate")?.takeIf { it.isNotBlank() },
-                // The end-of-generation tokens the *vocabulary* declares. A
-                // hand-kept list per model family is exactly the model-locking
-                // §1.3 exists to prevent.
+                // The end-of-generation tokens the *vocabulary* declares.
                 stopSequences = info["eogTokens"]?.jsonArray
                     ?.mapNotNull { it.jsonPrimitive.contentOrNull }
                     ?.filter { it.isNotBlank() }
@@ -96,14 +81,6 @@ class LlamaEngine(
                 loadMillis = System.currentTimeMillis() - started,
             )
             loaded = model
-            // What was loaded, and the four things that decide whether it can
-            // answer at all: the context it got (which is not the context that
-            // was asked for when the device could not spare it), the threads it
-            // will use, whether the GGUF carried a chat template, and whether the
-            // vocabulary declared any end-of-generation token. A model with no
-            // template produces a reply addressed to nobody, and one with no EOG
-            // never stops — both look like a bad model rather than a missing
-            // field, and neither is visible anywhere else.
             android.util.Log.i(
                 TAG,
                 "loaded ${request.modelPath.substringAfterLast('/')} in ${model.loadMillis}ms " +
@@ -147,9 +124,6 @@ class LlamaEngine(
         }
 
         appliedParams = appliedParams.overlaidWith(request.params)
-        // Parsed rather than discarded: a rejected sampler parameter changes
-        // nothing and says nothing, so a temperature the runtime refused looks
-        // exactly like one it honoured.
         val report = json.parseToJsonElement(
             LlamaBridge.nativeApplyParams(handle, appliedParams.toJsonString()),
         ).jsonObject
@@ -169,11 +143,7 @@ class LlamaEngine(
             return@flow
         }
 
-        // Counts and template source, never the text. What goes wrong here is
-        // structural — an unrendered template, a prompt that overran the context,
-        // a cache that was invalidated and made every turn reprocess the whole
-        // conversation — and all of it is visible without logging what anyone
-        // said.
+        // Counts and template source, never the text.
         android.util.Log.i(
             TAG,
             "prompt tokens=${start.int("promptTokens") ?: 0} " +
@@ -210,9 +180,6 @@ class LlamaEngine(
 
             val content = step.string("contentDelta").orEmpty()
             if (content.isNotEmpty()) {
-                // The first ordinary token is the end of the reasoning block —
-                // upstream's parser tells us that by switching which delta it
-                // fills, so the app never looks for a `</think>` itself.
                 if (thinkingStarted != 0L && !thinkingClosed) {
                     thinkingClosed = true
                     emit(

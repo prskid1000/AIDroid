@@ -4,15 +4,7 @@ import ai.ondevice.core.Fmt
 import ai.ondevice.core.SpeedClass
 import ai.ondevice.core.Verdict
 
-/**
- * What `flash_attn` is set to, which is three states and not two.
- *
- * llama.cpp's own type is `LLAMA_FLASH_ATTN_TYPE_{AUTO,ENABLED,DISABLED}`, and
- * [AUTO] — the default when the key was never set — is the one that matters
- * here: it lets the runtime turn flash attention on wherever the backend
- * supports it, so it must not be priced as "off". Collapsing this to a Boolean
- * would make every default configuration look like the expensive case.
- */
+/** What `flash_attn` is set to, which is three states and not two. */
 enum class FlashAttention {
     AUTO,
     ON,
@@ -29,24 +21,9 @@ enum class FlashAttention {
     }
 }
 
-/**
- * The compatibility gate: SPEC §3.3, and the reason §1.2 ("honest refusal over
- * silent failure") is enforceable rather than aspirational.
- *
- * Two rules from the spec shape this file:
- *  - It runs **before any download**, and no path may reach a native load
- *    without having passed it (Appendix A #5).
- *  - It **shows the arithmetic**. Not a bare yes/no — the model detail screen
- *    prints `weights + KV + compute` and recomputes live as the context slider
- *    moves, because a user who can see the sum can fix the problem themselves.
- */
+/** The compatibility gate: SPEC §3.3, and the reason §1.2 ("honest refusal over silent failure") is enforceable rather than aspirational. */
 object CompatibilityGate {
 
-    /**
-     * llama.cpp's default physical batch — the unit the attention graph is
-     * actually built over, which is not the logical `n_batch` the compute
-     * buffer's other terms scale with.
-     */
     const val DEFAULT_MICRO_BATCH = 512
 
     /** Whether a cache type is one ggml calls quantized, as `ggml_is_quantized` does. */
@@ -65,12 +42,7 @@ object CompatibilityGate {
         else -> 2f
     }
 
-    /**
-     * `2 × n_layer × n_ctx × n_embd_kv × bytes_per_elem(cache_type)`.
-     *
-     * The literal formula from SPEC §3.3, and the one the model-detail screen
-     * prints back to the user. The leading 2 is K and V.
-     */
+    /** `2 × n_layer × n_ctx × n_embd_kv × bytes_per_elem(cache_type)`. */
     fun kvCacheBytes(
         layers: Int,
         contextTokens: Int,
@@ -82,27 +54,7 @@ object CompatibilityGate {
         return (2.0 * layers * contextTokens * embeddingLengthKv * perElement).toLong()
     }
 
-    /**
-     * Compute buffer: the graph's intermediates, which flash attention changes
-     * by more than any other single setting.
-     *
-     * With flash attention the attention scores are never materialised — the
-     * kernel streams them — so the buffer scales with the batch and not with the
-     * context. That is the case this was calibrated for: `n_batch × n_embd ×
-     * bytes` with headroom, landing at 0.20–0.25 GB for a 4B at default batch.
-     *
-     * Without it, `KQ = K·Qᵀ` is a real f32 tensor of `[n_kv, n_ubatch, n_head]`
-     * for every layer in flight, and it grows with the context. At 32k with 32
-     * heads and the default 512-token micro-batch that is 2 GB — an order of
-     * magnitude more than the rest of the buffer, and the difference between a
-     * model that loads and one that does not. Leaving it out did not make the
-     * estimate slightly optimistic; it made it wrong in the only case where the
-     * user needed it to be right.
-     *
-     * [heads] is the query-head count from the GGUF. Without it the term cannot
-     * be computed honestly, so it is left out and [FitEstimate.exact] says so
-     * rather than a plausible number being invented.
-     */
+    /** Compute buffer: the graph's intermediates, which flash attention changes by more than any other single setting. */
     fun computeBufferBytes(
         nBatch: Int,
         embeddingLength: Int,
@@ -118,10 +70,7 @@ object CompatibilityGate {
         return base + scores
     }
 
-    /**
-     * The full resident estimate. Every term is returned separately so the UI
-     * can print the sum rather than just the total.
-     */
+    /** The full resident estimate. */
     fun estimate(
         weightsBytes: Long,
         layers: Int?,
@@ -137,9 +86,6 @@ object CompatibilityGate {
         val kv = if (layers != null && embeddingLengthKv != null) {
             kvCacheBytes(layers, contextTokens, embeddingLengthKv, cacheTypeK, cacheTypeV)
         } else {
-            // Without the architecture's own numbers, fall back to a coarse
-            // proportion of the weights and say so, rather than pretending to
-            // an exactness we don't have.
             (weightsBytes * 0.25).toLong()
         }
         val compute = computeBufferBytes(
@@ -165,13 +111,7 @@ object CompatibilityGate {
         )
     }
 
-    /**
-     * Turn an estimate into one of the six verdicts.
-     *
-     * `archSupported` is answered by the runtime registry, which is generated
-     * from the pinned upstream source — never a hand-maintained allowlist
-     * (SPEC §2.3, Appendix A #3).
-     */
+    /** Turn an estimate into one of the six verdicts. */
     fun verdict(
         estimate: FitEstimate,
         availableRamBytes: Long,
@@ -190,17 +130,7 @@ object CompatibilityGate {
         else -> Verdict.FAST
     }
 
-    /**
-     * Q4_0 is the only quant with an Adreno OpenCL kernel, so everything else
-     * falls back to CPU — *when there is an OpenCL backend at all*.
-     *
-     * That second clause is not a detail. The quant list is the screen where
-     * the app tells the user which file will be fast on their handset, and a
-     * build with no OpenCL backend compiled in that still prints "Adreno fast
-     * path" is making a performance promise it cannot keep. SPEC §8.2 is about
-     * exactly this: do not assert backend performance, report it. So the caller
-     * passes what the runtime *actually registered*, read back from ggml.
-     */
+    /** Q4_0 is the only quant with an Adreno OpenCL kernel, so everything else falls back to CPU — *when there is an OpenCL backend at all*. */
     fun speedClassFor(quant: String?, openClAvailable: Boolean): SpeedClass = when {
         !openClAvailable -> SpeedClass.CPU_PATH
         quant?.uppercase()?.contains("Q4_0") == true -> SpeedClass.OPENCL_FAST
@@ -211,13 +141,7 @@ object CompatibilityGate {
     private const val TIGHT_HEADROOM_BYTES = 1_000_000_000L
 }
 
-/**
- * A fit estimate with its terms intact, so the UI can show the working.
- *
- * [exact] records whether the KV term came from real architecture metadata or
- * from the coarse fallback — the screens say which, rather than presenting a
- * guess in the same voice as a calculation.
- */
+/** A fit estimate with its terms intact, so the UI can show the working. */
 data class FitEstimate(
     val weightsBytes: Long,
     val kvCacheBytes: Long,
@@ -231,18 +155,7 @@ data class FitEstimate(
     val heads: Int? = null,
     val flashAttention: FlashAttention = FlashAttention.AUTO,
 ) {
-    /**
-     * Whether llama.cpp will refuse this combination outright.
-     *
-     * `llama-context.cpp`: `if (ggml_is_quantized(params.type_v) &&
-     * params.flash_attn_type == LLAMA_FLASH_ATTN_TYPE_DISABLED) { … return
-     * nullptr; }`. The context is never created, so the model does not load —
-     * and until this was checked, the screen priced the smaller KV cache that a
-     * quantized V buys as though the user could have it.
-     *
-     * AUTO is not DISABLED, which is why only an explicit off trips this: left
-     * alone, llama.cpp turns flash attention on when the backend supports it.
-     */
+    /** Whether llama.cpp will refuse this combination outright. */
     val quantizedVWithoutFlashAttention: Boolean
         get() = flashAttention == FlashAttention.OFF &&
             CompatibilityGate.isQuantizedCache(cacheTypeV)
@@ -251,12 +164,7 @@ data class FitEstimate(
     fun headroomBytes(availableRam: Long): Long = availableRam - totalBytes
 
     /** "≈ 5.20 GB at 8K context". */
-    /**
-     * A KV cache is a property of autoregressive attention over a context. A
-     * diffusion model has neither, so quoting "at 8K context · KV 0.39" for one
-     * is not a rounding error — it is a number the user could act on that means
-     * nothing. Where there is no context, the summary says so instead.
-     */
+    /** A KV cache is a property of autoregressive attention over a context. */
     val hasContext: Boolean get() = contextTokens > 0 && kvCacheBytes > 0
 
     fun summary(): String = if (hasContext) {
@@ -272,10 +180,7 @@ data class FitEstimate(
         "weights ${Fmt.gb(weightsBytes)}   +   working set ${Fmt.gb(computeBufferBytes)}"
     }
 
-    /**
-     * The three-line breakdown S2 prints, with the KV line showing the actual
-     * multiplication so the user can see where the number comes from.
-     */
+    /** The three-line breakdown S2 prints, with the KV line showing the actual multiplication so the user can see where the number comes from. */
     fun longWorking(): List<String> = buildList {
         add("weights ${Fmt.gb(weightsBytes)}")
         if (layers != null && embeddingLengthKv != null) {
@@ -308,11 +213,4 @@ data class FitEstimate(
         }
     }
 
-    /**
-     * SPEC §3.3 also asks whether a Hexagon session can hold this at all — past
-     * ~3.5 GB the model needs layer-splitting across HTP0..HTP3 or an OpenCL
-     * fallback.
-     */
-    val exceedsHexagonSession: Boolean
-        get() = totalBytes > DeviceCapabilities.HEXAGON_SESSION_CAP_BYTES
 }

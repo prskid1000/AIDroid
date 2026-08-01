@@ -48,18 +48,7 @@ import ai.ondevice.ui.theme.ring
 import ai.ondevice.ui.vm.LibraryDetailState
 import ai.ondevice.ui.vm.LibraryDetailViewModel
 
-/**
- * One library item, opened.
- *
- * Four kinds share this screen because they share a shape: what it is, what
- * produced it, what it cost, and a way back into the tab that made it. Only the
- * first of those four differs between a conversation, an image, a rendered take
- * and a transcript — so only the first is written four times.
- *
- * The "open in" button is the point of the screen. A library that can only show
- * you what you made is an archive; one that can put it back on the workbench is
- * a library.
- */
+/** One library item, opened. */
 @Composable
 fun LibraryDetailScreen(
     onBack: () -> Unit,
@@ -147,15 +136,9 @@ private fun ConversationDetail(state: LibraryDetailState, onOpen: () -> Unit) {
     NTable {
         val assistant = state.messages.count { it.role == ai.ondevice.core.MessageRole.ASSISTANT }
         DetailRow("messages", "${state.messages.size} · $assistant from the model")
-        // No model row here. It belongs to the parameter table below, and a
-        // second one read `conversation.modelId` — which is only written on an
-        // explicit pick — so the same screen said "—" in one place and named the
-        // model in the other.
+        // No model row here.
         DetailRow("updated", Fmt.relative(conversation.updatedAt))
-        // The measured rate across every turn in the thread, weighted by
-        // nothing — each turn's own figure, averaged. A single number for a
-        // conversation that may have changed model mid-way would be a lie, so
-        // the count it was taken over is stated with it.
+        // The measured rate across every turn in the thread, weighted by nothing — each turn's own figure, averaged.
         val rates = state.messages.mapNotNull { it.tokensPerSecond?.takeIf { rate -> rate > 0 } }
         if (rates.isNotEmpty()) {
             DetailRow("speed", "${Fmt.tokensPerSecond(rates.average().toFloat())} over ${rates.size} turns")
@@ -188,9 +171,7 @@ private fun ImageDetail(state: LibraryDetailState, onOpen: () -> Unit) {
             .ring(NocturneColors.Divider, Radius.Md),
         contentAlignment = Alignment.Center,
     ) {
-        // The file itself. This used to be a gradient derived from the seed —
-        // a stand-in from before sd.cpp was wired in, left in place long after
-        // there were real pixels on disk to show.
+        // The file itself.
         coil3.compose.AsyncImage(
             model = image.path,
             contentDescription = image.prompt,
@@ -279,10 +260,7 @@ private fun TranscriptDetail(state: LibraryDetailState, onOpen: () -> Unit) {
         Modifier.padding(top = 6.dp),
     )
 
-    // Present for a file transcription, and for a recording made since the
-    // capture path started keeping its WAV. Older recordings have no audio at
-    // all — they were decoded and discarded — so this simply does not appear
-    // rather than offering a player for a file that was never written.
+    // Present for a file transcription, and for a recording made since the capture path started keeping its WAV.
     transcript.sourcePath?.let { path ->
         val audio = java.io.File(path)
         if (audio.isFile) {
@@ -314,9 +292,7 @@ private fun TranscriptDetail(state: LibraryDetailState, onOpen: () -> Unit) {
         }
         segments.forEach { segment ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // A live capture has no boundaries to report, so its cue times
-                // are genuinely zero and saying "0:00" for every line would be
-                // noise dressed as data.
+                // A live capture has no boundaries to report, so its cue times are genuinely zero and saying "0:00" for every line would be noise dressed as data.
                 if (segment.endMillis > 0) {
                     Text(
                         Fmt.duration(segment.startMillis),
@@ -339,9 +315,6 @@ private fun ParameterTable(state: LibraryDetailState) {
     SectionKicker("Parameters", Modifier.padding(top = 20.dp, bottom = 8.dp))
     NTable {
         state.modelId?.let { DetailRow("model", it) }
-        // Sorted, and with the two that are shown above the table dropped —
-        // repeating the prompt as a table row makes the whole set look like
-        // machine output rather than the settings it is.
         params.keys
             .filterNot { it == "prompt" || it == "negative_prompt" }
             .sorted()
@@ -356,14 +329,7 @@ private fun ParameterTable(state: LibraryDetailState) {
     }
 }
 
-/**
- * What it cost to make.
- *
- * A conversation has one block per turn because each turn is its own run — a
- * reply that called three tools generated four times, and averaging those into
- * a single graph would hide that the later rounds are cheap against a warm
- * cache. Everything else has exactly one.
- */
+/** What it cost to make. */
 @Composable
 private fun RunSection(state: LibraryDetailState) {
     val traces = state.traces
@@ -397,13 +363,7 @@ private fun DetailRow(key: String, value: String) {
     }
 }
 
-/**
- * Share the file when it exists, and its parameter set when it does not.
- *
- * The claim an image makes is that it reproduces without the app, so the share
- * always carries the full parameter set as text alongside the picture. The
- * FileProvider grant is read-only and scoped to whichever app receives it.
- */
+/** Share the file when it exists, and its parameter set when it does not. */
 internal fun shareImage(
     context: android.content.Context,
     image: ai.ondevice.data.db.GeneratedImageEntity,
@@ -440,19 +400,7 @@ internal fun shareImage(
     context.startActivity(android.content.Intent.createChooser(intent, "Share image"))
 }
 
-/**
- * Save and Share, for every kind of artifact, in one place.
- *
- * This is the whole of what used to be scattered across four screens as eight
- * buttons: Chat's two exports, Voice's "Save as WAV", "Send audio" and four
- * transcript formats, and the image share. They all did the same two things and
- * every one of them wrote into app-private storage, so "Save" produced a file
- * in a directory a phone's file manager will not show you.
- *
- * Save and Share are both here because they are not the same act — one puts a
- * file where you can find it, the other hands it to another app — and dropping
- * either would have lost something the app could already do.
- */
+/** Save and Share, for every kind of artifact, in one place. */
 @Composable
 private fun ExportSection(
     state: LibraryDetailState,

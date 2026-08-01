@@ -26,16 +26,7 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-/**
- * Diffusion, for real (SPEC §5).
- *
- * The engine knows nothing about model families. A run is a base model plus a
- * list of [ModelAttachment]s, each carrying a role and a path, and the runtime
- * is the thing that decides whether a given ControlNet or LoRA is loadable
- * against the loaded base. That is not laziness — the alternative is a
- * compatibility table this app would have to keep correct for every
- * architecture ever released, which is exactly the model-locking §1.3 forbids.
- */
+/** Diffusion, for real (SPEC §5). */
 class DiffusionEngine(
     private val context: Context,
     private val capabilities: ai.ondevice.data.hf.DeviceCapabilities,
@@ -58,13 +49,7 @@ class DiffusionEngine(
     val available: Boolean get() = SdBridge.available
     val isLoaded: Boolean get() = handle != 0L
 
-    /**
-     * Whether the loaded model is the one asked for, on the device asked for.
-     *
-     * sd.cpp resolves its backend once, when the context is built, so a changed
-     * Compute device is only a changed setting until something reloads. The
-     * Image screen compared model ids alone and so never did.
-     */
+    /** Whether the loaded model is the one asked for, on the device asked for. */
     suspend fun isCurrent(modelId: String): Boolean =
         isLoaded && loadedModelId == modelId &&
             loadedBackend == computeDevice.chosen(RuntimeRegistry.STABLE_DIFFUSION)
@@ -82,22 +67,12 @@ class DiffusionEngine(
             }
             unload()
 
-            // These three are load-time in sd.cpp — they change the context, not
-            // the run — so they are resolved here and the rest at generate time.
-            //
-            // The ticked attachment wins, and the manifest parameter is the
-            // fallback. Both routes existed but only the first was read, which
-            // made `vae`, `taesd` and `control_net` look like working Expert
-            // parameters while doing nothing: AttachmentRole declares those very
-            // strings as its `paramKey`, so even a search for them found a hit
-            // and hid the gap.
+            // These three are load-time in sd.cpp — they change the context, not the run — so they are resolved here and the rest at generate time.
             fun pathFor(role: AttachmentRole) =
                 attachments.firstOrNull { it.enabled && it.role == role }?.path
                     ?: params.string(role.paramKey).orEmpty()
 
-            // Settings → Compute device. sd.cpp picked its own device before
-            // this, which was defensible while there was only one to pick and a
-            // silent override of the user's answer once there were three.
+            // Settings → Compute device.
             val device = computeDevice.chosen(RuntimeRegistry.STABLE_DIFFUSION)
             val backend = device.registryNames.first()
 
@@ -158,25 +133,13 @@ class DiffusionEngine(
         if (handle != 0L) SdBridge.nativeCancel(handle)
     }
 
-    /**
-     * Generate, emitting progress and live previews while it runs.
-     *
-     * `generate_image` blocks, so it goes on its own coroutine and a second one
-     * polls. SPEC §5.4 wants intermediate latents rather than a spinner, and
-     * that is what the preview stream is — the actual denoising state, decoded
-     * by TAESD, not an animation standing in for one.
-     */
+    /** Generate, emitting progress and live previews while it runs. */
     fun generate(request: DiffusionRequest): Flow<DiffusionEvent> = channelFlow {
         if (handle == 0L) {
             send(DiffusionEvent.Failed("No diffusion model is loaded.", "Models → Add an SD or SDXL repo."))
             return@channelFlow
         }
 
-        // The report was thrown away here, and a rejected parameter is otherwise
-        // invisible: nothing fails, the run simply ignores what was asked for
-        // and produces a picture at the default. Rejections are the interesting
-        // half, so they are logged even when the list is empty and the
-        // acceptances only when there are some.
         val report = applyParams(request.params)
         android.util.Log.i(
             TAG,
@@ -190,15 +153,6 @@ class DiffusionEngine(
         val mask = request.maskPngPath?.let { decodeRgbFromFile(it) }
 
         // Attachments the *runtime* takes per-run, as a role-tagged list.
-        //
-        // Ticked attachments first, then anything named by an Expert parameter
-        // for a role nothing is ticked for.
-        //
-        // Only the two roles the runtime takes per-run are sent: sd.cpp applies
-        // LoRAs per generation and can hot-swap a ControlNet, and everything
-        // else is a context field set at load. Sending the others here would be
-        // silently ignored, which is how they came to look wired in the first
-        // place.
         val perRun = listOf(AttachmentRole.LORA, AttachmentRole.CONTROLNET)
         val ticked = request.attachments.filter { it.enabled && it.role in perRun }
         val attachmentsJson = buildJsonArray {
@@ -243,10 +197,6 @@ class DiffusionEngine(
                     send(DiffusionEvent.Failed("The run produced no image.", null))
                 } else {
                     val image = unpack(bytes)
-                    // A run that produced black, a flat colour or static is a
-                    // successful run everywhere in this file — the bytes arrive,
-                    // the PNG writes, the library lists it. This line is the only
-                    // place that can say which of those it was.
                     android.util.Log.i(
                         TAG,
                         "generated ${image.summary()} in " +
@@ -308,12 +258,7 @@ class DiffusionEngine(
         toRgb(BitmapFactory.decodeFile(path) ?: return null)
     }.getOrNull()
 
-    /**
-     * sd.cpp wants tightly packed RGB, and Android hands back ARGB_8888. The
-     * dimensions are forced to a multiple of 64 because the latent space is
-     * 8×-downsampled and the samplers assume it divides cleanly; a 999-pixel
-     * input silently produces a misaligned tensor otherwise.
-     */
+    /** sd.cpp wants tightly packed RGB, and Android hands back ARGB_8888. */
     private fun toRgb(source: Bitmap): Rgb {
         val width = (source.width / 64).coerceAtLeast(1) * 64
         val height = (source.height / 64).coerceAtLeast(1) * 64
@@ -335,18 +280,7 @@ class DiffusionEngine(
         return Rgb(out, width, height)
     }
 
-    /**
-     * Upscale a finished picture with an installed ESRGAN model.
-     *
-     * Deliberately not part of a generate: sd.cpp keeps the upscaler in its own
-     * context, so this needs no diffusion model loaded and leaves a loaded one
-     * alone. It is also slow and memory-hungry — a 512 ² image at ×4 is four
-     * megapixels out — which is why it is an explicit action on a picture the
-     * user already has rather than a step tacked onto every run.
-     *
-     * [factor] of 0 accepts whatever the model was trained for, which for the
-     * ESRGAN family is usually ×4.
-     */
+    /** Upscale a finished picture with an installed ESRGAN model. */
     suspend fun upscale(
         image: DiffusionImage,
         esrganPath: String,
@@ -418,10 +352,7 @@ data class DiffusionRequest(
 data class DiffusionImage(val width: Int, val height: Int, val pixels: IntArray) {
     fun toBitmap(): Bitmap = Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
 
-    /**
-     * PNG bytes with the generation parameters in a `tEXt` chunk, so the file
-     * alone is reproducible without this app's database (SPEC §5.4).
-     */
+    /** PNG bytes with the generation parameters in a `tEXt` chunk, so the file alone is reproducible without this app's database (SPEC §5.4). */
     fun toPng(parametersJson: String): ByteArray {
         val body = ByteArrayOutputStream()
         toBitmap().compress(Bitmap.CompressFormat.PNG, 100, body)
@@ -429,12 +360,7 @@ data class DiffusionImage(val width: Int, val height: Int, val pixels: IntArray)
     }
 }
 
-/**
- * Which part of the run is happening. sd.cpp reports loading, tiled VAE decode
- * and sampling through one untagged callback, so the phase is inferred natively
- * and carried here — the screen can then say "preparing" instead of pretending
- * the loader's tensor count is a sampler step.
- */
+/** Which part of the run is happening. */
 enum class DiffusionPhase(val label: String) {
     PREPARING("preparing"),
     SAMPLING("sampling"),

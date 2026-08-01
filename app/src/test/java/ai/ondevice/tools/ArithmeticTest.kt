@@ -5,21 +5,7 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * The `calculate` tool's evaluator.
- *
- * Worth testing more than its size suggests, for two separate reasons.
- *
- * It is the only place in the app that evaluates a string the *model* wrote,
- * which makes its grammar a security boundary: the comment above it says it is
- * deliberately not a scripting engine, and these tests are what stops that
- * staying true by accident. The refusal cases below are the point of the class,
- * not edge cases around it.
- *
- * And it is arithmetic a person will check. A model that says 2+3*4 is 20 is
- * worse than one with no calculator at all, because the wrong answer arrives
- * with the authority of a tool.
- */
+/** The `calculate` tool's evaluator. */
 class ArithmeticTest {
 
     private fun eval(expression: String) = Arithmetic.evaluate(expression)

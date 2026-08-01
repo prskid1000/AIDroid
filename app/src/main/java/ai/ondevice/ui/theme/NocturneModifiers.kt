@@ -15,12 +15,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-/**
- * `.elev-sm` / `.elev-md` / `.elev-lg`.
- *
- * On a dark ground elevation is a hairline edge plus ambient darkness, never a
- * stack of shadows — so each step draws exactly one ring and at most one drop.
- */
+/** `.elev-sm` / `.elev-md` / `.elev-lg`. */
 fun Modifier.elev(
     shadow: NocturneShadow,
     shape: Shape = Radius.Md,
@@ -39,12 +34,7 @@ fun Modifier.elev(
     return withAmbient.border(1.dp, shadow.ringColor, shape)
 }
 
-/**
- * `box-shadow: inset 0 0 0 1px <color>` — the canvas' single most-used
- * treatment. It marks the selected quant, the loaded model, the active persona,
- * the refusal cards, the running download. Inset means it does not grow the
- * box, which is why the mockups reach for it instead of a border.
- */
+/** `box-shadow: inset 0 0 0 1px <color>` — the canvas' single most-used treatment. */
 fun Modifier.ring(
     color: Color,
     shape: Shape = Radius.Md,
@@ -58,11 +48,7 @@ fun Modifier.ringedSurface(
     shape: Shape = Radius.Md,
 ): Modifier = background(fill, shape).border(1.dp, ring, shape)
 
-/**
- * `box-shadow: 0 1px 0 var(--color-divider)` — an in-control separator under a
- * row. Solid, not faded: the readme reserves the end-fade for freestanding
- * rules and table rows.
- */
+/** `box-shadow: 0 1px 0 var(--color-divider)` — an in-control separator under a row. */
 fun Modifier.ruleBelow(color: Color = NocturneColors.Divider): Modifier = drawBehind {
     val y = size.height - 0.5f
     drawLine(color, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
@@ -73,13 +59,7 @@ fun Modifier.ruleAbove(color: Color = NocturneColors.Divider): Modifier = drawBe
     drawLine(color, Offset(0f, 0.5f), Offset(size.width, 0.5f), strokeWidth = 1f)
 }
 
-/**
- * The Nocturne signature: a rule that fades to transparent over 48px at each
- * end rather than stopping cleanly. Used by `.hr` and by table row rules.
- *
- * When the element is narrower than 96px the two ramps would overlap, so the
- * fade collapses to a symmetric gradient rather than producing a hard edge.
- */
+/** The Nocturne signature: a rule that fades to transparent over 48px at each end rather than stopping cleanly. */
 fun Modifier.fadingRule(
     color: Color = NocturneColors.Divider,
     fadeWidth: Dp = 48.dp,
@@ -105,20 +85,14 @@ fun Modifier.fadingRule(
     )
 }
 
-/**
- * The chat composer's pill and several inset panels want a fill plus an inset
- * hairline in one call, on an arbitrary corner radius.
- */
+/** The chat composer's pill and several inset panels want a fill plus an inset hairline in one call, on an arbitrary corner radius. */
 fun Modifier.panel(
     fill: Color = NocturneColors.Surface,
     ring: Color = NocturneColors.Divider,
     radius: Dp = Radius.md,
 ): Modifier = ringedSurface(fill, ring, RoundedCornerShape(radius))
 
-/**
- * The vertical scrim the canvas paints under the TAESD preview's progress
- * readout: `linear-gradient(transparent, rgba(0,0,0,.6))`.
- */
+/** The vertical scrim the canvas paints under the TAESD preview's progress readout: `linear-gradient(transparent, rgba(0,0,0,.6))`. */
 fun Modifier.bottomScrim(alpha: Float = 0.6f): Modifier = drawBehind {
     drawRect(
         brush = Brush.verticalGradient(

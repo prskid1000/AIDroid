@@ -50,16 +50,7 @@ import ai.ondevice.ui.vm.ConversationSummary
 import ai.ondevice.ui.vm.LibrarySection
 import ai.ondevice.ui.vm.LibraryViewModel
 
-/**
- * **Library** — everything this device has produced.
- *
- * Three of the four kinds were already being written to the database and only
- * one of them could be read back. Conversations were reachable only as
- * "whichever was open last", transcripts accumulated in a table no screen
- * queried, and a rendered WAV survived exactly as long as the process that made
- * it. Generation without a history is a feature that quietly loses the user's
- * work, so this is the one place that lists all of it.
- */
+/** **Library** — everything this device has produced. */
 @Composable
 fun LibraryScreen(
     currentRoute: String?,
@@ -76,10 +67,7 @@ fun LibraryScreen(
     PhoneScaffold(
         toolbar = {
             RootToolbar("Library") {
-                // The three sections, as icons beside the count. They repeat the
-                // bottom bar's glyphs, which is a real risk — but they mean
-                // something different here (things you made, not places to go)
-                // and the selected plate says which one you are reading.
+                // The three sections, as icons beside the count.
                 LibrarySection.entries.forEach { entry ->
                     ToolbarToggle(
                         when (entry) {
@@ -106,9 +94,7 @@ fun LibraryScreen(
         bottomBar = { NBottomBar(BottomDestinations, currentRoute) { onNavigate(it.route) } },
         contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 18.dp),
     ) {
-        // Every row opens the same detail screen. Deleting is still here, so a
-        // clear-out does not cost one push per item — but *reading* one is now
-        // a push rather than four different behaviours per section.
+        // Every row opens the same detail screen.
         when (section) {
             LibrarySection.CHATS -> ChatsSection(
                 conversations = conversations,
@@ -162,13 +148,7 @@ private fun ChatsSection(
     }
 }
 
-/**
- * A thread's own title if it has earned one, otherwise its opening line.
- *
- * Nothing renames a conversation, so every row would otherwise read "New
- * conversation" and the list would be unusable at exactly the size where a list
- * starts to matter.
- */
+/** A thread's own title if it has earned one, otherwise its opening line. */
 private fun ConversationEntity.displayTitle(preview: String): String =
     title.takeIf { it.isNotBlank() && it != "New conversation" }
         ?: preview.takeIf { it.isNotBlank() }
@@ -205,11 +185,7 @@ private fun ImagesSection(
                         .nClickableFlat(onClick = { onOpen(image.id) }),
                     contentAlignment = Alignment.BottomStart,
                 ) {
-                    // The file on disk. These tiles used to draw a gradient
-                    // derived from the seed — a placeholder from before sd.cpp
-                    // could produce pixels, which outlived the reason for it and
-                    // turned the gallery into a wall of things that looked
-                    // generated and were not.
+                    // The file on disk.
                     coil3.compose.AsyncImage(
                         model = image.path,
                         contentDescription = image.prompt,

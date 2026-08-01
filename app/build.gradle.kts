@@ -110,19 +110,6 @@ android {
         }
     }
 
-    // The Hexagon DSP images, as assets rather than jniLibs.
-    //
-    // They are .so files but nothing in this process ever dlopens them: they
-    // run on the NPU, and the DSP's own loader finds them by *path*, from
-    // ADSP_LIBRARY_PATH. jniLibs would put them somewhere that path cannot
-    // name — with extractNativeLibs off, which is the default here, the
-    // library directory is a location inside the APK that only the dynamic
-    // linker knows how to open. So they are shipped as assets and unpacked to
-    // filesDir on first run (see HexagonSkels).
-    //
-    // Absent — no tools/build-hexagon.sh has been run — this is simply an
-    // assets directory that does not exist, which AGP accepts.
-    sourceSets.getByName("main").assets.srcDir(rootProject.file("native/hexagon/assets"))
 
     // SPEC 17.2 — two channels built from one source. `sideload` may self-update
     // its runtime bundles via PackageInstaller; `play` degrades the updater to a

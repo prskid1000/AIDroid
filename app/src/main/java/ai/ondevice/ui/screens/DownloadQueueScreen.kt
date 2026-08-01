@@ -41,13 +41,7 @@ import ai.ondevice.ui.theme.NocturneType
 import ai.ondevice.ui.theme.ruleAbove
 import ai.ondevice.ui.vm.DownloadsViewModel
 
-/**
- * **S4 — Download queue.**
- *
- * Sharded, resumable, companion-aware. The per-file list under each job is the
- * important part: a sharded model is one logical job, and showing the parts
- * makes "resumes across reboot" a visible claim rather than a promise.
- */
+/** **S4 — Download queue.** Sharded, resumable, companion-aware. */
 @Composable
 fun DownloadQueueScreen(
     onBack: () -> Unit,
@@ -105,11 +99,7 @@ fun DownloadQueueScreen(
                     block = true,
                     modifier = Modifier.padding(top = 10.dp),
                 )
-                // Said plainly because "clear" next to a list of model names
-                // reads like it might remove the models. It removes the history
-                // and nothing else — a completed row is a receipt, and the
-                // library derives "installed" from the absence of an *active*
-                // job, never from one of these.
+                // Said plainly because "clear" next to a list of model names reads like it might remove the models.
                 NHelp(
                     "Removes the history only. Installed models and their files are untouched.",
                     Modifier.padding(top = 6.dp),
@@ -166,12 +156,7 @@ private fun ActiveJobCard(job: DownloadJob, viewModel: DownloadsViewModel) {
                     minHeight = 24.dp,
                 )
             }
-            // Cancel was reachable only from a *failed* job, as "Discard". A
-            // running or paused one had pause and resume and no way out, so a
-            // download started by mistake — the wrong quant, or a repo that
-            // turned out to be twelve gigabytes — could only be escaped by
-            // clearing the app's data. Cancelling deletes the partial files, so
-            // it reclaims the space rather than just hiding the row.
+            // Cancel was reachable only from a *failed* job, as "Discard".
             NButton(
                 "Cancel",
                 onClick = { viewModel.cancel(job.id) },
@@ -194,11 +179,7 @@ private fun ActiveJobCard(job: DownloadJob, viewModel: DownloadsViewModel) {
             NMetaText("·")
             NMetaText("${Fmt.bytes(job.bytesDone)} of ${Fmt.bytes(job.bytesTotal)}")
             Box(Modifier.weight(1f))
-            // Rate and time remaining. The rate alone answers "is it moving";
-            // only the ETA answers "can I wait for this", which on a 5 GB model
-            // over a phone connection is the question actually being asked.
-            // `etaSeconds` has been computed on the job all along and shown
-            // nowhere.
+            // Rate and time remaining.
             if (job.bytesPerSecond > 0) {
                 NMetaText(Fmt.transferRate(job.bytesPerSecond))
                 if (running && job.etaSeconds > 0) {
@@ -262,10 +243,7 @@ private fun ActiveJobCard(job: DownloadJob, viewModel: DownloadsViewModel) {
     }
 }
 
-/**
- * The refusal shape again: neutral disc, no red. The checksum card shows both
- * hashes because "nothing was installed" is only credible with the evidence.
- */
+/** The refusal shape again: neutral disc, no red. */
 @Composable
 private fun FailedJobCard(job: DownloadJob, viewModel: DownloadsViewModel) {
     val error = job.error

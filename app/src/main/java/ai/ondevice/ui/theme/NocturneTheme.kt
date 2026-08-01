@@ -13,16 +13,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
-/**
- * Nocturne is a dark-only, mono-accent system. There is no light scheme and no
- * dynamic colour: "exact same colouring" means the tokens in `styles.css` and
- * nothing else, so Material You is deliberately not wired up.
- *
- * Material 3's own colour roles are mapped onto Nocturne rather than left at
- * their defaults, so that any Material primitive still reachable (a `Text` with
- * no explicit colour, a ripple, a text-field cursor) cannot paint a colour that
- * isn't in the system.
- */
+/** Nocturne is a dark-only, mono-accent system. */
 private val NocturneM3 = darkColorScheme(
     primary = NocturneColors.Accent,
     onPrimary = NocturneColors.Accent100,
@@ -48,9 +39,7 @@ private val NocturneM3 = darkColorScheme(
     outline = NocturneColors.Neutral700,
     outlineVariant = NocturneColors.Neutral800,
     scrim = NocturneColors.Neutral900,
-    // Nocturne carries no red. A failure is a neutral-800 disc with a slash,
-    // not an error colour — so `error` is mapped to the neutral ramp on purpose
-    // and no screen should reach for it.
+    // Nocturne carries no red.
     error = NocturneColors.Neutral400,
     onError = NocturneColors.Neutral900,
     errorContainer = NocturneColors.Neutral800,
@@ -63,10 +52,7 @@ private val NocturneSelection = TextSelectionColors(
     backgroundColor = NocturneColors.Selection,
 )
 
-/**
- * True when the app is drawing at phone scale inside the design canvas' 392×824
- * frame. Screens read it only to decide whether to draw the mock status bar.
- */
+/** True when the app is drawing at phone scale inside the design canvas' 392×824 frame. */
 val LocalShowsMockChrome = staticCompositionLocalOf { false }
 
 @Composable
@@ -80,15 +66,6 @@ fun NocturneTheme(
     ) {
         CompositionLocalProvider(
             // Both of these matter, and for different reasons.
-            //
-            // LocalTextStyle covers a `Text` that passes no style at all.
-            // LocalContentColor covers the far more common case here: a `Text`
-            // that passes one of the NocturneType styles, none of which carry a
-            // colour. Material 3 resolves that to LocalContentColor, which
-            // defaults to *black* outside a `Surface` — and this app draws its
-            // own grounds rather than using Surface, so without this every
-            // heading, card title and label would render near-black on a
-            // near-black ground.
             LocalContentColor provides NocturneColors.Text,
             LocalTextStyle provides NocturneType.Body.copy(color = NocturneColors.Text),
             LocalTextSelectionColors provides NocturneSelection,

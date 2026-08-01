@@ -7,19 +7,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
-/**
- * Text to IPA, for Kokoro.
- *
- * espeak reads its phoneme tables and dictionaries with stdio, and an entry in
- * an APK's asset archive is not a file — there is no path to hand it. So the
- * tables are unpacked once into app storage and espeak is pointed there.
- *
- * The unpack is guarded by a stamp file holding the tables' format version
- * rather than by "does the directory exist". A half-finished copy from a
- * process killed mid-unpack would otherwise look complete forever, and the
- * failure it produces — espeak refusing a truncated dictionary — reads like a
- * corrupt install rather than what it is.
- */
+/** Text to IPA, for Kokoro. */
 class Phonemizer(private val context: Context) {
 
     private val mutex = Mutex()
@@ -37,14 +25,7 @@ class Phonemizer(private val context: Context) {
             PhonemizerBridge.loadError ?: "The espeak-ng phonemiser is not installed in this build."
         }
 
-    /**
-     * The espeak voice for a Kokoro voice id.
-     *
-     * Kokoro names a voice `<language><gender>_<name>`, and the leading letter
-     * is the language. Japanese and Mandarin are absent on purpose: Kokoro's
-     * own pipeline phonemises those with misaki, not espeak, and feeding it
-     * espeak's output for them would produce confident nonsense.
-     */
+    /** The espeak voice for a Kokoro voice id. */
     fun espeakVoiceFor(kokoroVoiceId: String): String? = when (kokoroVoiceId.firstOrNull()) {
         'a' -> "en-us"
         'b' -> "en-gb"
@@ -56,20 +37,8 @@ class Phonemizer(private val context: Context) {
         else -> null
     }
 
-    /**
-     * [languageOverride] is the `lang_code` parameter: an espeak voice to use
-     * instead of the one the Kokoro voice id implies. It is a real thing to
-     * want — an American-trained voice reading British spellings pronounces
-     * "schedule" the American way, and forcing en-gb fixes it — but it is also
-     * a way to hand the model phonemes it was never trained on, so it stays an
-     * Advanced control with the default doing the sensible thing.
-     */
-    /**
-     * A `lang_code` value to an espeak voice, or null if this build has no data
-     * staged for it. `ja` and `zh` are in the manifest's list because Kokoro
-     * has voices for them; they resolve to null here because
-     * tools/stage-espeak-data.py deliberately does not ship their tables.
-     */
+    /** [languageOverride] is the `lang_code` parameter: an espeak voice to use instead of the one the Kokoro voice id implies. */
+    /** A `lang_code` value to an espeak voice, or null if this build has no data staged for it. */
     private fun espeakVoiceForCode(code: String): String? = when (code.lowercase()) {
         "en-us" -> "en-us"
         "en-gb" -> "en-gb"
@@ -110,11 +79,7 @@ class Phonemizer(private val context: Context) {
                         currentVoice = voice
                     }
                     PhonemizerBridge.nativePhonemize(text.trim()).also { ipa ->
-                        // espeak returning nothing is not an error it reports —
-                        // it hands back an empty string, which tokenises to no
-                        // ids, which the model turns into silence. Saying so
-                        // here is the difference between a diagnosable failure
-                        // and a WAV that is all header.
+                        // espeak returning nothing is not an error it reports — it hands back an empty string, which tokenises to no ids, which the model turns into silence.
                         if (ipa.isBlank()) {
                             android.util.Log.w(
                                 TAG,
@@ -174,12 +139,7 @@ class Phonemizer(private val context: Context) {
         const val TAG = "Phonemizer"
         const val ASSET_ROOT = "espeak-ng-data"
 
-        /**
-         * Bumped whenever the staged tables change. It is the phondata format
-         * version from tools/stage-espeak-data.py, so a runtime bump that
-         * changes the tables forces a re-unpack instead of leaving a stale
-         * copy espeak will reject.
-         */
+        /** Bumped whenever the staged tables change. */
         const val STAMP = "espeak-ng 1.52.0 phondata 0x014801"
     }
 }
