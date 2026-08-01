@@ -88,7 +88,11 @@ class ImageViewModel @Inject constructor(
         // The loaded context belongs to the old model; keep them in step.
         diffusion.unload()
         _state.value = _state.value.copy(model = model, error = null, errorHint = null, previewBitmap = null)
-        viewModelScope.launch { db.models().touch(model.id, System.currentTimeMillis()) }
+        viewModelScope.launch {
+            db.models().touch(model.id, System.currentTimeMillis())
+            // Components belong to the base model, so they change with it.
+            refreshAttachmentLibrary()
+        }
     }
 
     fun setUse(use: ImageUse) {
@@ -333,17 +337,40 @@ class ImageViewModel @Inject constructor(
 
     // — attachments (SPEC §5, generically) —
 
-    /** Everything installed that can hang off a diffusion run. */
+    /**
+     * The add-ons this run will actually pass, from what has been *chosen*.
+     *
+     * Not "everything installed with a role", which is what it used to be: with
+     * FLUX.2 selected the sheet listed SD 3.5's three encoders, none of which a
+     * DiT can read, and every one of them switched off — including the two
+     * Klein cannot start without.
+     *
+     * Which file fills a role is a per-model decision and lives in the base
+     * model's own parameters, under the key the runtime takes it by
+     * ([AttachmentRole.paramKey]). All Parameters is where that is chosen; this
+     * screen only arms and disarms what is already chosen, because arming is a
+     * per-run thought and choosing is not.
+     */
     private suspend fun refreshAttachmentLibrary() {
+        val model = _state.value.model
+        val chosen = SparseParams.parse(model?.paramOverridesJson)
         val installed = db.models().getInstalled()
-        val available = installed.mapNotNull { entity ->
-            val role = entity.attachmentRole ?: return@mapNotNull null
+        val previous = _state.value.availableAttachments.associateBy { it.modelId }
+
+        val available = ai.ondevice.core.AttachmentRole.entries.mapNotNull { role ->
+            val path = chosen.string(role.paramKey)?.takeIf { it.isNotBlank() }
+                ?: return@mapNotNull null
+            val entity = installed.firstOrNull { it.localPath == path } ?: return@mapNotNull null
+            val before = previous[entity.id]
             ai.ondevice.core.ModelAttachment(
                 modelId = entity.id,
                 role = role,
-                path = entity.localPath,
+                path = path,
                 displayName = entity.displayName,
-                enabled = false,
+                weight = before?.weight ?: 1.0f,
+                // Chosen means armed. Turning one off is a "run without this
+                // one", so it survives a refresh but not a restart.
+                enabled = before?.enabled ?: true,
             )
         }
         _state.value = _state.value.copy(availableAttachments = available)

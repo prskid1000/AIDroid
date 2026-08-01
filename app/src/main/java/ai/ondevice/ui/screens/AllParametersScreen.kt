@@ -170,7 +170,7 @@ fun AllParametersScreen(
             var lastGroup: String? = null
             state.visible.specs.forEach { spec ->
                 if (spec.group != lastGroup) {
-                    SectionKicker(spec.group, Modifier.padding(top = 16.dp, bottom = 4.dp))
+                    SectionKicker(groupLabel(spec.group), Modifier.padding(top = 16.dp, bottom = 4.dp))
                     lastGroup = spec.group
                 }
 
@@ -257,4 +257,21 @@ fun AllParametersScreen(
             )
         }
     }
+}
+
+/**
+ * The heading a parameter group gets.
+ *
+ * Most groups read fine as they are written. The four that hold the add-on
+ * paths do not: `encoder`, `decoder`, `control` and `postprocess` are the
+ * families a role belongs to, and the point of naming them is that CLIP-L,
+ * CLIP-G, T5-XXL and the LLM are four spellings of one job — turning the prompt
+ * into conditioning — rather than four unrelated files.
+ */
+private fun groupLabel(group: String): String = when (group) {
+    "encoder" -> "Prompt encoder"
+    "decoder" -> "Decoder"
+    "control" -> "Style & control"
+    "postprocess" -> "Post-processing"
+    else -> group
 }

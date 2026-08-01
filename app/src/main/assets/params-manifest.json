@@ -515,10 +515,10 @@
         },
         {
           "key": "lora",
-          "group": "model",
+          "group": "control",
           "type": "path",
           "default": "",
-          "tier": "EXPERT",
+          "tier": "ADVANCED",
           "label": "LoRA adapter",
           "help": "Path to a LoRA adapter to apply at load.",
           "requiresReload": true,
@@ -1668,10 +1668,10 @@
         },
         {
           "key": "vae",
-          "group": "model",
+          "group": "decoder",
           "type": "path",
           "default": "",
-          "tier": "EXPERT",
+          "tier": "ADVANCED",
           "label": "External VAE",
           "help": "Auto-paired from the repo when one is present.",
           "requiresReload": true,
@@ -1679,10 +1679,10 @@
         },
         {
           "key": "taesd",
-          "group": "model",
+          "group": "decoder",
           "type": "path",
           "default": "",
-          "tier": "EXPERT",
+          "tier": "ADVANCED",
           "label": "TAESD",
           "help": "Tiny autoencoder. Enables the live preview during sampling.",
           "requiresReload": true,
@@ -1690,87 +1690,196 @@
         },
         {
           "key": "clip_l",
-          "group": "model",
+          "group": "encoder",
           "type": "path",
           "default": "",
-          "tier": "EXPERT",
+          "tier": "ADVANCED",
           "label": "CLIP-L",
           "help": "Text encoder, required for SD3 and Flux.",
           "requiresReload": true,
-          "cliFlag": "--clip_l"
+          "cliFlag": "--clip_l",
+          "appliesTo": {
+            "arch": [
+              "sd1",
+              "sd2",
+              "sd3",
+              "flux",
+              "flux_fill",
+              "flux_controls",
+              "sdxl",
+              "sdxl_inpaint",
+              "sdxl_pix2pix",
+              "sdxl_ssd1b",
+              "sdxl_vega"
+            ]
+          }
         },
         {
           "key": "clip_g",
-          "group": "model",
+          "group": "encoder",
           "type": "path",
           "default": "",
-          "tier": "EXPERT",
+          "tier": "ADVANCED",
           "label": "CLIP-G",
           "help": "Second text encoder for SDXL and SD3.",
           "requiresReload": true,
-          "cliFlag": "--clip_g"
+          "cliFlag": "--clip_g",
+          "appliesTo": {
+            "arch": [
+              "sd3",
+              "sdxl",
+              "sdxl_inpaint",
+              "sdxl_pix2pix",
+              "sdxl_ssd1b",
+              "sdxl_vega"
+            ]
+          }
         },
         {
           "key": "t5xxl",
-          "group": "model",
+          "group": "encoder",
           "type": "path",
           "default": "",
-          "tier": "EXPERT",
+          "tier": "ADVANCED",
           "label": "T5-XXL",
           "help": "Large text encoder for SD3 and Flux.",
           "requiresReload": true,
-          "cliFlag": "--t5xxl"
+          "cliFlag": "--t5xxl",
+          "appliesTo": {
+            "arch": [
+              "sd3",
+              "flux",
+              "flux_fill",
+              "flux_controls"
+            ]
+          }
+        },
+        {
+          "key": "llm",
+          "group": "encoder",
+          "type": "path",
+          "default": "",
+          "tier": "ADVANCED",
+          "label": "LLM",
+          "help": "FLUX.2 reads the prompt with a language model rather than with CLIP or T5. Required for Klein; nothing else reads it.",
+          "requiresReload": true,
+          "cliFlag": "--llm",
+          "appliesTo": {
+            "arch": [
+              "flux2",
+              "flux2_klein"
+            ]
+          }
         },
         {
           "key": "ip_adapter",
-          "group": "model",
+          "group": "control",
           "type": "path",
           "default": "",
-          "tier": "EXPERT",
+          "tier": "ADVANCED",
           "label": "IP-Adapter",
           "help": "Style from a reference image. Needs the CLIP vision encoder below as well.",
           "requiresReload": true,
-          "cliFlag": "--ip-adapter"
+          "cliFlag": "--ip-adapter",
+          "appliesTo": {
+            "arch": [
+              "sd1",
+              "sd1_inpaint",
+              "sd1_pix2pix",
+              "sdxl",
+              "sdxl_inpaint",
+              "sdxl_pix2pix",
+              "sdxl_ssd1b",
+              "sdxl_vega"
+            ]
+          }
         },
         {
           "key": "clip_vision",
-          "group": "model",
+          "group": "control",
           "type": "path",
           "default": "",
-          "tier": "EXPERT",
+          "tier": "ADVANCED",
           "label": "CLIP vision encoder",
           "help": "The image encoder an IP-Adapter reads its reference picture through — usually image_encoder/model.safetensors from the adapter's own repo. Without it the adapter has nothing to encode with.",
           "requiresReload": true,
-          "cliFlag": "--clip_vision"
+          "cliFlag": "--clip_vision",
+          "appliesTo": {
+            "arch": [
+              "sd1",
+              "sd1_inpaint",
+              "sd1_pix2pix",
+              "svd",
+              "sdxl",
+              "sdxl_inpaint",
+              "sdxl_pix2pix",
+              "sdxl_ssd1b",
+              "sdxl_vega"
+            ]
+          }
         },
         {
           "key": "embd_dir",
-          "group": "model",
+          "group": "control",
           "type": "path",
           "default": "",
-          "tier": "EXPERT",
+          "tier": "ADVANCED",
           "label": "Embeddings directory",
           "help": "Textual-inversion embeddings.",
           "requiresReload": true,
-          "cliFlag": "--embd-dir"
+          "cliFlag": "--embd-dir",
+          "appliesTo": {
+            "arch": [
+              "sd1",
+              "sd1_inpaint",
+              "sd1_pix2pix",
+              "sd1_tiny_unet",
+              "sd2",
+              "sd2_inpaint",
+              "sd2_tiny_unet",
+              "sdxl",
+              "sdxl_inpaint",
+              "sdxl_pix2pix",
+              "sdxl_ssd1b",
+              "sdxl_vega",
+              "svd"
+            ]
+          }
         },
         {
           "key": "control_net",
-          "group": "controlnet",
+          "group": "control",
           "type": "path",
           "default": "",
-          "tier": "EXPERT",
+          "tier": "ADVANCED",
           "label": "ControlNet model",
           "help": "Path to the ControlNet weights.",
           "requiresReload": true,
-          "cliFlag": "--control-net"
+          "cliFlag": "--control-net",
+          "appliesTo": {
+            "arch": [
+              "sd1",
+              "sd1_inpaint",
+              "sd1_pix2pix",
+              "sd1_tiny_unet",
+              "sd2",
+              "sd2_inpaint",
+              "sd2_tiny_unet",
+              "sdxl",
+              "sdxl_inpaint",
+              "sdxl_pix2pix",
+              "sdxl_ssd1b",
+              "sdxl_vega",
+              "svd"
+            ]
+          }
         },
         {
           "key": "upscale_model",
-          "group": "upscale",
+          "group": "postprocess",
           "type": "path",
           "default": "",
-          "tier": "EXPERT",
+          "tier": "ADVANCED",
           "label": "Upscale model",
           "help": "ESRGAN-family upscaler. Used by the Upscale action on a finished image, in its own context — it does not affect generation.",
           "requiresReload": false

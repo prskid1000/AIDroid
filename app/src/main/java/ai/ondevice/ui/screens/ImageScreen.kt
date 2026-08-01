@@ -530,21 +530,41 @@ private fun SourceImageField(
     }
 }
 
-/** LoRAs, ControlNets, IP-Adapters, VAEs — whatever is installed. */
+/**
+ * What this run will pass alongside the model, and nothing else.
+ *
+ * Only components that have a file *chosen* appear here, each as one switch.
+ * Choosing which file fills a role is a per-model decision and belongs on the
+ * All Parameters screen; this is the per-run one.
+ */
 @Composable
 private fun AttachmentsSection(
     state: ImageState,
     viewModel: ImageViewModel,
 ) {
     if (state.availableAttachments.isEmpty()) {
-        SectionKicker("Attachments", Modifier.padding(top = 20.dp, bottom = 8.dp))
+        SectionKicker("Components", Modifier.padding(top = 20.dp, bottom = 8.dp))
+
+        // A required component with nothing chosen is the difference between
+        // this screen being empty because there is nothing to add and being
+        // empty because the run is about to fail.
+        state.missingComponents.forEach { missing ->
+            NCard(Modifier.padding(bottom = 8.dp)) {
+                Text(missing.what, style = NocturneType.CardTitleSm, color = NocturneColors.Accent200)
+                Text(
+                    "${missing.because}. ${missing.remedy}.",
+                    style = NocturneType.CardBody,
+                    color = NocturneColors.Text.copy(alpha = 0.8f),
+                )
+            }
+        }
+
         NCard {
-            Text("Nothing installed to attach", style = NocturneType.CardTitleSm)
+            Text("Nothing chosen for this model", style = NocturneType.CardTitleSm)
             Text(
-                "LoRA, ControlNet, IP-Adapter, VAE and TAESD all work here — a LoRA gets a weight " +
-                    "dial, a ControlNet pairs with the reference image above. The app files each " +
-                    "one by role rather than by model family, so anything the runtime can load " +
-                    "shows up without an app update.",
+                "A prompt encoder, a VAE, a LoRA, a ControlNet — whichever of them this " +
+                    "architecture can take. Pick the file for each under All Parameters and it " +
+                    "appears here as a switch.",
                 style = NocturneType.CardBody,
                 color = NocturneColors.Text.copy(alpha = 0.8f),
             )
@@ -558,7 +578,7 @@ private fun AttachmentsSection(
     }
 
     SectionKicker(
-        "Attachments · ${state.attachments.size} of ${state.availableAttachments.size} on",
+        "Components · ${state.attachments.size} of ${state.availableAttachments.size} on",
         Modifier.padding(top = 20.dp, bottom = 8.dp),
     )
 
@@ -575,11 +595,16 @@ private fun AttachmentsSection(
         }
     }
 
+    // Grouped by what the thing is *for*, in a fixed order, so the four ways of
+    // encoding a prompt sit under one heading instead of reading as four
+    // unrelated files scattered through the list.
     state.availableAttachments
-        .groupBy { it.role }
-        .forEach { (role, items) ->
-            NHelp(role.label, Modifier.padding(top = 4.dp, bottom = 4.dp))
-            items.forEach { attachment ->
+        .groupBy { it.role.family }
+        .toList()
+        .sortedBy { (family, _) -> family.ordinal }
+        .forEach { (family, inFamily) ->
+            NHelp(family.label, Modifier.padding(top = 10.dp, bottom = 4.dp))
+            inFamily.forEach { attachment ->
                 Column(
                     Modifier
                         .fillMaxWidth()
@@ -600,8 +625,10 @@ private fun AttachmentsSection(
                         horizontalArrangement = Arrangement.spacedBy(9.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        // The role leads, because the role is the slot; the
+                        // file is which one is in it.
                         Text(
-                            attachment.displayName,
+                            attachment.role.label,
                             style = NocturneType.Row,
                             color = if (attachment.enabled) NocturneColors.Accent200 else NocturneColors.Text,
                             modifier = Modifier.weight(1f),
@@ -612,8 +639,16 @@ private fun AttachmentsSection(
                             color = if (attachment.enabled) NocturneColors.Accent else NocturneColors.TextMuted,
                         )
                     }
-                    // Only the roles the runtime actually weights get a dial.
-                    if (attachment.enabled && role.weighted) {
+                    Text(
+                        attachment.path.substringAfterLast('/'),
+                        style = NocturneType.MonoXs,
+                        color = NocturneColors.TextMuted,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                    // Only the roles the runtime actually weights get a dial,
+                    // and weight is a per-run thought, so it lives here rather
+                    // than beside the choice of file.
+                    if (attachment.enabled && attachment.role.weighted) {
                         LabeledSlider(
                             label = "Weight",
                             value = attachment.weight,

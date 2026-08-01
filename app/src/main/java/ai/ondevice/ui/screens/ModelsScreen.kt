@@ -225,6 +225,13 @@ fun ModelsScreen(
                                     style = NTagStyle.Outline,
                                 )
                                 loaded -> NTag("loaded", style = NTagStyle.Accent)
+                                // What it is *for*. Three rows all reading
+                                // "stable-diffusion-3.5-fp8" were told apart
+                                // only by a filename, and the one thing that
+                                // distinguishes them — which slot each fills —
+                                // was the one thing not on the row.
+                                model.attachmentRole != null ->
+                                    NTag(model.attachmentRole!!.label, style = NTagStyle.Outline)
                                 model.modality == Modality.VISION -> NTag("vision", style = NTagStyle.Outline)
                                 else -> Unit
                             }
