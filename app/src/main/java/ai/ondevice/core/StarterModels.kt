@@ -95,6 +95,27 @@ object StarterModels {
                 "Needs all three encoders below — about 5 GB together.",
             sizeHint = "~1.8 GB at Q4",
         ),
+
+        // The only model here a ControlNet or an IP-Adapter fits.
+        //
+        // sd.cpp builds both for a UNet and nothing else — control.hpp branches
+        // on SD1/SD2/SDXL/SVD, and the IP-Adapter's injection map is a list of
+        // UNet block names — so on Klein or SD 3.5, which are both diffusion
+        // transformers, either would load, cost its memory and change no
+        // pixels. SDXL is the last model built that way, which is the whole
+        // reason it is here: nothing newer can be steered by a pose or a depth
+        // map at all.
+        //
+        // It is slow. A 1024-pixel picture is minutes on a phone CPU, against
+        // seconds for Klein at four steps. That is the trade, stated up front.
+        StarterModel(
+            repoId = "HyperX-Sentience/SDXL-GGUF",
+            modality = Modality.DIFFUSION,
+            summary = "The last model a ControlNet or IP-Adapter fits — steer it with a pose, " +
+                "depth or edge map. UNet only, so it needs CLIP-L, CLIP-G and the SDXL VAE " +
+                "below. Minutes per picture here.",
+            sizeHint = "1.42 GB at Q4_K_S",
+        ),
     )
 
     /** The text encoder FLUX.2 Klein 4B reads its prompt with. */
@@ -147,12 +168,50 @@ object StarterModels {
             sizeHint = "~4.9 GB fp8",
         ),
 
-        // No ControlNet and no IP-Adapter, and it is not an omission.
-        // sd.cpp's are UNet-shaped — control.hpp branches on SD1/SD2/SDXL, and
-        // the IP-Adapter injects into a UNet's attn2 layers. SD 3.5 and FLUX.2
-        // are both DiTs with no UNet to inject into, so either would attach to
-        // nothing. They come back the day this build carries a DiT ControlNet.
+        // — the two SDXL needs, and the two only SDXL can use —
         //
+        // SDXL reads its prompt through the same CLIP-L and CLIP-G that SD 3.5
+        // does, so the two encoders above serve both and are not listed twice.
+        StarterModel(
+            repoId = "madebyollin/sdxl-vae-fp16-fix",
+            modality = Modality.DIFFUSION,
+            role = AttachmentRole.VAE,
+            summary = "SDXL's decoder, rebuilt so it does not produce a black image in fp16. " +
+                "Required with the SDXL card above.",
+            sizeHint = "319 MB",
+        ),
+        StarterModel(
+            repoId = "r3gm/controlnet-union-sdxl-1.0-fp16",
+            modality = Modality.DIFFUSION,
+            role = AttachmentRole.CONTROLNET,
+            // xinsir's original is fp32 at the same tensor count; this is the
+            // fp16 mirror. There is no GGUF of it anywhere — ComfyUI's GGUF
+            // loader does not handle ControlNets, so nobody has quantised one.
+            summary = "Canny, depth, pose, scribble and tile in one file. Attach a control " +
+                "image on the Image screen and it steers the composition. SDXL only.",
+            sizeHint = "2.39 GB fp16",
+        ),
+        StarterModel(
+            repoId = "h94/IP-Adapter",
+            modality = Modality.DIFFUSION,
+            role = AttachmentRole.IP_ADAPTER,
+            summary = "Style from a reference picture instead of from words. Pick " +
+                "ip-adapter_sdxl_vit-h, and take the CLIP-Vision encoder below with it — " +
+                "without one it binds to nothing.",
+            sizeHint = "666 MB",
+        ),
+        StarterModel(
+            repoId = "h94/IP-Adapter",
+            modality = Modality.DIFFUSION,
+            role = AttachmentRole.CLIP_VISION,
+            // models/image_encoder is the ViT-H, which is what the _vit-h
+            // adapters were trained against; sdxl_models/image_encoder is the
+            // bigG and 1.1 GB larger for no gain unless you picked that adapter.
+            summary = "The eye the IP-Adapter looks through — models/image_encoder. " +
+                "Nothing else uses it, and it is the expensive half of the pair.",
+            sizeHint = "2.4 GB",
+        ),
+
         // The upscaler is model-agnostic: it enlarges a finished PNG and does
         // not care what made it.
         StarterModel(

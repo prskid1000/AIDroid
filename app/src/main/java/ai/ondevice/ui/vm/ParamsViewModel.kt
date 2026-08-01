@@ -77,12 +77,20 @@ class ParamsViewModel @Inject constructor(
         recompute()
     }
 
-    /** Whose overrides this screen edits. */
+    /**
+     * Whose overrides this screen edits.
+     *
+     * The base model, never an add-on. A VAE and a ControlNet are rows in the
+     * same table with the same modality, so "the first diffusion model" could
+     * be either — and writing the component choices onto a VAE's row meant the
+     * Image screen, which reads them off the base model, never saw them.
+     */
     private suspend fun modelFor(runtimeId: String) = when (runtimeId) {
         RuntimeRegistry.LLAMA ->
             engines.state.value.loaded?.modelId?.let { db.models().get(it) }
                 ?: db.models().observeInstalledByModality(Modality.TEXT).first().firstOrNull()
-        else -> db.models().observeInstalledByModality(modalityOf(runtimeId)).first().firstOrNull()
+        else -> db.models().observeInstalledByModality(modalityOf(runtimeId)).first()
+            .firstOrNull { it.attachmentRole == null }
     }
 
     /** Every installed file a `path` parameter could legitimately name. */

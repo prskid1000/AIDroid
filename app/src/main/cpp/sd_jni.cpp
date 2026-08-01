@@ -60,6 +60,7 @@ struct od_sd {
     int   batch_count = 1;
     float strength    = 0.75f;
     float control_strength = 0.9f;
+    float ip_adapter_strength = 1.0f;
     int64_t seed      = -1;
     bool  vae_tiling  = false;
 
@@ -179,6 +180,7 @@ const std::map<std::string, row> & table() {
         { "batch_count",      { [](od_sd & e, const json & v) { e.batch_count = std::max(1, as_int(v, e.batch_count)); } } },
         { "strength",         { [](od_sd & e, const json & v) { e.strength = as_float(v, e.strength); } } },
         { "control_strength", { [](od_sd & e, const json & v) { e.control_strength = as_float(v, e.control_strength); } } },
+        { "ip_adapter_strength", { [](od_sd & e, const json & v) { e.ip_adapter_strength = as_float(v, e.ip_adapter_strength); } } },
         { "vae_tiling",       { [](od_sd & e, const json & v) { e.vae_tiling = as_bool(v, false); } } },
         { "sampling_method",  { [](od_sd & e, const json & v) { e.sampling_method = as_string(v); } } },
         { "schedule",         { [](od_sd & e, const json & v) { e.schedule = as_string(v); } } },
@@ -205,6 +207,7 @@ const std::map<std::string, json (*)(const od_sd &)> & default_table() {
         { "batch_count",      [](const od_sd & e) { return json(e.batch_count); } },
         { "strength",         [](const od_sd & e) { return json(e.strength); } },
         { "control_strength", [](const od_sd & e) { return json(e.control_strength); } },
+        { "ip_adapter_strength", [](const od_sd & e) { return json(e.ip_adapter_strength); } },
         { "vae_tiling",       [](const od_sd & e) { return json(e.vae_tiling); } },
         { "sampling_method",  [](const od_sd & e) { return json(e.sampling_method); } },
         { "schedule",         [](const od_sd & e) { return json(e.schedule); } },
@@ -488,6 +491,7 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
         jbyteArray jmask, jint maskW, jint maskH,
         jbyteArray jcontrol, jint controlW, jint controlH,
         jbyteArray jref, jint refW, jint refH,
+        jbyteArray jstyle, jint styleW, jint styleH,
         jstring jattachments) {
     auto * e = as_sd(handle);
     if (e == nullptr || e->ctx == nullptr) {
@@ -514,6 +518,12 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
     // img2img run starts from. Kontext and FLUX.2 read this one; it is `-r` on
     // upstream's command line and it does not go through denoising strength.
     owned_image reference = take_image(env, jref, refW, refH);
+    // The IP-Adapter's own picture, and a third distinct thing: not the map a
+    // ControlNet reads, not the picture an edit model is shown. sd.cpp gives it
+    // its own field, and it was the one field nothing here ever filled — so an
+    // IP-Adapter loaded, cost its weights and a 2.4 GB encoder, and was handed
+    // nothing to look at.
+    owned_image style = take_image(env, jstyle, styleW, styleH);
 
     // Attachments arrive as a role-tagged list, not as named arguments.
     std::vector<sd_lora_t>   loras;
@@ -604,6 +614,10 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
     if (control.image.data != nullptr) {
         params.control_image    = control.image;
         params.control_strength = e->control_strength;
+    }
+    if (style.image.data != nullptr) {
+        params.ip_adapter_image    = style.image;
+        params.ip_adapter_strength = e->ip_adapter_strength;
     }
 
     sd_image_t * images = nullptr;

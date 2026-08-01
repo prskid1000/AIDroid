@@ -126,7 +126,7 @@ class ModelResolver(
         val pickles = files.filter { it.endsWith(".pkl") || it.endsWith(".pt") || it.endsWith(".pth") }
 
         // The pickle block exists because `torch.load` executes whatever the file tells it to.
-        val pickleAuxiliaries = pickles.filter { AttachmentRole.classify(it) != null }
+        val pickleAuxiliaries = pickles.filter { AttachmentRole.classify(it, info.tags) != null }
         val unsafePickles = pickles - pickleAuxiliaries.toSet()
 
         if (blockPickle && unsafePickles.isNotEmpty()) {
@@ -145,7 +145,12 @@ class ModelResolver(
             safetensors +
                 files.filter { it.endsWith(".ckpt", ignoreCase = true) } +
                 pickleAuxiliaries
-            ).filter { AttachmentRole.classify(it) != null }
+            // With the repo's tags, not without them. A ControlNet from the
+            // diffusers world is called `diffusion_pytorch_model.safetensors`
+            // and says nothing about itself; the only thing that identifies it
+            // is the repo's `controlnet` tag, which classify already reads and
+            // was never being given.
+            ).filter { AttachmentRole.classify(it, info.tags) != null }
 
         if (ggufFiles.isEmpty() && ggmlBins.isEmpty() && onnxFiles.isEmpty() && auxiliaries.isEmpty()) {
             return@withContext if (safetensors.isNotEmpty() || files.any { it.endsWith(".bin") }) {
@@ -178,7 +183,7 @@ class ModelResolver(
             ModelFormat.GGML_BIN -> ggmlBins
             ModelFormat.ONNX -> onnxFiles
             // For an auxiliary pack the "variants" are the individual auxiliaries — canny, depth, openpose — and picking one is the point, not a quality trade-off.
-            else -> refineAuxiliaries(repoId, pinnedRevision, safetensors, auxiliaries)
+            else -> refineAuxiliaries(repoId, pinnedRevision, safetensors, auxiliaries, info.tags)
         }
 
         // A multi-graph ONNX model is grouped by directory, not by file — see
@@ -197,7 +202,7 @@ class ModelResolver(
             .getOrDefault(emptyList())
             .associateBy { it.path }
 
-        val quants = enumerateQuants(
+        val enumerated = enumerateQuants(
             files = primaryFiles,
             sizes = sizeLookup,
             info = info,
@@ -220,6 +225,27 @@ class ModelResolver(
                     )
                 }
             }.orEmpty()
+
+        // ESRGAN at any scale but four.
+        //
+        // The bundled upscaler builds one network shape, and the x2 and x8
+        // Real-ESRGAN releases carry a different number of upsample blocks: the
+        // file downloads, the tensor names line up, and the load fails. Shown
+        // and refused is the honest answer — a x8 that installs and then never
+        // runs is worse than one that says so before the 67 MB.
+        val quants = enumerated.map { variant ->
+            val name = variant.files.firstOrNull()?.filename.orEmpty().lowercase()
+            val scale = Regex("""x(\d+)""").find(name)?.groupValues?.get(1)
+            if (variant.blockedReason == null && name.contains("esrgan") && scale != null && scale != "4") {
+                variant.copy(
+                    blockedReason = "is the x$scale network, and this build's upscaler only has " +
+                        "the upsample blocks for x4",
+                )
+            } else {
+                variant
+            }
+        }
+
         if (quants.isEmpty()) {
             return@withContext Resolution.Refused(
                 kind = RefusalKind.NO_RUNTIME,
@@ -367,9 +393,10 @@ class ModelResolver(
         revision: String,
         safetensors: List<String>,
         classified: List<String>,
+        tags: List<String> = emptyList(),
     ): List<String> {
         val ambiguous = safetensors.filter {
-            it !in classified || AttachmentRole.classify(it) == AttachmentRole.TAESD
+            it !in classified || AttachmentRole.classify(it, tags) == AttachmentRole.TAESD
         }
         if (ambiguous.isEmpty() || safetensors.size > HEADER_PROBE_LIMIT) return classified
 
@@ -383,7 +410,7 @@ class ModelResolver(
         fun unreadable(filename: String) = filename in verdicts && verdicts[filename] == null
 
         val kept = classified.filter { filename ->
-            AttachmentRole.classify(filename) != AttachmentRole.TAESD ||
+            AttachmentRole.classify(filename, tags) != AttachmentRole.TAESD ||
                 isTaesd(filename) || unreadable(filename)
         }
         val recovered = ambiguous.filter { it !in classified && isTaesd(it) }

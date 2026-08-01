@@ -88,6 +88,7 @@ fun ImageScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val pickSource = rememberSourceImagePicker(viewModel::setSourceImage)
     val pickControl = rememberSourceImagePicker(viewModel::setControlImage)
+    val pickStyle = rememberSourceImagePicker(viewModel::setStyleImage)
 
     // The Advanced screen writes to the same diffusion model row, so pick up
     // anything it changed on the way back rather than showing a stale form.
@@ -217,6 +218,30 @@ fun ImageScreen(
                     onChange = viewModel::setControlStrength,
                     modifier = Modifier.padding(top = 8.dp),
                 )
+            }
+
+            // A third picture, and a third thing: the IP-Adapter reads style
+            // from it through CLIP-Vision — colour, texture, treatment — where
+            // a ControlNet reads structure and img2img reads pixels. It appears
+            // only with an IP-Adapter armed, because it goes nowhere else.
+            if (state.usesStyleReference) {
+                SourceImageField(
+                    label = "Style reference · IP-Adapter",
+                    uri = state.styleImageUri,
+                    emptyLabel = "Add a picture to take the look from",
+                    onPick = pickStyle,
+                    onClear = { viewModel.setStyleImage(null) },
+                )
+                if (state.styleImageUri != null) {
+                    LabeledSlider(
+                        label = "Style strength",
+                        value = state.styleStrength,
+                        display = String.format("%.2f", state.styleStrength),
+                        range = 0f..1f,
+                        onChange = viewModel::setStyleStrength,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
             }
 
             // What the attached picture is for. Four screens once, and they

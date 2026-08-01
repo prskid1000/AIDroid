@@ -136,6 +136,7 @@ class DiffusionEngine(
         val init = request.initImageUri?.let { decodeRgb(it) }
         val reference = request.referenceImageUri?.let { decodeRgb(it) }
         val control = request.controlImageUri?.let { decodeRgb(it) }
+        val style = request.styleImageUri?.let { decodeRgb(it) }
         val mask = request.maskPngPath?.let { decodeRgbFromFile(it) }
 
         // Attachments the *runtime* takes per-run, as a role-tagged list.
@@ -177,6 +178,7 @@ class DiffusionEngine(
                     mask?.pixels, mask?.width ?: 0, mask?.height ?: 0,
                     control?.pixels, control?.width ?: 0, control?.height ?: 0,
                     reference?.pixels, reference?.width ?: 0, reference?.height ?: 0,
+                    style?.pixels, style?.width ?: 0, style?.height ?: 0,
                     attachmentsJson,
                 )
                 if (bytes == null) {
@@ -339,6 +341,15 @@ data class DiffusionRequest(
      */
     val referenceImageUri: String? = null,
     val controlImageUri: String? = null,
+    /**
+     * The picture an IP-Adapter takes its style from.
+     *
+     * A third distinct thing, and sd.cpp gives it a third field: not the map a
+     * ControlNet reads, not the picture an edit model is shown. Nothing ever
+     * filled it, so an IP-Adapter loaded, cost its weights and a 2.4 GB vision
+     * encoder, and was handed nothing to look at.
+     */
+    val styleImageUri: String? = null,
     val maskPngPath: String? = null,
     val attachments: List<ModelAttachment> = emptyList(),
 )

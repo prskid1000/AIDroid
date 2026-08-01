@@ -65,15 +65,22 @@ class ImageViewModel @Inject constructor(
 
         // Live, so a model that finishes downloading while this screen is open
         // appears — the same mistake the chat picker used to make.
+        //
+        // It also carries the component choices. Those are written on the All
+        // Parameters screen, into the base model's own row, so the row is where
+        // this screen has to read them from: holding a snapshot taken when the
+        // screen opened meant a component chosen over there never showed up
+        // over here until the app restarted.
         viewModelScope.launch {
             db.models().observeInstalledByModality(Modality.DIFFUSION).collect { all ->
                 val models = baseModelsOnly(all)
-                _state.value = _state.value.copy(
-                    availableModels = models,
-                    model = _state.value.model?.let { current ->
-                        models.firstOrNull { it.id == current.id }
-                    } ?: models.firstOrNull(),
-                )
+                val fresh = _state.value.model?.let { current ->
+                    models.firstOrNull { it.id == current.id }
+                } ?: models.firstOrNull()
+                val chosenChanged =
+                    fresh?.paramOverridesJson != _state.value.model?.paramOverridesJson
+                _state.value = _state.value.copy(availableModels = models, model = fresh)
+                if (chosenChanged) refreshAttachmentLibrary()
             }
         }
     }
@@ -111,6 +118,8 @@ class ImageViewModel @Inject constructor(
     fun setSourceImage(uri: String?) = update { copy(sourceImageUri = uri) }
 
     fun setControlImage(uri: String?) = update { copy(controlImageUri = uri) }
+    fun setStyleImage(uri: String?) = update { copy(styleImageUri = uri) }
+    fun setStyleStrength(value: Float) = update { copy(styleStrength = value) }
 
     fun setControlStrength(value: Float) = update { copy(controlStrength = value) }
 
@@ -218,6 +227,7 @@ class ImageViewModel @Inject constructor(
                         referenceImageUri = _state.value.sourceImageUri
                             .takeIf { _state.value.use == ImageUse.EDIT },
                         controlImageUri = _state.value.controlImageUri,
+                        styleImageUri = _state.value.styleImageUri,
                         maskPngPath = _state.value.maskPath
                             ?.takeIf { _state.value.use == ImageUse.REPAINT },
                         attachments = _state.value.attachments,
@@ -323,6 +333,7 @@ class ImageViewModel @Inject constructor(
                 negativePrompt = "",
                 sourceImageUri = null,
                 controlImageUri = null,
+                styleImageUri = null,
                 maskPath = null,
                 lastImage = null,
                 usedSeed = null,
@@ -492,6 +503,7 @@ class ImageViewModel @Inject constructor(
             "init_img" to s.sourceImageUri,
             "control_image" to s.controlImageUri,
             "control_strength" to s.controlStrength.takeIf { s.controlImageUri != null },
+            "ip_adapter_strength" to s.styleStrength.takeIf { s.styleImageUri != null },
             "extend" to listOf(s.extendLeft, s.extendTop, s.extendRight, s.extendBottom)
                 .takeIf { s.use == ImageUse.EXTEND && it.any { px -> px > 0 } },
         )
@@ -571,6 +583,9 @@ data class ImageState(
     val sourceImageUri: String? = null,
     /** ControlNet's structural reference: a pose, depth or edge map that steers composition without contributing pixels. */
     val controlImageUri: String? = null,
+    /** What an IP-Adapter takes its look from — see DiffusionRequest.styleImageUri. */
+    val styleImageUri: String? = null,
+    val styleStrength: Float = 1.0f,
     val controlStrength: Float = 0.9f,
     /** Outpaint margins in pixels, per edge. */
     val extendLeft: Int = 0,
@@ -605,6 +620,18 @@ data class ImageState(
     val availableAttachments: List<ai.ondevice.core.ModelAttachment> = emptyList(),
     val availableModels: List<ModelEntity> = emptyList(),
 ) {
+    /**
+     * Whether a style reference has anywhere to go.
+     *
+     * An IP-Adapter is the only thing that reads one, so the slot appears with
+     * it and not otherwise — an always-visible field for a file nothing will
+     * open is the same mistake as a switch that turns nothing on.
+     */
+    val usesStyleReference: Boolean
+        get() = availableAttachments.any {
+            it.enabled && it.role == ai.ondevice.core.AttachmentRole.IP_ADAPTER
+        }
+
     /** Only the ones actually ticked go to the runtime. */
     val attachments: List<ai.ondevice.core.ModelAttachment>
         get() = availableAttachments.filter { it.enabled }

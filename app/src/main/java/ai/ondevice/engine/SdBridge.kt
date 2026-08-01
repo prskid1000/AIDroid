@@ -66,6 +66,8 @@ object SdBridge {
         control: ByteArray?, controlWidth: Int, controlHeight: Int,
         /** The picture an edit model is shown — `-r` upstream, not img2img. */
         reference: ByteArray?, referenceWidth: Int, referenceHeight: Int,
+        /** The picture an IP-Adapter takes its style from, read through CLIP-Vision. */
+        style: ByteArray?, styleWidth: Int, styleHeight: Int,
         attachmentsJson: String,
     ): ByteArray?
 }
