@@ -252,7 +252,7 @@ fun NSheetHandle(modifier: Modifier = Modifier) {
 }
 
 /** How much of the screen a quick-settings sheet covers, whatever it holds. */
-private const val SHEET_HEIGHT_FRACTION = 0.8f
+private const val SHEET_HEIGHT_FRACTION = 0.9f
 
 /** The sheet every quick-settings panel opens in. */
 @Composable
@@ -277,7 +277,7 @@ fun NBottomSheet(
             Column(
                 modifier
                     .fillMaxWidth()
-                    // A fixed 80% of the screen, not "as tall as the content".
+                    // A fixed fraction of the screen, not "as tall as the content".
                     .fillMaxHeight(SHEET_HEIGHT_FRACTION)
                     .background(
                         NocturneColors.Surface,

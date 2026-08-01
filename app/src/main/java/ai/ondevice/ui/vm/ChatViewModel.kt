@@ -3,7 +3,6 @@ package ai.ondevice.ui.vm
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import ai.ondevice.core.BackendId
 import ai.ondevice.core.MessageRole
 import ai.ondevice.core.Modality
 import ai.ondevice.core.SparseParams
@@ -71,12 +70,6 @@ class ChatViewModel @Inject constructor(
             }
         }
 
-        viewModelScope.launch {
-            prefs.backendMode.collect { mode ->
-                _state.value = _state.value.copy(backendPreference = mode)
-            }
-        }
-
         // Likewise the engine's own view of what is loaded, so the sheet says
         // "loaded" only when something actually is.
         viewModelScope.launch {
@@ -84,7 +77,10 @@ class ChatViewModel @Inject constructor(
                 _state.value = _state.value.copy(
                     loadedModelId = engine.loaded?.modelId,
                     loadingModel = engine.loading,
-                    loadedBackend = engine.backend,
+                    chatTemplate = engine.loaded?.chatTemplate,
+                    templateSource = engine.loaded?.templateSource ?: "gguf.chat_template",
+                    supportsThinking = engine.loaded?.supportsThinking == true,
+                    loadedTemplateKwargsJson = engine.loaded?.templateKwargsJson ?: "{}",
                 )
             }
         }
@@ -351,7 +347,6 @@ class ChatViewModel @Inject constructor(
                 imageTokenCount = images.size * IMAGE_TOKEN_COST,
                 generationParamsJson = params.toJsonString(),
                 tokensPerSecond = null,
-                backend = null,
                 createdAt = System.currentTimeMillis(),
                 parentMessageId = null,
             )
@@ -416,7 +411,6 @@ class ChatViewModel @Inject constructor(
             var thinkingMillis: Long? = null
             var thinkingTokens: Int? = null
             var tps = 0f
-            var backend: BackendId? = null
             var promptTokens = 0
             val toolCalls = mutableListOf<ai.ondevice.engine.ToolCallRequest>()
 
@@ -484,7 +478,6 @@ class ChatViewModel @Inject constructor(
                         }
                         is GenerationEvent.Stats -> {
                             tps = event.tokensPerSecond
-                            backend = event.backend
                             _state.value = _state.value.copy(
                                 tokensPerSecond = event.tokensPerSecond,
                                 contextUsed = event.contextUsed,
@@ -519,7 +512,6 @@ class ChatViewModel @Inject constructor(
                                 imageTokenCount = null,
                                 generationParamsJson = params.toJsonString(),
                                 tokensPerSecond = tps,
-                                backend = backend,
                                 createdAt = System.currentTimeMillis(),
                                 parentMessageId = lastParent,
                             ),
@@ -528,7 +520,6 @@ class ChatViewModel @Inject constructor(
                             kind = ai.ondevice.core.PredictionKind.CHAT,
                             artifactId = assistantId,
                             modelId = _state.value.model?.id,
-                            backend = backend,
                             startedAt = startedAt,
                             trace = trace,
                             stats = SparseParams.of("tokens_per_second" to tps),
@@ -602,7 +593,6 @@ class ChatViewModel @Inject constructor(
         imageTokenCount = null,
         generationParamsJson = "{}",
         tokensPerSecond = null,
-        backend = null,
         createdAt = System.currentTimeMillis(),
         parentMessageId = parentId,
     )
@@ -757,6 +747,43 @@ class ChatViewModel @Inject constructor(
                 systemPrompt = persona.systemPrompt,
             )
         }
+    }
+
+    /**
+     * The chat template, overridden per model and applied by reloading it.
+     *
+     * A template is not a live setting: llama.cpp builds its parser and its
+     * stop sequences from it once, in `common_chat_templates_init` at load, so
+     * setting it on a resident model would change nothing until the next one.
+     * Pass null to go back to the one in the GGUF.
+     */
+    fun setChatTemplate(template: String?) {
+        viewModelScope.launch {
+            val model = _state.value.model ?: return@launch
+            val trimmed = template?.takeIf { it.isNotBlank() }
+            val overrides = SparseParams.parse(model.paramOverridesJson).let {
+                if (trimmed == null) it.without("chat_template") else it.with("chat_template", trimmed)
+            }
+            db.models().setParamOverrides(model.id, overrides.toJsonString())
+            val updated = db.models().get(model.id) ?: return@launch
+            _state.value = _state.value.copy(model = updated)
+            engines.unload()
+            engines.load(updated)
+        }
+    }
+
+    /** The Thinking switch, written as the template argument it actually is. */
+    fun setThinking(enabled: Boolean) {
+        val current = ChatState.parseKwargs(_state.value.templateKwargsJson)
+        val merged = kotlinx.serialization.json.JsonObject(
+            current + ("enable_thinking" to kotlinx.serialization.json.JsonPrimitive(enabled)),
+        )
+        setTemplateKwargs(merged.toString())
+    }
+
+    /** `--chat-template-kwargs`, verbatim. Anything but a JSON object is ignored by the runtime. */
+    fun setTemplateKwargs(json: String) {
+        setLiveParam("chat_template_kwargs", json)
     }
 
     fun setSystemPrompt(value: String) {
@@ -916,11 +943,13 @@ data class ChatState(
     val importSummary: String? = null,
     /** What the engine says is resident — not what the conversation prefers. */
     val loadedModelId: String? = null,
-
-    /** The backend actually in use, from the engine. */
-    val loadedBackend: ai.ondevice.core.BackendId? = null,
-    /** The global preference, for describing what *would* be used. */
-    val backendPreference: String = ai.ondevice.core.BackendId.CPU.name,
+    /** The template the loaded model is actually rendering with. */
+    val chatTemplate: String? = null,
+    val templateSource: String = "gguf.chat_template",
+    /** Whether the loaded template has a reasoning mode to switch off. */
+    val supportsThinking: Boolean = false,
+    /** What the runtime held when the model loaded; [templateKwargsJson] is the live answer. */
+    val loadedTemplateKwargsJson: String = "{}",
     val error: String? = null,
     val errorSuggestion: String? = null,
     /** Sampled while the current turn runs; null when nothing is generating. */
@@ -935,12 +964,36 @@ data class ChatState(
             ?: 8192
     val presetName: String? get() = presets.firstOrNull { it.id == selectedPresetId }?.name
 
+    /**
+     * The template arguments in force: what has been set this session, else
+     * what the model loaded with. The switch and the JSON box are two views of
+     * this one value, so neither can show something the other has overwritten.
+     */
+    val templateKwargsJson: String
+        get() = liveOverrides.string("chat_template_kwargs") ?: loadedTemplateKwargsJson
+
+    /** Upstream's own default is on, so anything but an explicit `false` is on. */
+    val thinkingEnabled: Boolean
+        get() = parseKwargs(templateKwargsJson)["enable_thinking"]
+            ?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content != "false" }
+            ?: true
+
     /** Whether an image can reach this model, which decides what the file picker offers. */
     val acceptsImages: Boolean
         get() = model?.modality == Modality.VISION &&
             ai.ondevice.core.ComponentCheck.forChatImage(
                 SparseParams.parse(model.companionPathsJson).keys.associateWith { "" },
             ) == null
+
+    companion object {
+        /** Half-typed JSON is the normal state of a text box, so a parse failure is empty rather than an error. */
+        fun parseKwargs(json: String): Map<String, kotlinx.serialization.json.JsonElement> = runCatching {
+            kotlinx.serialization.json.Json
+                .parseToJsonElement(json)
+                .let { it as kotlinx.serialization.json.JsonObject }
+                .toMap()
+        }.getOrDefault(emptyMap())
+    }
 }
 
 /** A file the user attached but has not sent yet. */

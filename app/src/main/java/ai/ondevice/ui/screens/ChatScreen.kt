@@ -229,9 +229,10 @@ fun ChatScreen(
                 state = state,
                 onDismiss = { sheetOpen = false },
                 onSelectModel = viewModel::setModel,
-                onSelectPreset = viewModel::setPreset,
-                onSelectPersona = viewModel::setPersona,
                 onSystemPromptChange = viewModel::setSystemPrompt,
+                onChatTemplateChange = viewModel::setChatTemplate,
+                onThinkingChange = viewModel::setThinking,
+                onTemplateKwargsChange = viewModel::setTemplateKwargs,
                 onLiveParam = viewModel::setLiveParam,
                 onOpenParametersAtTier = onOpenParameters,
             )
@@ -259,15 +260,8 @@ private fun ChatToolbar(
                 NDot(color = if (state.generating) NocturneColors.Accent else NocturneColors.Neutral500)
                 Text(
                     buildString {
-                        // What is *running*, not a guess.
-                        append(
-                            state.loadedBackend?.label
-                                ?: state.model?.backendOverride?.label
-                                ?: ai.ondevice.data.prefs.AppPrefs
-                                    .backendModeLabel(state.backendPreference)
-                                    .let { if (state.loadedModelId == null) "not loaded · $it" else it },
-                        )
-                        append(" · ${Fmt.grouped(state.contextUsed)} / ${Fmt.grouped(state.contextLimit)} ctx")
+                        if (state.loadedModelId == null) append("not loaded · ")
+                        append("${Fmt.grouped(state.contextUsed)} / ${Fmt.grouped(state.contextLimit)} ctx")
                     },
                     style = NocturneType.NavLabel,
                 )

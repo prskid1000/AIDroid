@@ -1,20 +1,12 @@
 package ai.ondevice.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,25 +18,20 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import ai.ondevice.core.Fmt
 import ai.ondevice.core.Tier
 import ai.ondevice.data.db.ModelEntity
-import ai.ondevice.data.db.PersonaEntity
 import ai.ondevice.ui.components.NBottomSheet
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NDot
 import ai.ondevice.ui.components.NHelp
-import ai.ondevice.ui.components.NSeg
-import ai.ondevice.ui.components.NSheetHandle
+import ai.ondevice.ui.components.NSwitch
 import ai.ondevice.ui.components.NSlider
 import ai.ondevice.ui.components.NTextArea
 import ai.ondevice.ui.components.SectionKicker
 import ai.ondevice.ui.components.nClickableFlat
 import ai.ondevice.ui.theme.NIcons
-import ai.ondevice.ui.vm.ExportFormat
 import ai.ondevice.ui.theme.NocturneColors
 import ai.ondevice.ui.theme.NocturneType
 import ai.ondevice.ui.theme.Radius
@@ -52,15 +39,16 @@ import ai.ondevice.ui.theme.ring
 import ai.ondevice.ui.theme.ruleBelow
 import ai.ondevice.ui.vm.ChatState
 
-/** **S7 — Chat settings.** A sheet, not a screen: model, persona, system prompt, preset, and the Basic tier inline. */
+/** **S7 — Chat settings.** A sheet, not a screen: model, system prompt, thinking, chat template, and the Basic tier inline. */
 @Composable
 fun ChatSettingsSheet(
     state: ChatState,
     onDismiss: () -> Unit,
     onSelectModel: (ModelEntity) -> Unit,
-    onSelectPreset: (String) -> Unit,
-    onSelectPersona: (PersonaEntity) -> Unit,
     onSystemPromptChange: (String) -> Unit,
+    onChatTemplateChange: (String?) -> Unit,
+    onThinkingChange: (Boolean) -> Unit,
+    onTemplateKwargsChange: (String) -> Unit,
     onLiveParam: (String, Any?) -> Unit,
     onOpenParametersAtTier: (Tier) -> Unit,
 ) {
@@ -176,58 +164,6 @@ fun ChatSettingsSheet(
                         }
                     }
 
-                    // — persona —
-                    SectionKicker("Persona", Modifier.padding(top = 20.dp, bottom = 8.dp))
-                    Row(
-                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(7.dp),
-                    ) {
-                        state.personas.forEach { persona ->
-                            val selected = persona.id == state.selectedPersonaId
-                            Column(
-                                Modifier
-                                    .widthIn(min = 104.dp)
-                                    .background(
-                                        if (selected) NocturneColors.Accent900 else NocturneColors.Bg,
-                                        Radius.Md,
-                                    )
-                                    .ring(
-                                        if (selected) NocturneColors.Accent else NocturneColors.Divider,
-                                        Radius.Md,
-                                    )
-                                    .nClickableFlat { onSelectPersona(persona) }
-                                    .padding(horizontal = 12.dp, vertical = 9.dp),
-                            ) {
-                                Text(
-                                    persona.name,
-                                    style = NocturneType.Row.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium),
-                                    color = if (selected) NocturneColors.Accent200 else NocturneColors.Text,
-                                )
-                                Text(
-                                    listOfNotNull(persona.defaultVoice, persona.defaultPresetId?.substringAfter('-'))
-                                        .joinToString(" · "),
-                                    style = NocturneType.Help,
-                                    color = if (selected) NocturneColors.Accent300 else NocturneColors.TextMuted,
-                                )
-                            }
-                        }
-                        Box(
-                            Modifier
-                                .widthIn(min = 70.dp)
-                                .background(NocturneColors.Bg, Radius.Md)
-                                .ring(NocturneColors.Divider, Radius.Md)
-                                .padding(vertical = 13.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                NIcons.PlusThin,
-                                contentDescription = "New persona",
-                                tint = NocturneColors.Text.copy(alpha = 0.6f),
-                                modifier = Modifier.size(16.dp),
-                            )
-                        }
-                    }
-
                     state.importSummary?.let { summary ->
                         NHelp(summary, Modifier.padding(top = 20.dp))
                     }
@@ -241,21 +177,133 @@ fun ChatSettingsSheet(
                         textStyle = NocturneType.Row,
                     )
 
-                    // — preset —
+                    // — thinking —
+                    //
+                    // Only for templates that have a reasoning mode, which the
+                    // runtime answers by rendering one throwaway turn. A switch
+                    // shown against a model that ignores it would be a switch
+                    // that does nothing.
+                    if (state.supportsThinking) {
+                        SectionKicker("Thinking", Modifier.padding(top = 20.dp, bottom = 8.dp))
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "Reason before answering",
+                                style = NocturneType.Row,
+                                modifier = Modifier.weight(1f),
+                            )
+                            NSwitch(state.thinkingEnabled, onCheckedChange = onThinkingChange)
+                        }
+                        NHelp(
+                            "Goes to the template, not the sampler: off, the prompt ends without " +
+                                "opening a reasoning block and the model answers directly. Faster, " +
+                                "and worse at anything that needs working out.",
+                            Modifier.padding(top = 6.dp),
+                        )
+                    }
+
+                    // — template arguments —
+                    //
+                    // The switch above is one key in this object. A model card
+                    // that says `--chat-template-kwargs '{"…":…}'` is naming
+                    // exactly this, so it is offered whole rather than as a
+                    // switch per key somebody has to add each time.
+                    SectionKicker("Template arguments", Modifier.padding(top = 20.dp, bottom = 8.dp))
+                    var kwargsDraft by remember(state.templateKwargsJson) {
+                        mutableStateOf(state.templateKwargsJson)
+                    }
+                    NTextArea(
+                        value = kwargsDraft,
+                        onValueChange = { kwargsDraft = it },
+                        minHeight = 56.dp,
+                        textStyle = NocturneType.MonoXs,
+                        placeholder = """{"enable_thinking": false}""",
+                    )
+                    NButton(
+                        "Apply arguments",
+                        onClick = { onTemplateKwargsChange(kwargsDraft) },
+                        style = NButtonStyle.Secondary,
+                        block = true,
+                        enabled = kwargsDraft.isNotBlank() && kwargsDraft != state.templateKwargsJson,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    NHelp(
+                        "The same JSON llama.cpp takes as --chat-template-kwargs, handed to the " +
+                            "template as-is. Keys it does not read are ignored by the template, " +
+                            "not by this app.",
+                        Modifier.padding(top = 6.dp),
+                    )
+
+                    // — chat template —
                     SectionKicker(
-                        "Preset",
+                        "Chat template",
                         Modifier.padding(top = 20.dp, bottom = 8.dp),
                         trailing = {
-                            Text("Save as…", style = NocturneType.Meta, color = NocturneColors.Accent)
+                            Text(
+                                if (state.templateSource == "override") "overridden" else "from the GGUF",
+                                style = NocturneType.Help,
+                                color = if (state.templateSource == "override") {
+                                    NocturneColors.Accent300
+                                } else {
+                                    NocturneColors.TextMuted
+                                },
+                            )
                         },
                     )
-                    if (state.presets.isNotEmpty()) {
-                        NSeg(
-                            options = state.presets.map { it.name },
-                            selectedIndex = state.presets.indexOfFirst { it.id == state.selectedPresetId }
-                                .coerceAtLeast(0),
-                            onSelect = { onSelectPreset(state.presets[it].id) },
-                            modifier = Modifier.fillMaxWidth(),
+                    var templateOpen by remember { mutableStateOf(false) }
+                    var draft by remember(state.chatTemplate) {
+                        mutableStateOf(state.chatTemplate.orEmpty())
+                    }
+                    if (!templateOpen) {
+                        NButton(
+                            if (state.chatTemplate == null) "No model loaded" else "Edit template",
+                            onClick = { templateOpen = true },
+                            style = NButtonStyle.Secondary,
+                            block = true,
+                            enabled = state.chatTemplate != null,
+                        )
+                        NHelp(
+                            "The Jinja the runtime renders every turn through. Editing it is how " +
+                                "a model with a broken or missing template gets a working one.",
+                            Modifier.padding(top = 6.dp),
+                        )
+                    } else {
+                        NTextArea(
+                            value = draft,
+                            onValueChange = { draft = it },
+                            minHeight = 180.dp,
+                            textStyle = NocturneType.MonoXs,
+                        )
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            NButton(
+                                "Apply and reload",
+                                onClick = {
+                                    onChatTemplateChange(draft)
+                                    templateOpen = false
+                                },
+                                style = NButtonStyle.Primary,
+                                modifier = Modifier.weight(1f),
+                            )
+                            NButton(
+                                "Reset",
+                                onClick = {
+                                    onChatTemplateChange(null)
+                                    templateOpen = false
+                                },
+                                style = NButtonStyle.Secondary,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        NHelp(
+                            "Applying reloads the model: llama.cpp builds its parser and its stop " +
+                                "sequences from the template once, at load.",
+                            Modifier.padding(top = 6.dp),
                         )
                     }
 
@@ -283,22 +331,6 @@ fun ChatSettingsSheet(
                         onChange = { onLiveParam("temp", it) },
                         onReset = { onLiveParam("temp", null) },
                     )
-
-                    Column(Modifier.fillMaxWidth().ruleBelow().padding(vertical = 10.dp)) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(bottom = 5.dp),
-                            horizontalArrangement = Arrangement.spacedBy(7.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text("Max tokens", style = NocturneType.Row, modifier = Modifier.weight(1f))
-                            Text(
-                                (state.liveOverrides.int("n_predict") ?: -1).toString(),
-                                style = NocturneType.MonoValue,
-                                color = NocturneColors.Accent300,
-                            )
-                        }
-                        NHelp("−1 generates until EOS or the context fills.")
-                    }
 
                     NButton(
                         "Advanced parameters",

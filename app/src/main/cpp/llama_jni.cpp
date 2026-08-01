@@ -48,6 +48,22 @@ struct od_engine {
     common_chat_templates_ptr templates;
     common_sampler *          smpl = nullptr;
 
+    // What the Jinja template is handed besides the messages — upstream's
+    // `--chat-template-kwargs`, verbatim. Values are raw JSON text, so `true`,
+    // `"high"` and `2` are all spelled the way they would be in the flag.
+    //
+    // This is where a hybrid-reasoning model's switch lives: Qwen 3.5 reads
+    // `enable_thinking` out of here and emits a different prompt suffix for
+    // it. Anything else a template reads goes through the same door rather
+    // than through a growing list of named parameters.
+    std::map<std::string, std::string> chat_template_kwargs;
+
+    /** The `enable_thinking` kwarg, or upstream's default when unset. */
+    bool thinking_enabled() const {
+        const auto it = chat_template_kwargs.find("enable_thinking");
+        return it == chat_template_kwargs.end() || it->second != "false";
+    }
+
     std::mutex mutex;
 
     // Prompt cache. The tokens currently resident in the KV, so a follow-up
@@ -157,17 +173,27 @@ struct param_row {
     void (*apply)(od_engine &, const json &);
 };
 
+/** Merge a JSON object into the template kwargs, each value kept as JSON text. */
+void apply_template_kwargs(od_engine & engine, const json & object) {
+    if (!object.is_object()) return;
+    for (auto it = object.begin(); it != object.end(); ++it) {
+        engine.chat_template_kwargs[it.key()] = dump_json(it.value());
+    }
+}
+
 const std::map<std::string, param_row> & param_table() {
     static const std::map<std::string, param_row> table = {
         // — load-time —
         { "n_ctx",           { true,  [](od_engine & e, const json & v) { e.params.n_ctx   = as_int(v, e.params.n_ctx);   } } },
         { "n_batch",         { true,  [](od_engine & e, const json & v) { e.params.n_batch = as_int(v, e.params.n_batch); } } },
         { "n_ubatch",        { true,  [](od_engine & e, const json & v) { e.params.n_ubatch = as_int(v, e.params.n_ubatch); } } },
-        { "n_gpu_layers",    { true,  [](od_engine & e, const json & v) { e.params.n_gpu_layers = as_int(v, e.params.n_gpu_layers); } } },
+        // No n_gpu_layers, main_gpu or no_kv_offload: this build has one device
+        // and offers no way to act on them, so listing them would put three
+        // knobs on the parameter screen that read back whatever they are set to
+        // and change nothing.
         { "n_threads",       { true,  [](od_engine & e, const json & v) { e.params.cpuparams.n_threads = as_int(v, e.params.cpuparams.n_threads); } } },
         { "n_threads_batch", { true,  [](od_engine & e, const json & v) { e.params.cpuparams_batch.n_threads = as_int(v, e.params.cpuparams_batch.n_threads); } } },
         { "n_parallel",      { true,  [](od_engine & e, const json & v) { e.params.n_parallel = as_int(v, e.params.n_parallel); } } },
-        { "main_gpu",        { true,  [](od_engine & e, const json & v) { e.params.main_gpu = as_int(v, e.params.main_gpu); } } },
         { "use_mmap",        { true,  [](od_engine & e, const json & v) {
               const bool mlock = e.params.load_mode == LLAMA_LOAD_MODE_MLOCK ||
                                  e.params.load_mode == LLAMA_LOAD_MODE_MMAP_MLOCK;
@@ -188,7 +214,6 @@ const std::map<std::string, param_row> & param_table() {
           } } },
         { "cache_type_k",    { true,  [](od_engine & e, const json & v) { e.params.cache_type_k = as_cache_type(v, e.params.cache_type_k); } } },
         { "cache_type_v",    { true,  [](od_engine & e, const json & v) { e.params.cache_type_v = as_cache_type(v, e.params.cache_type_v); } } },
-        { "no_kv_offload",   { true,  [](od_engine & e, const json & v) { e.params.no_kv_offload = as_bool(v, false); } } },
         { "check_tensors",   { true,  [](od_engine & e, const json & v) { e.params.check_tensors = as_bool(v, false); } } },
         { "rope_freq_base",  { true,  [](od_engine & e, const json & v) { e.params.rope_freq_base = as_float(v, e.params.rope_freq_base); } } },
         { "rope_freq_scale", { true,  [](od_engine & e, const json & v) { e.params.rope_freq_scale = as_float(v, e.params.rope_freq_scale); } } },
@@ -247,7 +272,24 @@ const std::map<std::string, param_row> & param_table() {
                   : common_grammar(COMMON_GRAMMAR_TYPE_USER, text);
           } } },
         { "stop",             { false, [](od_engine & e, const json & v) { e.params.antiprompt = as_string_list(v); } } },
-        { "chat_template",    { false, [](od_engine & e, const json & v) { e.params.chat_template = as_string(v); } } },
+        { "chat_template",    { true,  [](od_engine & e, const json & v) { e.params.chat_template = as_string(v); } } },
+        // The one kwarg with a switch of its own, because it is the one users
+        // reach for. It writes into the same map as the general form below, so
+        // whichever is set last wins and there is no second source of truth.
+        { "enable_thinking",  { false, [](od_engine & e, const json & v) {
+              e.chat_template_kwargs["enable_thinking"] = as_bool(v, true) ? "true" : "false";
+          } } },
+        { "chat_template_kwargs", { false, [](od_engine & e, const json & v) {
+              if (v.is_string()) {
+                  // Accepted as a string too, so the value can be pasted
+                  // straight from a model card's --chat-template-kwargs line.
+                  try {
+                      apply_template_kwargs(e, json::parse(as_string(v)));
+                  } catch (const std::exception &) { /* not JSON; ignored, and reported as rejected */ }
+              } else if (v.is_object()) {
+                  apply_template_kwargs(e, v);
+              }
+          } } },
         { "samplers",         { false, [](od_engine & e, const json & v) {
               // §4.2 — the chain order is the user's, verbatim. An unrecognised
               // name is dropped by upstream's own parser, not by us.
@@ -276,13 +318,12 @@ const std::map<std::string, json (*)(const common_params &)> & default_table() {
         { "n_ctx",              [](const common_params & p) { return json(p.n_ctx); } },
         { "n_batch",            [](const common_params & p) { return json(p.n_batch); } },
         { "n_ubatch",           [](const common_params & p) { return json(p.n_ubatch); } },
-        { "n_gpu_layers",       [](const common_params & p) { return json(p.n_gpu_layers); } },
         { "n_threads",          [](const common_params & p) { return json(p.cpuparams.n_threads); } },
         { "n_threads_batch",    [](const common_params & p) { return json(p.cpuparams_batch.n_threads); } },
         { "n_parallel",         [](const common_params & p) { return json(p.n_parallel); } },
-        { "main_gpu",           [](const common_params & p) { return json(p.main_gpu); } },
-        { "no_kv_offload",      [](const common_params & p) { return json(p.no_kv_offload); } },
         { "check_tensors",      [](const common_params & p) { return json(p.check_tensors); } },
+        { "enable_thinking",    [](const common_params &)   { return json(true); } },
+        { "chat_template_kwargs", [](const common_params &) { return json::object(); } },
         { "rope_freq_base",     [](const common_params & p) { return json(p.rope_freq_base); } },
         { "rope_freq_scale",    [](const common_params & p) { return json(p.rope_freq_scale); } },
         { "yarn_ext_factor",    [](const common_params & p) { return json(p.yarn_ext_factor); } },
@@ -581,6 +622,25 @@ Java_ai_ondevice_engine_LlamaBridge_nativeInfo(JNIEnv * env, jobject, jlong hand
     info["templateSource"] = e->params.chat_template.empty() ? "gguf.chat_template" : "override";
     info["threads"]       = e->params.cpuparams.n_threads;
 
+    // Whether this template has a reasoning mode to switch off, asked of the
+    // template rather than guessed from the architecture name. Upstream
+    // answers it by rendering one throwaway turn, which is why it can throw.
+    info["supportsThinking"] = [&] {
+        try {
+            return common_chat_templates_support_enable_thinking(e->templates.get());
+        } catch (const std::exception &) {
+            return false;
+        }
+    }();
+
+    json kwargs = json::object();
+    for (const auto & [key, value] : e->chat_template_kwargs) {
+        try {
+            kwargs[key] = json::parse(value);
+        } catch (const std::exception &) { /* written by us; unparseable means dropped */ }
+    }
+    info["chatTemplateKwargs"] = kwargs;
+
     json eog = json::array();
     for (llama_token token = 0; token < llama_vocab_n_tokens(e->vocab); ++token) {
         if (llama_vocab_is_eog(e->vocab, token)) {
@@ -625,7 +685,11 @@ Java_ai_ondevice_engine_LlamaBridge_nativeFormatPrompt(
         inputs.add_generation_prompt = addGenerationPrompt == JNI_TRUE;
         // Must match what the parser is given, and it was not: this defaults to NONE, so the applied template resolved to a format with no notion of reasoning.
         inputs.reasoning_format      = COMMON_REASONING_FORMAT_DEEPSEEK;
-        inputs.enable_thinking       = true;
+        // Both, and not redundantly: the kwargs reach the Jinja template, and
+        // `enable_thinking` additionally tells upstream's parser whether to
+        // expect a reasoning block back.
+        inputs.chat_template_kwargs  = e->chat_template_kwargs;
+        inputs.enable_thinking       = e->thinking_enabled();
 
         for (const auto & item : json::parse(jni_to_string(env, jmessages))) {
             inputs.messages.push_back(to_chat_msg(item));
