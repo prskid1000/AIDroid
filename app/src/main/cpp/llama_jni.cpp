@@ -418,10 +418,19 @@ std::string model_meta(llama_model * model, const char * key) {
     return n < 0 ? std::string() : std::string(buf, n);
 }
 
-/** Decode `tokens` in `n_batch` chunks, continuing from whatever is resident. */
+/**
+ * Decode `tokens` in `n_batch` chunks, continuing from whatever is resident.
+ *
+ * Stop is checked between batches, not only between generated tokens: a long
+ * prompt is seconds of work with nothing to show for it, and a Stop pressed
+ * during it used to be noticed only once the whole prompt was through.
+ */
 bool decode_tokens(od_engine & engine, const std::vector<llama_token> & tokens, size_t from) {
     const int n_batch = std::max(1, engine.params.n_batch);
     for (size_t i = from; i < tokens.size(); i += n_batch) {
+        if (engine.cancelled) {
+            return false;
+        }
         const int n = static_cast<int>(std::min<size_t>(n_batch, tokens.size() - i));
         llama_batch batch = llama_batch_get_one(const_cast<llama_token *>(tokens.data() + i), n);
         if (llama_decode(engine.ctx, batch) != 0) {
@@ -610,6 +619,13 @@ Java_ai_ondevice_engine_LlamaBridge_nativeLoad(JNIEnv * env, jobject, jstring jp
         mparams_mtmd.print_timings = false;
         mparams_mtmd.n_threads     = engine->params.cpuparams.n_threads;
         mparams_mtmd.warmup        = false;
+        // Encoding an image is seconds of uninterruptible work otherwise.
+        // ggml asks before each node and abandons the graph on false, which is
+        // the only place a Stop can land inside the projector.
+        mparams_mtmd.cb_eval = [](ggml_tensor *, bool, void * user_data) -> bool {
+            return !static_cast<od_engine *>(user_data)->cancelled;
+        };
+        mparams_mtmd.cb_eval_user_data = engine;
         engine->mctx = mtmd_init_from_file(engine->params.mmproj.path.c_str(),
                                            engine->model, mparams_mtmd);
         if (engine->mctx == nullptr) {
@@ -807,6 +823,11 @@ Java_ai_ondevice_engine_LlamaBridge_nativeStartGeneration(
 
     std::lock_guard<std::mutex> lock(e->mutex);
 
+    // Cleared here rather than after the prompt is in, because everything
+    // between the two is work a Stop is meant to interrupt. Clearing it later
+    // erased a cancel that arrived while the image was still encoding.
+    e->cancelled = false;
+
     const auto prompt = jni_to_string(env, jprompt);
 
     std::vector<std::string> image_paths;
@@ -889,6 +910,16 @@ Java_ai_ondevice_engine_LlamaBridge_nativeStartGeneration(
         for (auto * bitmap : owned) mtmd_bitmap_free(bitmap);
 
         if (evaluated != 0) {
+            // A Stop pressed mid-encode arrives here as a failed graph, and
+            // saying "out of memory" to someone who just pressed Stop would be
+            // a lie with a suggestion attached.
+            if (e->cancelled) {
+                // Half a prompt is in the KV and `cached` still describes the
+                // turn before it. Dropping both is the only honest state.
+                llama_memory_seq_rm(llama_get_memory(e->ctx), 0, 0, -1);
+                e->cached.clear();
+                return jni_from_string(env, dump_json(json{ { "cancelled", true } }));
+            }
             return jni_from_string(env, dump_json(json{
                 { "error", "The image could not be evaluated." },
                 { "suggestion", "This is usually memory. Lower n_ctx and try again." },
@@ -919,6 +950,13 @@ Java_ai_ondevice_engine_LlamaBridge_nativeStartGeneration(
         llama_memory_seq_rm(llama_get_memory(e->ctx), 0, static_cast<llama_pos>(n_common), -1);
 
         if (!decode_tokens(*e, tokens, n_common)) {
+            if (e->cancelled) {
+                // Half a prompt is in the KV and `cached` still describes the
+                // turn before it. Dropping both is the only honest state.
+                llama_memory_seq_rm(llama_get_memory(e->ctx), 0, 0, -1);
+                e->cached.clear();
+                return jni_from_string(env, dump_json(json{ { "cancelled", true } }));
+            }
             return jni_from_string(env, dump_json(json{
                 { "error", "llama_decode failed while processing the prompt." },
                 { "suggestion", "This is usually memory. Lower n_ctx or n_batch and try again." },

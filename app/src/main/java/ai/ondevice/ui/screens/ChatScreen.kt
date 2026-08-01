@@ -242,7 +242,7 @@ fun ChatScreen(
     }
 }
 
-/** Model name, preset, and the live backend/context readout. */
+/** The live context readout. Which model it is belongs in chat settings. */
 @Composable
 private fun ChatToolbar(
     state: ChatState,
@@ -251,8 +251,7 @@ private fun ChatToolbar(
     onImport: () -> Unit,
 ) {
     RootToolbar(
-        title = listOfNotNull(state.model?.displayName, state.presetName).joinToString(" · ")
-            .ifBlank { "No model" },
+        title = if (state.model == null) "No model" else "Chat",
         subtitle = {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -302,6 +301,66 @@ private fun EmptyChat(state: ChatState, onOpenModels: () -> Unit) {
 }
 
 /** A user bubble, or an assistant reply with its thinking block and actions. */
+/**
+ * An attached document, as a row that can be opened rather than a wall of its
+ * own text. The model still receives every byte of it.
+ */
+@Composable
+private fun DocumentChip(document: ai.ondevice.core.MessageAttachments.Document) {
+    var open by rememberSaveable(document.path) { mutableStateOf(false) }
+    Column(
+        Modifier
+            .fillMaxWidth(0.8f)
+            .background(NocturneColors.Neutral900, Radius.Md)
+            .ring(NocturneColors.Divider, Radius.Md)
+            .nClickableFlat { open = !open }
+            .padding(horizontal = 11.dp, vertical = 9.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                NIcons.File,
+                contentDescription = null,
+                tint = NocturneColors.TextMuted,
+                modifier = Modifier.size(14.dp),
+            )
+            Text(
+                document.name,
+                style = NocturneType.CardTitleSm,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                "${Fmt.grouped(document.text.length)} chars",
+                style = NocturneType.MonoXs,
+                color = NocturneColors.TextMuted,
+            )
+            Icon(
+                NIcons.ChevronDown,
+                contentDescription = null,
+                tint = NocturneColors.TextMuted,
+                modifier = Modifier.size(14.dp).alpha(if (open) 1f else 0.5f),
+            )
+        }
+        if (open) {
+            Text(
+                document.text.take(DOCUMENT_PREVIEW_CHARS) +
+                    if (document.text.length > DOCUMENT_PREVIEW_CHARS) "\n…" else "",
+                style = NocturneType.MonoXs,
+                color = NocturneColors.Text.copy(alpha = 0.75f),
+            )
+        }
+    }
+}
+
+/** Enough to recognise the file by, not enough to bury the conversation. */
+private const val DOCUMENT_PREVIEW_CHARS = 2000
+
 @Composable
 private fun MessageBubble(
     message: MessageEntity,
@@ -330,7 +389,11 @@ private fun MessageBubble(
                     Text(message.content, style = NocturneType.Message)
                 }
             }
-            val images = SparseParams.parse(message.imagePathsJson).stringList("images").orEmpty()
+            val attachments = ai.ondevice.core.MessageAttachments.of(message.imagePathsJson)
+            attachments.documents.forEach { document ->
+                DocumentChip(document)
+            }
+            val images = attachments.images
             images.forEach { path ->
                 // The picture itself. The file name is a copy-in id and a
                 // sanitised original, which reads as a hash and tells the reader

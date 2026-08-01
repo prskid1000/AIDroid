@@ -169,7 +169,8 @@ data class ToolsState(
     val enabled: Boolean = false,
     val enabledProviders: Set<String> = emptySet(),
     val servers: List<McpServerEntity> = emptyList(),
-    val builtInTools: List<String> = listOf("get_current_time", "calculate", "device_status"),
+    val builtInTools: List<String> =
+        ai.ondevice.tools.BuiltInToolProvider.toolNames(webSearchAvailable = true),
     /** Only one server's tool list is open at a time; the rest stay one line. */
     val expandedServerId: String? = null,
     val draftName: String = "",

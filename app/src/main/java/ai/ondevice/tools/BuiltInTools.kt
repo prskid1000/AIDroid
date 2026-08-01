@@ -14,17 +14,52 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-/** Tools that need nothing but this device. */
+/**
+ * The tools the app carries itself.
+ *
+ * Three of them need nothing but this device. [web_search] is the exception and
+ * the only one that leaves it: it is offered only when a [WebSearch] is passed,
+ * so a build or a screen that has no business going out simply does not get it.
+ */
 class BuiltInToolProvider(
     private val db: OnDeviceDatabase,
     private val capabilities: DeviceCapabilities,
+    private val web: WebSearch? = null,
 ) : ToolProvider {
 
     override val id: String = ID
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    override suspend fun specs(): List<ToolSpec> = listOf(
+    override suspend fun specs(): List<ToolSpec> = listOfNotNull(
+        web?.let {
+            ToolSpec(
+                name = "web_search",
+                description = "Search the public web and read the results. Use it for anything " +
+                    "that happened, changed or was published after your training data: current " +
+                    "events, today's prices, a library's latest version, a page the user names. " +
+                    "Do not use it for arithmetic, for what is already in this conversation, or " +
+                    "for what the other tools here answer. Cite the URLs it returns.",
+                parametersJson = """
+                    {
+                      "type": "object",
+                      "properties": {
+                        "query": {
+                          "type": "string",
+                          "description": "What to search for, as you would type it into a search box."
+                        },
+                        "read_pages": {
+                          "type": "integer",
+                          "description": "How many of the top results to open and read in full, 0 to 3. Snippets alone (0) answer most factual questions and are far faster; ask for 1 or 2 when the question needs what an article actually says.",
+                          "minimum": 0,
+                          "maximum": 3
+                        }
+                      },
+                      "required": ["query"]
+                    }
+                """.trimIndent(),
+            )
+        },
         ToolSpec(
             name = "get_current_time",
             description = "The current date and time on this device. Use it whenever the answer " +
@@ -68,6 +103,26 @@ class BuiltInToolProvider(
         val args = runCatching { json.parseToJsonElement(argumentsJson).jsonObject }.getOrNull()
 
         return when (name) {
+            "web_search" -> {
+                val search = web ?: return fail("Web search is not available in this build.")
+                val query = args?.get("query")?.jsonPrimitive?.content?.trim().orEmpty()
+                if (query.length < 2) return fail("web_search needs a \"query\" of at least two characters.")
+                val pages = (args?.get("read_pages")?.jsonPrimitive?.content?.toIntOrNull() ?: 0)
+                    .coerceIn(0, MAX_PAGES_READ)
+                runCatching { search.search(query, MAX_RESULTS, pages) }.fold(
+                    onSuccess = { results ->
+                        android.util.Log.i(
+                            "BuiltInTools",
+                            "web_search \"$query\" → ${results.size} result(s), $pages page(s) read",
+                        )
+                        ok(search.render(query, results))
+                    },
+                    // The model is told what failed so it can say so, rather
+                    // than filling the gap with something plausible.
+                    onFailure = { fail("The web search failed: ${it.message ?: "no connection"}.") },
+                )
+            }
+
             "get_current_time" -> {
                 val zone = args?.get("timezone")?.jsonPrimitive?.content
                 val format = SimpleDateFormat("EEEE, d MMMM yyyy 'at' HH:mm:ss z", Locale.UK).apply {
@@ -121,6 +176,18 @@ class BuiltInToolProvider(
 
     companion object {
         const val ID = "built-in"
+
+        /** Enough to answer from, few enough to fit beside the conversation. */
+        const val MAX_RESULTS = 5
+        const val MAX_PAGES_READ = 3
+
+        /** What the Tools screen lists, from here rather than from a second copy. */
+        fun toolNames(webSearchAvailable: Boolean): List<String> = buildList {
+            if (webSearchAvailable) add("web_search")
+            add("get_current_time")
+            add("calculate")
+            add("device_status")
+        }
     }
 }
 

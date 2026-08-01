@@ -266,12 +266,13 @@ class ToolProviderFactory(
     private val capabilities: ai.ondevice.data.hf.DeviceCapabilities,
 ) {
     private val http = McpToolProvider.httpClient()
+    private val web = WebSearch(http)
 
     suspend fun registry(builtInEnabled: Boolean): ToolRegistry {
         val servers = db.mcpServers().getAll().filter { it.enabled }
         return ToolRegistry(
             buildList {
-                if (builtInEnabled) add(BuiltInToolProvider(db, capabilities))
+                if (builtInEnabled) add(BuiltInToolProvider(db, capabilities, web))
                 addAll(servers.map { McpToolProvider(it, http) })
             },
         )

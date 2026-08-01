@@ -85,7 +85,7 @@ fun ToolsScreen(
             }
 
             // — built-ins —
-            SectionKicker("On this device", Modifier.padding(top = 20.dp, bottom = 8.dp))
+            SectionKicker("Built in", Modifier.padding(top = 20.dp, bottom = 8.dp))
             val builtInOn = state.builtInEnabled
             Row(
                 Modifier
@@ -111,8 +111,10 @@ fun ToolsScreen(
                 NTag(if (builtInOn) "on" else "off", style = if (builtInOn) NTagStyle.Accent else NTagStyle.Outline)
             }
             NHelp(
-                "The clock it cannot read, arithmetic it gets subtly wrong, and the state of the device " +
-                    "it is running on. None of it touches the network.",
+                "The clock it cannot read, arithmetic it gets subtly wrong, and the state of the " +
+                    "device it is running on — none of which touches the network. web_search does: " +
+                    "it fetches search.brave.com, and the pages it is asked to open, with no key and " +
+                    "no account. Your query goes out; the conversation does not.",
                 Modifier.padding(top = 6.dp),
             )
 

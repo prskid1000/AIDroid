@@ -177,12 +177,11 @@ fun VoiceScreen(
                 }
             }
 
-            // Transcribe's engine card, the mirror of Speak's.
-            if (state.mode == VoiceMode.TRANSCRIBE) {
-                NCard(
-                    Modifier.padding(bottom = 10.dp),
-                    ring = if (state.sttModel != null) NocturneColors.Accent700 else NocturneColors.Divider,
-                ) {
+            // Which whisper is loaded is a setting, and it lives in the sheet
+            // with the rest of them. What belongs on the screen is the one
+            // thing that stops the screen working: having no model at all.
+            if (state.mode == VoiceMode.TRANSCRIBE && state.sttModel == null) {
+                NCard(Modifier.padding(bottom = 10.dp), ring = NocturneColors.Divider) {
                     Row(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -191,42 +190,22 @@ fun VoiceScreen(
                         Icon(
                             NIcons.Waveform,
                             contentDescription = null,
-                            tint = NocturneColors.Accent300,
+                            tint = NocturneColors.Neutral300,
                             modifier = Modifier.size(16.dp),
                         )
-                        // No engine name here.
                         Text(
-                            if (state.sttModel != null) "Speech model" else "No speech model",
+                            "No speech model",
                             style = NocturneType.CardTitleSm,
                             modifier = Modifier.weight(1f),
                         )
-                        NTag(
-                            if (state.sttModel != null) "on-device" else "missing",
-                            style = if (state.sttModel != null) NTagStyle.Accent else NTagStyle.Outline,
-                        )
+                        NTag("missing", style = NTagStyle.Outline)
                     }
-                    if (state.sttModel == null) {
-                        Text(
-                            "Nothing to transcribe with yet. Add model lists whisper under Speech — " +
-                                "base or small suits a phone.",
-                            style = NocturneType.CardBody,
-                            color = NocturneColors.Text.copy(alpha = 0.8f),
-                        )
-                    }
-                    // Shown whenever anything is installed, not only when there are two.
-                    if (state.sttModels.isNotEmpty()) {
-                        val labels = state.sttModels.map { it.quant ?: it.displayName }
-                        NDropdown(
-                            options = labels,
-                            selected = state.sttModel?.let { it.quant ?: it.displayName },
-                            onSelect = { label ->
-                                state.sttModels
-                                    .firstOrNull { (it.quant ?: it.displayName) == label }
-                                    ?.let(viewModel::selectSttModel)
-                            },
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                    }
+                    Text(
+                        "Nothing to transcribe with yet. Add model lists whisper under Speech — " +
+                            "base or small suits a phone.",
+                        style = NocturneType.CardBody,
+                        color = NocturneColors.Text.copy(alpha = 0.8f),
+                    )
                 }
             }
 
@@ -449,8 +428,6 @@ private fun TranscribePanel(
                     style = NocturneType.MonoSm,
                     color = NocturneColors.Accent300,
                 )
-                NMetaText("·")
-                NMetaText(state.sttModel?.displayName ?: "no model")
                 Box(Modifier.weight(1f))
                 // Measured, not asserted (§8.2).
                 NMetaText(String.format("%.1f× realtime", state.realtimeFactor))
@@ -503,40 +480,28 @@ private fun SpeakPanel(
     onPickReference: () -> Unit,
 ) {
     val provider = state.selectedVoice?.provider ?: ai.ondevice.speech.SynthProvider.SYSTEM
-    NCard(ring = if (provider != ai.ondevice.speech.SynthProvider.SYSTEM) NocturneColors.Accent700 else NocturneColors.Divider) {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                NIcons.Waveform,
-                contentDescription = null,
-                tint = NocturneColors.Accent300,
-                modifier = Modifier.size(16.dp),
-            )
+
+    // Which engine and which voice are settings, and they are in the sheet.
+    // What stays on the screen is the thing that stops Speak working: shown
+    // before the button rather than after, because with no packs the model
+    // loads and then fails inside the graph, which reads as a broken model.
+    state.missingVoiceComponent?.let { missing ->
+        NCard(ring = NocturneColors.Divider) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    NIcons.TriangleAlert,
+                    contentDescription = null,
+                    tint = NocturneColors.Neutral300,
+                    modifier = Modifier.size(15.dp),
+                )
+                Text(missing.what, style = NocturneType.CardTitleSm, modifier = Modifier.weight(1f))
+            }
             Text(
-                listOfNotNull(
-                    when (provider) {
-                        ai.ondevice.speech.SynthProvider.KOKORO -> "Kokoro"
-                        ai.ondevice.speech.SynthProvider.OMNIVOICE -> "OmniVoice"
-                        ai.ondevice.speech.SynthProvider.SYSTEM -> "System engine"
-                    },
-                    state.selectedVoice?.displayName,
-                ).joinToString(" · "),
-                style = NocturneType.CardTitleSm,
-                modifier = Modifier.weight(1f),
-            )
-            NTag(
-                if (provider == ai.ondevice.speech.SynthProvider.SYSTEM) "fallback" else "neural",
-                style = if (provider == ai.ondevice.speech.SynthProvider.SYSTEM) NTagStyle.Outline else NTagStyle.Accent,
-            )
-        }
-        // Before Speak rather than after: with no packs the model loads and then
-        // fails inside the graph, which reads as a broken model.
-        state.missingVoiceComponent?.let { missing ->
-            Text(
-                "${missing.what} — ${missing.because}. ${missing.remedy}.",
+                "${missing.because}. ${missing.remedy}.",
                 style = NocturneType.CardBody,
                 color = NocturneColors.Text.copy(alpha = 0.8f),
             )

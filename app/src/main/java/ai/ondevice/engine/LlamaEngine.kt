@@ -155,6 +155,14 @@ class LlamaEngine(
             ),
         ).jsonObject
 
+        // Stop pressed while the prompt or the image was still going in. There
+        // is nothing to report and nothing went wrong.
+        if (start.bool("cancelled") == true) {
+            android.util.Log.i(TAG, "generation cancelled during prompt processing")
+            emit(GenerationEvent.Done(StopReason.CANCELLED, generatedTokens = 0, elapsedMillis = 0))
+            return@flow
+        }
+
         start.string("error")?.let { error ->
             android.util.Log.e(TAG, "generation refused: $error")
             emit(GenerationEvent.Failed(error, start.string("suggestion")))

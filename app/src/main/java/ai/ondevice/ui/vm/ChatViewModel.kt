@@ -314,18 +314,22 @@ class ChatViewModel @Inject constructor(
         val pending = _state.value.pendingAttachments
         if (typed.isEmpty() && pending.isEmpty()) return
 
-        val images = pending.filter { it.kind == ai.ondevice.data.AttachmentKind.IMAGE }.map { it.path }
-
-        val documents = pending.filter { it.kind == ai.ondevice.data.AttachmentKind.DOCUMENT }
-        val text = buildString {
-            documents.forEach { document ->
-                appendLine("--- ${document.name} ---")
-                appendLine(document.text)
-                appendLine("--- end of ${document.name} ---")
-                appendLine()
-            }
-            append(typed)
-        }.trim()
+        // What was typed and what was attached are stored apart. The model is
+        // handed both (toEngineMessage puts them back together); the bubble
+        // shows only the first.
+        val attachments = ai.ondevice.core.MessageAttachments(
+            images = pending.filter { it.kind == ai.ondevice.data.AttachmentKind.IMAGE }.map { it.path },
+            documents = pending
+                .filter { it.kind == ai.ondevice.data.AttachmentKind.DOCUMENT }
+                .map {
+                    ai.ondevice.core.MessageAttachments.Document(
+                        name = it.name,
+                        path = it.path,
+                        text = it.text,
+                    )
+                },
+        )
+        val images = attachments.images
 
         _state.value = _state.value.copy(input = "", pendingAttachments = emptyList(), error = null)
 
@@ -336,11 +340,11 @@ class ChatViewModel @Inject constructor(
                 id = UUID.randomUUID().toString(),
                 conversationId = conversation.id,
                 role = MessageRole.USER,
-                content = text,
+                content = typed,
                 thinking = null,
                 thinkingMillis = null,
                 thinkingTokens = null,
-                imagePathsJson = SparseParams.of("images" to images).toJsonString(),
+                imagePathsJson = attachments.toJsonString(),
                 toolCallsJson = null,
                 tokenCount = null,
                 imageTokenCount = images.size * IMAGE_TOKEN_COST,
@@ -870,7 +874,10 @@ class ChatViewModel @Inject constructor(
                 MessageRole.TOOL_RESULT -> "tool"
                 MessageRole.ASSISTANT, MessageRole.TOOL_CALL -> "assistant"
             },
-            content = content,
+            // The documents go back in front of what was typed. They are kept
+            // out of `content` so the bubble shows the question rather than
+            // the file — see MessageAttachments.
+            content = ai.ondevice.core.MessageAttachments.of(imagePathsJson).promptText(content),
             imagePaths = SparseParams.parse(imagePathsJson).stringList("images").orEmpty(),
             toolCalls = if (role == MessageRole.ASSISTANT) decodeToolCalls(toolCallsJson) else emptyList(),
             toolCallId = meta.string("tool_call_id")?.takeIf { role == MessageRole.TOOL_RESULT },
