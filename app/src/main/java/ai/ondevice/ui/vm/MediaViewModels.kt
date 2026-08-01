@@ -263,12 +263,28 @@ class ImageViewModel @Inject constructor(
                         applyArchitectureDefaults(diffusion.detectedVersion)
                     }
                     if (loaded.isFailure) {
+                        // The hint used to assert one cause — over-long tensor
+                        // names — whatever had actually gone wrong. Now that a
+                        // component is filled in for you where only one fits,
+                        // the likelier cause is a file from another family: the
+                        // library holds one VAE and it belongs to a different
+                        // model. Name the suspects rather than a diagnosis.
+                        val armed = _state.value.attachments
                         _state.value = _state.value.copy(
                             generating = false,
                             error = loaded.exceptionOrNull()?.message ?: "The diffusion model could not be loaded.",
-                            errorHint = "Some GGUF converters emit tensor names longer than ggml's 64-character " +
-                                "limit. Try another quantisation of the same model, or a repo published for " +
-                                "stable-diffusion.cpp.",
+                            errorHint = if (armed.isNotEmpty()) {
+                                "Loaded with " + armed.joinToString(", ") { it.role.label } +
+                                    ". A component belonging to another architecture is refused here — " +
+                                    "switch them off one at a time under Components to find which. " +
+                                    "Failing that, some GGUF converters emit tensor names past ggml's " +
+                                    "64-character limit; another quantisation of the same model would " +
+                                    "avoid it."
+                            } else {
+                                "Some GGUF converters emit tensor names past ggml's 64-character limit. " +
+                                    "Try another quantisation of the same model, or a repo published " +
+                                    "for stable-diffusion.cpp."
+                            },
                         )
                         return@launch
                     }
