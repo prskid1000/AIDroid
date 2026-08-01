@@ -599,7 +599,12 @@ class ModelResolver(
             return if (stem.isBlank()) ORIGINAL_EXPORT else stem.uppercase()
         }
         val match = Regex("""(?i)(IQ\d[_A-Z0-9]*|Q\d[_A-Z0-9]*|BF16|F16|F32)$""").find(base)
-        return match?.value?.uppercase() ?: base.substringAfterLast('-').ifBlank { base }
+        // With no quant suffix the whole name is the label. It used to be
+        // everything after the last hyphen, which reads well on `ggml-base.en`
+        // and destroys anything else: `ip-adapter_sd15` became `adapter_sd15`,
+        // `ip-adapter_sd15_vit-G` became `G`, and two files that differed only
+        // before the last hyphen collapsed onto the same label.
+        return match?.value?.uppercase() ?: base.removeSuffix(".safetensors").ifBlank { base }
     }
 
     /** A warning that this variant will run and should probably not be chosen. */

@@ -48,7 +48,31 @@ class AddModelViewModel @Inject constructor(
     val state: StateFlow<AddModelState> = _state.asStateFlow()
 
     fun onQueryChange(value: String) {
-        _state.value = _state.value.copy(query = value)
+        // Typed by hand, so any role the last starter card implied is stale.
+        _state.value = _state.value.copy(query = value, intendedRole = null, roleWasSuggested = false)
+    }
+
+    /**
+     * A starter card carries what it is for, and dropping that was why two
+     * cards looked identical.
+     *
+     * `h94/IP-Adapter` holds the adapters *and* the CLIP-Vision encoders they
+     * read through, so it appears twice in the list under two roles — and both
+     * cards resolved to the same repo and offered the same twelve files, with
+     * nothing to say which of them belonged to which card. The role travels
+     * with the pick now: it seeds the Role answer, and the file list narrows to
+     * what can fill it.
+     */
+    fun pickStarter(entry: ai.ondevice.core.StarterModel) {
+        _state.value = _state.value.copy(
+            query = entry.repoId,
+            intendedRole = entry.role,
+            roleWasSuggested = entry.role != null,
+            selectedRole = entry.role,
+            roleAnswered = entry.role != null,
+            selectedModality = entry.modality,
+        )
+        resolve()
     }
 
     /** Resolve a repo, or search for one. */
@@ -75,18 +99,34 @@ class AddModelViewModel @Inject constructor(
                     // ourselves rather than guessing at the KV term.
                     val first = outcome.model.quants.firstOrNull()
                     val enriched = if (first != null) resolver.enrichFromHeader(outcome.model, first) else outcome.model
-                    val defaultQuant = pickDefaultQuant(enriched)
+                    val forRole = narrowToRole(enriched, _state.value.intendedRole)
+                    val defaultQuant = pickDefaultQuant(forRole)
                     _state.value = _state.value.copy(
                         resolving = false,
-                        resolved = enriched,
+                        resolved = forRole,
                         selectedQuant = defaultQuant?.name,
-                        companionChoice = enriched.companions.associate { it.role to it.selected },
-                        contextTokens = (enriched.contextLength ?: 8192).coerceAtMost(8192),
+                        companionChoice = forRole.companions.associate { it.role to it.selected },
+                        contextTokens = (forRole.contextLength ?: 8192).coerceAtMost(8192),
                     )
                     recomputeVerdict()
                 }
             }
         }
+    }
+
+    /**
+     * Keep only the files that can fill the role the card was offered for.
+     *
+     * Left alone when no role is implied, and when narrowing would empty the
+     * list — a repo whose filenames do not announce their role should be shown
+     * whole rather than shown as nothing.
+     */
+    private fun narrowToRole(model: ResolvedModel, role: AttachmentRole?): ResolvedModel {
+        if (role == null) return model
+        val kept = model.quants.filter { variant ->
+            variant.files.any { AttachmentRole.classify(it.filename) == role }
+        }
+        return if (kept.isEmpty()) model else model.copy(quants = kept)
     }
 
     fun selectQuant(name: String) {
@@ -383,6 +423,10 @@ data class AddModelState(
     val searchResults: List<ai.ondevice.data.hf.HfSearchResult> = emptyList(),
     val selectedModality: Modality? = null,
     val selectedRole: AttachmentRole? = null,
+    /** The role the starter card was listed under, when the pick came from one. */
+    val intendedRole: AttachmentRole? = null,
+    /** Whether the role above was suggested rather than answered by hand. */
+    val roleWasSuggested: Boolean = false,
     /** True once [selectedRole] has been answered, including answered as "none". */
     val roleAnswered: Boolean = false,
     /** Which file fills each companion role, seeded from the resolver's defaults. */

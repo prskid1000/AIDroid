@@ -234,10 +234,36 @@ fun AddModelScreen(
                     }
                 }
 
+                // "Quant variants" is only true when they are quantisations of
+                // one model. h94/IP-Adapter holds twelve files that are twelve
+                // different adapters — SD 1.5 against SDXL, plain against plus
+                // against face — and calling those precisions of each other
+                // invites picking the one that cannot work with your model.
+                val areQuants = resolved.quants.any {
+                    it.name.matches(Regex("""(?i)(IQ|Q)\d.*|BF16|F16|F32"""))
+                }
                 SectionKicker(
-                    "Quant variants · ${resolved.quants.size} in repo",
+                    if (areQuants) {
+                        "Quant variants · ${resolved.quants.size} in repo"
+                    } else {
+                        "Files · ${resolved.quants.size} in repo · pick one"
+                    },
                     Modifier.padding(top = 20.dp, bottom = 8.dp),
                 )
+                if (!areQuants) {
+                    NHelp(
+                        "These are not precisions of one model — they are separate files, and " +
+                            "which of them works depends on the model you mean to use it with.",
+                        Modifier.padding(bottom = 8.dp),
+                    )
+                }
+                state.intendedRole?.takeIf { state.roleWasSuggested }?.let { role ->
+                    NHelp(
+                        "Narrowed to what can fill the ${role.label} slot, because that is the " +
+                            "card you came from.",
+                        Modifier.padding(bottom = 8.dp),
+                    )
+                }
 
                 resolved.quants.forEach { quant ->
                     val selected = quant.name == state.selectedQuant
@@ -466,10 +492,7 @@ fun AddModelScreen(
             }
 
             if (state.resolved == null && state.refusal == null && !state.resolving) {
-                StarterTable(onPick = { repoId ->
-                    viewModel.onQueryChange(repoId)
-                    viewModel.resolve()
-                })
+                StarterTable(onPick = viewModel::pickStarter)
             }
         }
     }
@@ -477,7 +500,7 @@ fun AddModelScreen(
 
 /** Somewhere to start. */
 @Composable
-private fun StarterTable(onPick: (String) -> Unit) {
+private fun StarterTable(onPick: (ai.ondevice.core.StarterModel) -> Unit) {
     ai.ondevice.core.StarterModels.BY_MODALITY.forEach { (modality, entries) ->
         if (entries.isEmpty()) return@forEach
         SectionKicker(modality.label, Modifier.padding(top = 18.dp, bottom = 7.dp))
@@ -505,7 +528,7 @@ private fun StarterTable(onPick: (String) -> Unit) {
 @Composable
 private fun StarterRows(
     entries: List<ai.ondevice.core.StarterModel>,
-    onPick: (String) -> Unit,
+    onPick: (ai.ondevice.core.StarterModel) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
         entries.forEach { entry ->
@@ -514,7 +537,7 @@ private fun StarterRows(
                     .fillMaxWidth()
                     .background(NocturneColors.Surface, Radius.Md)
                     .ring(NocturneColors.Divider, Radius.Md)
-                    .nClickableFlat { onPick(entry.repoId) }
+                    .nClickableFlat { onPick(entry) }
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(9.dp),
                 verticalAlignment = Alignment.CenterVertically,
