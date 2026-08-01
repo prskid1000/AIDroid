@@ -59,14 +59,24 @@ interface ModelDao {
     @Query("UPDATE models SET completedAt = :at WHERE id = :modelId")
     suspend fun markCompleted(modelId: String, at: Long)
 
-    /** Models with a download still in flight, so the library can say so. */
+    /**
+     * Models with a download still in flight, so a tab can say "on its way"
+     * rather than "none installed" — two states that look the same from
+     * [observeInstalledByModality], which sees neither.
+     */
     @Query(
         """
-        SELECT modelId FROM download_jobs
-        WHERE state IN ('QUEUED','RUNNING','PAUSED','VERIFYING')
+        SELECT m.id AS modelId, j.displayName AS displayName, m.modality AS modality,
+               m.attachmentRole AS attachmentRole, j.bytesDone AS bytesDone,
+               j.bytesTotal AS bytesTotal, j.state AS state
+        FROM download_jobs j
+        JOIN models m ON m.id = j.modelId
+        WHERE j.state IN ('QUEUED','RUNNING','PAUSED','VERIFYING')
+          AND m.completedAt IS NULL
+        ORDER BY j.createdAt
         """,
     )
-    fun observePendingModelIds(): Flow<List<String>>
+    fun observeInstalling(): Flow<List<InstallingModel>>
 
     /** The same set, read once. */
     @Query(

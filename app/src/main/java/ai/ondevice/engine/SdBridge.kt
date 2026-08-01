@@ -19,6 +19,9 @@ object SdBridge {
 
     external fun nativeSupportedParams(): String
 
+    /** What the loader worked out the last checkpoint to be, e.g. "Flux.2 klein". */
+    external fun nativeDetectedVersion(): String
+
     external fun nativeLoad(
         modelPath: String,
         vaePath: String,

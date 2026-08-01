@@ -62,6 +62,36 @@ data class ModelEntity(
     val attachmentRole: AttachmentRole? = null,
 )
 
+/**
+ * A model row whose bytes have not all landed yet.
+ *
+ * The library row is written when a download *starts*, so "there is no model"
+ * and "the model is on its way" look identical to a tab that only counts
+ * installed rows. Each tab reads this so it can say which of the two it is.
+ */
+data class InstallingModel(
+    val modelId: String,
+    val displayName: String,
+    val modality: Modality,
+    val attachmentRole: AttachmentRole?,
+    val bytesDone: Long,
+    val bytesTotal: Long,
+    val state: DownloadState,
+) {
+    val fraction: Float
+        get() = if (bytesTotal > 0) (bytesDone.toFloat() / bytesTotal).coerceIn(0f, 1f) else 0f
+
+    val paused: Boolean get() = state == DownloadState.PAUSED
+
+    /** "Qwen3.5 4B · 62%", or "· paused" when it is not moving. */
+    val label: String
+        get() = if (paused) {
+            "$displayName · paused at ${(fraction * 100).toInt()}%"
+        } else {
+            "$displayName · ${(fraction * 100).toInt()}%"
+        }
+}
+
 @Entity(tableName = "conversations", indices = [Index("updatedAt")])
 data class ConversationEntity(
     @PrimaryKey val id: String,

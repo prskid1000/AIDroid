@@ -157,10 +157,12 @@ fun ImageScreen(
                         ImageAction.CANCEL -> viewModel.cancel()
                         ImageAction.GENERATE -> viewModel.generate()
                         ImageAction.INSTALL_RUNTIME -> onOpenRuntimes()
+                        ImageAction.INSTALLING -> Unit
                         ImageAction.ADD_MODEL -> onAddModel()
                         ImageAction.PICK_SOURCE -> pickSource()
                     }
                 },
+                enabled = state.actionEnabled,
                 style = if (state.action == ImageAction.CANCEL) {
                     NButtonStyle.Secondary
                 } else {
@@ -170,6 +172,29 @@ fun ImageScreen(
                 modifier = Modifier.padding(top = 8.dp),
             )
             state.actionHint?.let { NHelp(it, Modifier.padding(top = 6.dp)) }
+
+            // Settings changed *for* the user say so where the user is, not
+            // inside the sheet they would have to open to find out.
+            state.defaultsNote?.let { note ->
+                NCard(Modifier.padding(top = 10.dp)) {
+                    Text(
+                        "Settings updated",
+                        style = NocturneType.CardTitleSm,
+                        color = NocturneColors.Accent200,
+                    )
+                    Text(
+                        note,
+                        style = NocturneType.CardBody,
+                        color = NocturneColors.Text.copy(alpha = 0.8f),
+                    )
+                    Text(
+                        "Anything you set yourself is left alone.",
+                        style = NocturneType.CardBody,
+                        color = NocturneColors.Text.copy(alpha = 0.8f),
+                    )
+                    NButton("Got it", viewModel::dismissDefaultsNote, block = true)
+                }
+            }
 
             NField("Prompt", Modifier.padding(top = 16.dp)) {
                 NTextArea(
@@ -595,19 +620,38 @@ private fun AttachmentsSection(
         }
 
         NCard {
-            Text("Nothing chosen for this model", style = NocturneType.CardTitleSm)
-            Text(
-                "A prompt encoder, a VAE, a LoRA, a ControlNet — whichever of them this " +
-                    "architecture can take. Pick the file for each under All Parameters and it " +
-                    "appears here as a switch.",
-                style = NocturneType.CardBody,
-                color = NocturneColors.Text.copy(alpha = 0.8f),
-            )
-            Text(
-                "Add model lists a few that are known to work — look under Image add-ons.",
-                style = NocturneType.CardBody,
-                color = NocturneColors.Text.copy(alpha = 0.8f),
-            )
+            // Two different situations wore the same sentence: a library with
+            // no add-ons in it, and a library holding several of one role with
+            // nobody having said which. Only the second is a decision waiting.
+            if (state.unchosenRoles.isEmpty()) {
+                Text("Nothing chosen for this model", style = NocturneType.CardTitleSm)
+                Text(
+                    "A prompt encoder, a VAE, a LoRA, a ControlNet — whichever of them this " +
+                        "architecture can take. Downloading one is enough for the parts a run " +
+                        "cannot do without; the rest are chosen under All Parameters.",
+                    style = NocturneType.CardBody,
+                    color = NocturneColors.Text.copy(alpha = 0.8f),
+                )
+                Text(
+                    "Add model lists a few that are known to work — look under Image add-ons.",
+                    style = NocturneType.CardBody,
+                    color = NocturneColors.Text.copy(alpha = 0.8f),
+                )
+            } else {
+                Text("Installed, not chosen", style = NocturneType.CardTitleSm)
+                Text(
+                    state.unchosenRoles.joinToString(", ") { it.label },
+                    style = NocturneType.CardBody,
+                    color = NocturneColors.Accent200,
+                )
+                Text(
+                    "Each of these fits this model and more than one file could fill it, so the " +
+                        "choice is yours: pick one per role under All Parameters and it appears " +
+                        "here as a switch.",
+                    style = NocturneType.CardBody,
+                    color = NocturneColors.Text.copy(alpha = 0.8f),
+                )
+            }
         }
         return
     }

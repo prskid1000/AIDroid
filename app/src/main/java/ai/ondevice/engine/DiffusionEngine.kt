@@ -88,8 +88,21 @@ class DiffusionEngine(
                     .ifEmpty { listOf("none") }.joinToString("+"),
             )
             loadedModelId = modelId
+            // What the loader decided this checkpoint is, now that it has read
+            // the tensors. Nothing else in the app can know it as reliably.
+            detectedVersion = SdBridge.nativeDetectedVersion().takeIf { it.isNotBlank() }
+            detectedVersion?.let { android.util.Log.i(TAG, "recognised as $it") }
+            Unit
         }
     }
+
+    /**
+     * stable-diffusion.cpp's own name for the loaded checkpoint — "Flux.2
+     * klein", "SDXL" — or null when nothing is loaded.
+     */
+    @Volatile
+    var detectedVersion: String? = null
+        private set
 
     fun unload() {
         if (handle != 0L) {

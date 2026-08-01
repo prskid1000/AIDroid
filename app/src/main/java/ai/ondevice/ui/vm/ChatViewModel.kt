@@ -68,6 +68,18 @@ class ChatViewModel @Inject constructor(
             }
         }
 
+        // A chat model still arriving is not a chat model missing, and the
+        // empty screen told you to add one you were already adding.
+        viewModelScope.launch {
+            db.models().observeInstalling().collect { jobs ->
+                _state.value = _state.value.copy(
+                    installing = jobs.filter {
+                        it.modality == Modality.TEXT || it.modality == Modality.VISION
+                    },
+                )
+            }
+        }
+
         // Likewise the engine's own view of what is loaded, so the sheet says
         // "loaded" only when something actually is.
         viewModelScope.launch {
@@ -296,7 +308,14 @@ class ChatViewModel @Inject constructor(
         val typed = _state.value.input.trim()
         val conversation = _state.value.conversation ?: return
         val model = _state.value.model ?: run {
-            _state.value = _state.value.copy(error = "Pick a model first — Models → Add.")
+            val arriving = _state.value.installing.firstOrNull()
+            _state.value = _state.value.copy(
+                error = if (arriving != null) {
+                    "${arriving.displayName} is still downloading — ${(arriving.fraction * 100).toInt()}%."
+                } else {
+                    "Pick a model first — Models → Add."
+                },
+            )
             return
         }
         val pending = _state.value.pendingAttachments
@@ -886,6 +905,8 @@ data class ChatState(
     val conversation: ConversationEntity? = null,
     val model: ModelEntity? = null,
     val availableModels: List<ModelEntity> = emptyList(),
+    /** Text and vision downloads still running, so "none" reads as "not yet". */
+    val installing: List<ai.ondevice.data.db.InstallingModel> = emptyList(),
     val messages: List<MessageEntity> = emptyList(),
     val streaming: StreamingMessage? = null,
     val input: String = "",

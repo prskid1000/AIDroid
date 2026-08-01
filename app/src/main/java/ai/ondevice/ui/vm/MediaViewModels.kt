@@ -41,6 +41,7 @@ class ImageViewModel @Inject constructor(
     private val capabilities: DeviceCapabilities,
     private val diffusion: ai.ondevice.engine.DiffusionEngine,
     private val recorder: ai.ondevice.engine.ResourceRecorder,
+    private val params: ai.ondevice.params.ParamRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ImageState())
@@ -60,6 +61,9 @@ class ImageViewModel @Inject constructor(
                 model = model,
                 runtimeInstalled = runtimeInstalled,
             )
+            // Free when the row already knows what it is; the load does it
+            // otherwise, once the runtime has read the file.
+            applyArchitectureDefaults(null)
             refreshAttachmentLibrary()
         }
 
@@ -83,6 +87,16 @@ class ImageViewModel @Inject constructor(
                 if (chosenChanged) refreshAttachmentLibrary()
             }
         }
+
+        // A model that is still arriving is not a model that is missing, and
+        // the tab said the second thing for both.
+        viewModelScope.launch {
+            db.models().observeInstalling().collect { jobs ->
+                _state.value = _state.value.copy(
+                    installing = jobs.filter { it.modality == Modality.DIFFUSION },
+                )
+            }
+        }
     }
 
     /** The diffusion entries that can be the *base* model, which is not the same set as the diffusion entries. */
@@ -94,12 +108,25 @@ class ImageViewModel @Inject constructor(
         if (_state.value.model?.id == model.id) return
         // The loaded context belongs to the old model; keep them in step.
         diffusion.unload()
-        _state.value = _state.value.copy(model = model, error = null, errorHint = null, previewBitmap = null)
+        _state.value = _state.value.copy(
+            model = model,
+            error = null,
+            errorHint = null,
+            previewBitmap = null,
+            recognisedAs = null,
+            defaultsNote = null,
+        )
         viewModelScope.launch {
             db.models().touch(model.id, System.currentTimeMillis())
-            // Components belong to the base model, so they change with it.
+            // Settings and components both belong to the base model, so both
+            // change with it.
+            applyArchitectureDefaults(null)
             refreshAttachmentLibrary()
         }
+    }
+
+    fun dismissDefaultsNote() {
+        _state.value = _state.value.copy(defaultsNote = null)
     }
 
     fun setUse(use: ImageUse) {
@@ -203,6 +230,13 @@ class ImageViewModel @Inject constructor(
                         params = SparseParams.parse(model.paramOverridesJson),
                     )
                     _state.value = _state.value.copy(loadingModel = false)
+                    // The loader has now read the tensors and said what this
+                    // is. Nothing before this point could know — the GGUF
+                    // carried no `general.architecture` — so the settings this
+                    // family needs are applied here, in time for this run.
+                    if (loaded.isSuccess) {
+                        applyArchitectureDefaults(diffusion.detectedVersion)
+                    }
                     if (loaded.isFailure) {
                         _state.value = _state.value.copy(
                             generating = false,
@@ -376,8 +410,9 @@ class ImageViewModel @Inject constructor(
      */
     private suspend fun refreshAttachmentLibrary() {
         val model = _state.value.model
-        val chosen = SparseParams.parse(model?.paramOverridesJson)
         val installed = db.models().getInstalled()
+        val chosen = model?.let { adoptObviousComponents(it, installed) }
+            ?: SparseParams.parse(model?.paramOverridesJson)
         val previous = _state.value.availableAttachments.associateBy { it.modelId }
 
         val available = ai.ondevice.core.AttachmentRole.entries.mapNotNull { role ->
@@ -396,8 +431,115 @@ class ImageViewModel @Inject constructor(
                 enabled = before?.enabled ?: true,
             )
         }
-        _state.value = _state.value.copy(availableAttachments = available)
+        val claimed = available.map { it.role }.toSet()
+        val offered = applicableKeys(model)
+        _state.value = _state.value.copy(
+            availableAttachments = available,
+            // Installed, fits this model, and nobody has said which one — the
+            // difference between "you have nothing" and "you have not picked".
+            unchosenRoles = installed
+                .mapNotNull { it.attachmentRole }
+                .filter { it !in claimed && it.paramKey in offered }
+                .distinct()
+                .sortedBy { it.ordinal },
+        )
     }
+
+    /**
+     * Fill the empty role slots this model cannot run without, when there is
+     * only one candidate for each.
+     *
+     * A GGUF diffusion release is a bare denoiser: its VAE and its text
+     * encoders are separate downloads, and until one is *chosen* the run has
+     * no decoder and no way to read the prompt. Making the user open All
+     * parameters and pick the only file that fits is a quiz with one answer.
+     *
+     * Only the families a picture cannot be made without are adopted. A LoRA,
+     * a ControlNet or an IP-Adapter changes what comes out, so arming one on
+     * the user's behalf would be choosing for them, and those stay unchosen
+     * until somebody says otherwise.
+     */
+    private suspend fun adoptObviousComponents(
+        model: ModelEntity,
+        installed: List<ModelEntity>,
+    ): SparseParams {
+        val chosen = SparseParams.parse(model.paramOverridesJson)
+        val offered = applicableKeys(model)
+
+        var next = chosen
+        for (role in ai.ondevice.core.AttachmentRole.entries) {
+            if (role.family !in ADOPTABLE_FAMILIES) continue
+            if (role.multiple) continue
+            if (role.paramKey !in offered) continue
+            if (!chosen.string(role.paramKey).isNullOrBlank()) continue
+            val candidates = installed.filter {
+                it.attachmentRole == role && java.io.File(it.localPath).isFile
+            }
+            val only = candidates.singleOrNull() ?: continue
+            next = next.with(role.paramKey, only.localPath)
+        }
+        if (next == chosen) return chosen
+
+        val json = next.toJsonString()
+        db.models().upsert(model.copy(paramOverridesJson = json))
+        // The row this screen holds is a copy; keep it in step or the next
+        // refresh adopts the same files again.
+        _state.value = _state.value.copy(model = model.copy(paramOverridesJson = json))
+        return next
+    }
+
+    /**
+     * Give the model the sampler settings its family needs, once something
+     * authoritative has said what family that is.
+     *
+     * Only keys with nothing stored are written: an explicit choice on the All
+     * Parameters screen is an instruction, and this is a default. The write
+     * goes to the model's own row, so the two screens agree and the correction
+     * happens once rather than on every load.
+     */
+    private suspend fun applyArchitectureDefaults(reported: String?) {
+        val model = _state.value.model ?: return
+        val name = reported ?: model.architecture
+        val wanted = ai.ondevice.core.DiffusionDefaults.forName(name) ?: return
+
+        val stored = SparseParams.parse(model.paramOverridesJson)
+        var next = stored
+        if ("steps" !in stored) next = next.with("steps", wanted.steps)
+        if ("cfg_scale" !in stored) next = next.with("cfg_scale", wanted.cfgScale)
+        if ("sampling_method" !in stored) next = next.with("sampling_method", wanted.samplingMethod)
+        if ("schedule" !in stored) next = next.with("schedule", wanted.schedule)
+
+        // Worth keeping even when nothing changed: the row had no architecture,
+        // and now the next session can pick the defaults before the load.
+        val learned = model.architecture ?: reported
+        if (next == stored && learned == model.architecture) {
+            _state.value = _state.value.copy(recognisedAs = name)
+            return
+        }
+
+        val updated = model.copy(
+            paramOverridesJson = next.toJsonString(),
+            architecture = learned,
+        )
+        db.models().upsert(updated)
+        _state.value = _state.value.copy(
+            model = updated,
+            recognisedAs = name,
+            steps = next.int("steps") ?: _state.value.steps,
+            cfgScale = next.float("cfg_scale") ?: _state.value.cfgScale,
+            samplingMethod = next.string("sampling_method") ?: _state.value.samplingMethod,
+            schedule = next.string("schedule") ?: _state.value.schedule,
+            defaultsNote = "Recognised as $name — ${wanted.steps} steps, CFG ${wanted.cfgScale}, " +
+                "${wanted.samplingMethod}: ${wanted.because}.",
+        )
+    }
+
+    /** What the manifest offers this model, keyed the way roles are. */
+    private suspend fun applicableKeys(model: ModelEntity?): Set<String> = params.applicableKeys(
+        RUNTIME_ID,
+        Modality.DIFFUSION.name.lowercase(),
+        model?.architecture,
+    )
 
     fun toggleAttachment(modelId: String) {
         val updated = _state.value.availableAttachments.map {
@@ -543,11 +685,18 @@ class ImageViewModel @Inject constructor(
         const val STEP_MILLIS = 3100L // the canvas' 3.1 s/it on CPU
         const val SAFE_PIXEL_ENVELOPE = 768L * 768L
         const val RUNTIME_ID = "stable-diffusion.cpp"
+
+        /** The parts of a run that are plumbing, not authorship. */
+        val ADOPTABLE_FAMILIES = setOf(
+            ai.ondevice.core.RoleFamily.PROMPT_ENCODER,
+            ai.ondevice.core.RoleFamily.DECODER,
+            ai.ondevice.core.RoleFamily.POST,
+        )
     }
 }
 
 /** What the Image screen's primary action should say and do right now. */
-enum class ImageAction { INSTALL_RUNTIME, ADD_MODEL, PICK_SOURCE, GENERATE, CANCEL }
+enum class ImageAction { INSTALL_RUNTIME, INSTALLING, ADD_MODEL, PICK_SOURCE, GENERATE, CANCEL }
 
 /**
  * What the attached picture is *for*.
@@ -633,6 +782,14 @@ data class ImageState(
     val lastTrace: ai.ondevice.engine.ResourceTrace? = null,
     val availableAttachments: List<ai.ondevice.core.ModelAttachment> = emptyList(),
     val availableModels: List<ModelEntity> = emptyList(),
+    /** Roles with a file installed that fits, and no file chosen. */
+    val unchosenRoles: List<ai.ondevice.core.AttachmentRole> = emptyList(),
+    /** Diffusion downloads still running, so "none" can be told from "not yet". */
+    val installing: List<ai.ondevice.data.db.InstallingModel> = emptyList(),
+    /** What stable-diffusion.cpp said this checkpoint is, once it has read it. */
+    val recognisedAs: String? = null,
+    /** Shown once, when recognising the model changed the settings under it. */
+    val defaultsNote: String? = null,
 ) {
     /**
      * Whether a picture slot has anywhere to send a picture.
@@ -677,25 +834,40 @@ data class ImageState(
         get() = when {
             generating -> ImageAction.CANCEL
             !runtimeInstalled -> ImageAction.INSTALL_RUNTIME
+            // A download in flight is not an absence, and "Add a diffusion
+            // model" is the wrong instruction for someone already adding one.
+            model == null && baseInstalling != null -> ImageAction.INSTALLING
             model == null -> ImageAction.ADD_MODEL
             requiresSource && sourceImageUri == null -> ImageAction.PICK_SOURCE
             else -> ImageAction.GENERATE
         }
 
+    /** The base model on its way, if one is — add-ons do not unblock the tab. */
+    val baseInstalling: ai.ondevice.data.db.InstallingModel?
+        get() = installing.firstOrNull { it.attachmentRole == null }
+
     val actionLabel: String
         get() = when (action) {
             ImageAction.CANCEL -> if (cancelling) "Cancelling…" else "Cancel"
             ImageAction.INSTALL_RUNTIME -> "Install stable-diffusion.cpp first"
+            ImageAction.INSTALLING -> baseInstalling?.label ?: "Downloading…"
             ImageAction.ADD_MODEL -> "Add a diffusion model"
             ImageAction.PICK_SOURCE -> "Choose a source image"
             ImageAction.GENERATE -> "Generate"
         }
+
+    /** Whether pressing it does anything. A button that silently does nothing is worse than one that is plainly off. */
+    val actionEnabled: Boolean
+        get() = action != ImageAction.INSTALLING
 
     /** The runtime is installed but there is nothing for it to load. */
     val actionHint: String?
         get() = when (action) {
             ImageAction.INSTALL_RUNTIME ->
                 "Diffusion is optional and ships separately. Settings → Runtimes installs it."
+            ImageAction.INSTALLING ->
+                "It becomes usable here the moment the last byte verifies. Models → Downloads " +
+                    "shows the queue."
             ImageAction.ADD_MODEL ->
                 "stable-diffusion.cpp is installed, but no diffusion model is. The Add model " +
                     "screen lists the ones this build runs."
@@ -758,6 +930,17 @@ class VoiceViewModel @Inject constructor(
         viewModelScope.launch {
             db.models().observeInstalledByModality(Modality.TEXT_TO_SPEECH).collect {
                 loadVoices(preferred = _state.value.ttsModel)
+            }
+        }
+
+        // Neither mode can start without its model, and both said "none
+        // installed" while one was arriving.
+        viewModelScope.launch {
+            db.models().observeInstalling().collect { jobs ->
+                _state.value = _state.value.copy(
+                    installingStt = jobs.filter { it.modality == Modality.SPEECH_TO_TEXT },
+                    installingTts = jobs.filter { it.modality == Modality.TEXT_TO_SPEECH },
+                )
             }
         }
     }
@@ -1511,6 +1694,9 @@ data class VoiceState(
     val sttModel: ModelEntity? = null,
     /** Every installed speech model, so the tab can offer a choice. */
     val sttModels: List<ModelEntity> = emptyList(),
+    /** Speech models still downloading, so an empty list can say which empty it is. */
+    val installingStt: List<ai.ondevice.data.db.InstallingModel> = emptyList(),
+    val installingTts: List<ai.ondevice.data.db.InstallingModel> = emptyList(),
     val ttsModel: ModelEntity? = null,
     /** Every installed voice model, so the Speak tab can offer a choice. */
     /** OmniVoice: the speaker described in words, since it ships no voice list. */

@@ -180,7 +180,18 @@ fun VoiceScreen(
             // Which whisper is loaded is a setting, and it lives in the sheet
             // with the rest of them. What belongs on the screen is the one
             // thing that stops the screen working: having no model at all.
-            if (state.mode == VoiceMode.TRANSCRIBE && state.sttModel == null) {
+            val missingModel = when (state.mode) {
+                VoiceMode.TRANSCRIBE -> state.sttModel == null
+                VoiceMode.SPEAK -> state.ttsModel == null
+            }
+            // Downloading is not missing. Saying "Add model" to somebody who is
+            // watching a download is the one instruction that cannot help.
+            val arriving = if (state.mode == VoiceMode.TRANSCRIBE) {
+                state.installingStt
+            } else {
+                state.installingTts
+            }
+            if (missingModel) {
                 NCard(Modifier.padding(bottom = 10.dp), ring = NocturneColors.Divider) {
                     Row(
                         Modifier.fillMaxWidth(),
@@ -194,18 +205,41 @@ fun VoiceScreen(
                             modifier = Modifier.size(16.dp),
                         )
                         Text(
-                            "No speech model",
+                            when {
+                                arriving.isNotEmpty() -> "Downloading"
+                                state.mode == VoiceMode.TRANSCRIBE -> "No speech model"
+                                else -> "No voice model"
+                            },
                             style = NocturneType.CardTitleSm,
                             modifier = Modifier.weight(1f),
                         )
-                        NTag("missing", style = NTagStyle.Outline)
+                        NTag(
+                            if (arriving.isEmpty()) "missing" else "on its way",
+                            style = NTagStyle.Outline,
+                        )
                     }
-                    Text(
-                        "Nothing to transcribe with yet. Add model lists whisper under Speech — " +
-                            "base or small suits a phone.",
-                        style = NocturneType.CardBody,
-                        color = NocturneColors.Text.copy(alpha = 0.8f),
-                    )
+                    if (arriving.isNotEmpty()) {
+                        arriving.forEach { job ->
+                            Text(
+                                job.label,
+                                style = NocturneType.CardBody,
+                                color = NocturneColors.Accent200,
+                            )
+                            NProgressBar(job.fraction)
+                        }
+                    } else {
+                        Text(
+                            if (state.mode == VoiceMode.TRANSCRIBE) {
+                                "Nothing to transcribe with yet. Add model lists whisper under " +
+                                    "Speech — base or small suits a phone."
+                            } else {
+                                "Nothing to speak with yet. Add model lists Kokoro and OmniVoice " +
+                                    "under Voice."
+                            },
+                            style = NocturneType.CardBody,
+                            color = NocturneColors.Text.copy(alpha = 0.8f),
+                        )
+                    }
                 }
             }
 

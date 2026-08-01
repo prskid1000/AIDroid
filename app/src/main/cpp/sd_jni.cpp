@@ -325,6 +325,19 @@ Java_ai_ondevice_engine_SdBridge_nativeSupportedParams(JNIEnv * env, jobject) {
     return jni_from_string(env, dump_json(out));
 }
 
+/**
+ * What stable-diffusion.cpp decided this checkpoint is.
+ *
+ * Not a guess from a filename or a repo tag: the loader works the version out
+ * from the tensors it finds and announces it, and one of the few things that
+ * has to follow from it is the sampler settings a family expects.
+ */
+JNIEXPORT jstring JNICALL
+Java_ai_ondevice_engine_SdBridge_nativeDetectedVersion(JNIEnv * env, jobject) {
+    std::lock_guard<std::mutex> lock(g_version_mutex);
+    return jni_from_string(env, g_version);
+}
+
 JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeSystemInfo(JNIEnv * env, jobject) {
     json info;
@@ -354,6 +367,9 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
     // T5 — Qwen3 for Klein, Mistral Small for dev — so the text encoder is a
     // GGUF the size of a chat model and arrives through its own path.
     const auto llm        = jni_to_string(env, jllm);
+
+    // A version left over from the last checkpoint would be read as this one's.
+    { std::lock_guard<std::mutex> lock(g_version_mutex); g_version.clear(); }
 
     static std::once_flag once;
     std::call_once(once, [] {

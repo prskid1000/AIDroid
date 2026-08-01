@@ -86,6 +86,24 @@ class ParamRepository(
 
     suspend fun storedManifest(): ParamManifestEntity? = db.manifests().newest()
 
+    /**
+     * The keys a runtime offers for one architecture — the same `appliesTo`
+     * gate the parameter screen applies, asked as a question instead of
+     * rendered as a list.
+     *
+     * Anything choosing a file for a role needs this: a T5-XXL in the library
+     * is a legitimate encoder for FLUX and nonsense for SDXL, and the manifest
+     * is where that already knows.
+     */
+    suspend fun applicableKeys(
+        runtimeId: String,
+        modality: String?,
+        architecture: String?,
+    ): Set<String> = specsFor(manifest(), runtimeId)
+        .filter { appliesToMatches(it, modality, architecture) }
+        .map { it.key }
+        .toSet()
+
     /** The visible parameter set for a screen. */
     fun visible(
         specs: List<ParamSpec>,

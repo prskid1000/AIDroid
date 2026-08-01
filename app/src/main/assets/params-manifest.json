@@ -1673,7 +1673,7 @@
           "default": "",
           "tier": "ADVANCED",
           "label": "External VAE",
-          "help": "Auto-paired from the repo when one is present.",
+          "help": "The decoder that turns the latent into pixels. A bare diffusion GGUF ships without one, so a separate VAE has to fill the slot — when only one is installed it is chosen for you.",
           "requiresReload": true,
           "cliFlag": "--vae"
         },
@@ -1881,7 +1881,7 @@
           "default": "",
           "tier": "ADVANCED",
           "label": "Upscale model",
-          "help": "ESRGAN-family upscaler. Used by the Upscale action on a finished image, in its own context — it does not affect generation.",
+          "help": "ESRGAN-family upscaler. The Upscale button on a finished image runs it, in its own context; generation does not.",
           "requiresReload": false
         }
       ]

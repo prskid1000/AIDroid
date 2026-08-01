@@ -51,6 +51,7 @@ import ai.ondevice.ui.components.NCard
 import ai.ondevice.ui.components.NCircleButton
 import ai.ondevice.ui.components.NDot
 import ai.ondevice.ui.components.NHelp
+import ai.ondevice.ui.components.NProgressBar
 import ai.ondevice.ui.components.PhoneScaffold
 import ai.ondevice.ui.components.ResourceBlock
 import ai.ondevice.ui.components.RootToolbar
@@ -278,24 +279,48 @@ private fun ChatToolbar(
 
 @Composable
 private fun EmptyChat(state: ChatState, onOpenModels: () -> Unit) {
+    // Three states, not two: nothing here, something on its way, something ready.
+    val arriving = state.installing.takeIf { state.model == null }.orEmpty()
     NCard(Modifier.padding(top = 12.dp)) {
         Text(
-            if (state.model == null) "No model loaded" else "Ready",
+            when {
+                arriving.isNotEmpty() -> "Downloading"
+                state.model == null -> "No model loaded"
+                else -> "Ready"
+            },
             style = NocturneType.CardTitleSm,
         )
-        Text(
-            if (state.model == null) {
-                "Nothing is loaded yet. Add a model and the chat runs entirely on this device — after " +
-                    "download there is no network at all."
-            } else {
-                "${state.model.displayName} is installed. Send a message and it loads on first use; " +
-                    "the KV cache is reused across turns so follow-ups don't reprocess the prompt."
-            },
-            style = NocturneType.CardBody,
-            color = NocturneColors.Text.copy(alpha = 0.8f),
-        )
+        if (arriving.isNotEmpty()) {
+            arriving.forEach { job ->
+                Text(job.label, style = NocturneType.CardBody, color = NocturneColors.Accent200)
+                NProgressBar(job.fraction)
+            }
+            Text(
+                "The library row is written when a download starts, so it is here already — it " +
+                    "becomes usable the moment the last byte verifies.",
+                style = NocturneType.CardBody,
+                color = NocturneColors.Text.copy(alpha = 0.8f),
+            )
+        } else {
+            Text(
+                if (state.model == null) {
+                    "Nothing is loaded yet. Add a model and the chat runs entirely on this device — after " +
+                        "download there is no network at all."
+                } else {
+                    "${state.model.displayName} is installed. Send a message and it loads on first use; " +
+                        "the KV cache is reused across turns so follow-ups don't reprocess the prompt."
+                },
+                style = NocturneType.CardBody,
+                color = NocturneColors.Text.copy(alpha = 0.8f),
+            )
+        }
         if (state.model == null) {
-            NButton("Add a model", onOpenModels, style = NButtonStyle.Primary, block = true)
+            NButton(
+                if (arriving.isEmpty()) "Add a model" else "Open Models",
+                onOpenModels,
+                style = NButtonStyle.Primary,
+                block = true,
+            )
         }
     }
 }
