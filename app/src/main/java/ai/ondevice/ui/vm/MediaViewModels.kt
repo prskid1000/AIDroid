@@ -466,7 +466,7 @@ class ImageViewModel @Inject constructor(
                 modelId = entity.id,
                 role = role,
                 path = path,
-                displayName = entity.displayName,
+                displayName = entity.label,
                 weight = before?.weight ?: 1.0f,
                 // Chosen means armed. Turning one off is a "run without this
                 // one", so it survives a refresh but not a restart.

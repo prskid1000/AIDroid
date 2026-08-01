@@ -220,7 +220,7 @@ class ChatViewModel @Inject constructor(
                     // Two separate ways this fails, and they used to be one check.
                     val missing = if (model?.modality != Modality.VISION) {
                         ai.ondevice.core.MissingComponent(
-                            what = "${model?.displayName ?: "This model"} cannot see images",
+                            what = "${model?.label ?: "This model"} cannot see images",
                             because = "it is a text model, and images reach one only through a " +
                                 "separate vision projector",
                             state = ai.ondevice.core.MissingComponent.State.NOT_INSTALLED,

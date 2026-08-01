@@ -70,7 +70,9 @@ interface ModelDao {
      */
     @Query(
         """
-        SELECT m.id AS modelId, j.displayName AS displayName, m.modality AS modality,
+        SELECT m.id AS modelId,
+               COALESCE(NULLIF(m.customLabel, ''), j.displayName) AS displayName,
+               m.modality AS modality,
                m.attachmentRole AS attachmentRole, j.bytesDone AS bytesDone,
                j.bytesTotal AS bytesTotal, j.state AS state
         FROM download_jobs j

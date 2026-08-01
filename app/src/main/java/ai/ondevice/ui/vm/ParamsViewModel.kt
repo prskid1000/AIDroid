@@ -106,8 +106,12 @@ class ParamsViewModel @Inject constructor(
             val file = java.io.File(model.localPath)
             val role = model.attachmentRole
             ai.ondevice.params.PathChoice(
-                label = if (role != null) fileLabels.getValue(model.localPath) else model.displayName,
-                detail = "${model.displayName} · ${fileLabels.getValue(model.localPath)} · " +
+                // A name given by hand wins here as everywhere else; the
+                // derived label — a filename, grown by a folder where two
+                // files share one — is the fallback rather than the rule.
+                label = model.customLabel?.takeIf { it.isNotBlank() }
+                    ?: if (role != null) fileLabels.getValue(model.localPath) else model.displayName,
+                detail = "${model.label} · ${fileLabels.getValue(model.localPath)} · " +
                     ai.ondevice.core.Fmt.bytes(file.length()),
                 path = model.localPath,
                 role = role,

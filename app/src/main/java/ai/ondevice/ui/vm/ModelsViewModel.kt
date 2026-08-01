@@ -49,7 +49,8 @@ class ModelsViewModel @Inject constructor(
             models
         } else {
             models.filter {
-                it.displayName.contains(query, true) ||
+                it.label.contains(query, true) ||
+                    it.displayName.contains(query, true) ||
                     it.architecture?.contains(query, true) == true ||
                     it.quant?.contains(query, true) == true
             }

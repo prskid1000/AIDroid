@@ -340,7 +340,7 @@ fun ModelDetailScreen(
                 // The size is the point of the sentence. "Are you sure?" is a
                 // question nobody can answer; "801 MB, downloaded again" is.
                 NDialogBody(
-                    "${model.displayName} — " +
+                    "${model.label} — " +
                         "${Fmt.bytes(state.filesTotalBytes.coerceAtLeast(model.sizeBytes))} " +
                         "removed from this device. Nothing else changes: conversations, images and " +
                         "transcripts made with it stay. Getting it back means downloading it again.",
