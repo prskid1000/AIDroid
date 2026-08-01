@@ -109,9 +109,13 @@ val BottomDestinations = listOf(
     NavDestination("Image", NIcons.Image, Routes.IMAGE),
     NavDestination("Voice", NIcons.Voice, Routes.VOICE),
     NavDestination("Library", NIcons.Library, Routes.LIBRARY),
-    NavDestination("Models", NIcons.Models, Routes.MODELS),
     NavDestination("Settings", NIcons.Settings, Routes.SETTINGS),
 )
+// Models is no longer one of these. Six tabs across a phone left each one
+// narrower than its own label, and the library is not somewhere you go while
+// working — it is where you go to install something, once, and then leave. It
+// now opens from the Settings toolbar, alongside Runtimes and Tools, which is
+// the company it actually keeps.
 
 @Composable
 fun OnDeviceApp(
@@ -141,7 +145,7 @@ fun OnDeviceApp(
                     )
                 },
                 onOpenPromptInspector = { navController.navigate(Routes.PROMPT_INSPECTOR) },
-                onOpenModels = { navController.navigateToRoot(Routes.MODELS) },
+                onOpenModels = { navController.navigate(Routes.MODELS) },
             )
         }
         composable(Routes.IMAGE) {
@@ -182,25 +186,25 @@ fun OnDeviceApp(
                 onOpenItem = { kind, id -> navController.navigate(Routes.libraryItem(kind, id)) },
             )
         }
-        composable(Routes.MODELS) {
-            ModelsScreen(
-                currentRoute = currentRoute,
-                onNavigate = { navController.navigateToRoot(it) },
-                onAddModel = { navController.navigate(Routes.ADD_MODEL) },
-                onOpenModel = { navController.navigate(Routes.modelDetail(it)) },
-                onOpenDownloads = { navController.navigate(Routes.DOWNLOADS) },
-            )
-        }
         composable(Routes.SETTINGS) {
             SettingsScreen(
                 currentRoute = currentRoute,
                 onNavigate = { navController.navigateToRoot(it) },
+                onOpenModels = { navController.navigate(Routes.MODELS) },
                 onOpenRuntimes = { navController.navigate(Routes.RUNTIMES) },
                 onOpenTools = { navController.navigate(Routes.TOOLS) },
             )
         }
 
         // — pushes —
+        composable(Routes.MODELS) {
+            ModelsScreen(
+                onBack = { navController.popBackStack() },
+                onAddModel = { navController.navigate(Routes.ADD_MODEL) },
+                onOpenModel = { navController.navigate(Routes.modelDetail(it)) },
+                onOpenDownloads = { navController.navigate(Routes.DOWNLOADS) },
+            )
+        }
         composable(Routes.ADD_MODEL) {
             AddModelScreen(
                 onBack = { navController.popBackStack() },

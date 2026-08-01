@@ -2,6 +2,7 @@ package ai.ondevice.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -17,6 +18,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -29,7 +33,12 @@ import ai.ondevice.core.VerdictTone
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NCard
+import ai.ondevice.ui.components.NDialog
+import ai.ondevice.ui.components.NDialogActions
+import ai.ondevice.ui.components.NDialogBody
+import ai.ondevice.ui.components.NDialogTitle
 import ai.ondevice.ui.components.NHelp
+import ai.ondevice.ui.components.NIconButton
 import ai.ondevice.ui.components.NSlider
 import ai.ondevice.ui.components.NTable
 import ai.ondevice.ui.components.NTableHeaderCell
@@ -68,18 +77,89 @@ fun ModelDetailScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val model = state.model
 
+    // The ⋮ was an Icon and nothing else — no click handler, no menu, drawn at
+    // the one position on the screen where a toolbar icon means "there is more
+    // here". It now holds the action that should never have been a button.
+    var menuOpen by rememberSaveable { mutableStateOf(false) }
+    var confirmingDelete by rememberSaveable { mutableStateOf(false) }
+
     PhoneScaffold(
         toolbar = {
             PushToolbar(
                 title = model?.let { "${it.displayName} · ${it.quant.orEmpty()}" } ?: "Model",
                 onBack = onBack,
                 trailing = {
-                    Icon(
-                        NIcons.MoreVertical,
-                        contentDescription = "More",
-                        tint = NocturneColors.Text,
-                        modifier = Modifier.size(20.dp),
-                    )
+                    // The actions live up here, as icons, the way every other
+                    // push screen in the app puts them. They used to be a row
+                    // of full-width text buttons pinned under the file list —
+                    // reachable only after scrolling past everything, and a
+                    // different shape from the same actions elsewhere.
+                    val isAddOn = model?.attachmentRole != null
+                    if (model != null && !isAddOn) {
+                        NIconButton(
+                            NIcons.Pin,
+                            if (model.pinned) "Unpin from RAM" else "Keep loaded in RAM",
+                            onClick = viewModel::togglePin,
+                            style = if (model.pinned) NButtonStyle.Primary else NButtonStyle.Secondary,
+                            size = 34.dp,
+                            iconSize = 15.dp,
+                        )
+                        // Only while there is something to unload. The other
+                        // half of "Keep loaded": until now a model could be
+                        // pinned and never released, and the only ways to get
+                        // several gigabytes back were to load a different model
+                        // or to kill the app.
+                        if (state.loaded) {
+                            NIconButton(
+                                NIcons.Eject,
+                                "Unload from RAM",
+                                onClick = viewModel::unload,
+                                size = 34.dp,
+                                iconSize = 15.dp,
+                            )
+                        }
+                        NIconButton(
+                            NIcons.Settings,
+                            "Parameters",
+                            onClick = {
+                                onOpenParameters(ai.ondevice.core.Tier.EXPERT, state.paramRuntimeId)
+                            },
+                            size = 34.dp,
+                            iconSize = 15.dp,
+                        )
+                    }
+                    Box {
+                        Icon(
+                            NIcons.MoreVertical,
+                            contentDescription = "More",
+                            tint = NocturneColors.Text,
+                            modifier = Modifier
+                                .size(20.dp)
+                                .nClickableFlat { menuOpen = true },
+                        )
+                        androidx.compose.material3.DropdownMenu(
+                            expanded = menuOpen,
+                            onDismissRequest = { menuOpen = false },
+                            // Its own surface, outside the app's, so it has to
+                            // be handed the palette or it arrives in Material's
+                            // default light grey.
+                            containerColor = NocturneColors.Neutral900,
+                        ) {
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        "Delete model",
+                                        style = NocturneType.MonoSm,
+                                        color = NocturneColors.Text,
+                                    )
+                                },
+                                onClick = {
+                                    menuOpen = false
+                                    confirmingDelete = true
+                                },
+                            )
+                        }
+                    }
                 },
             )
         },
@@ -260,33 +340,38 @@ fun ModelDetailScreen(
                 )
             }
 
-            Row(
-                Modifier.fillMaxWidth().padding(top = 18.dp),
-                horizontalArrangement = Arrangement.spacedBy(7.dp),
-            ) {
-                // An add-on is never loaded on its own — it is a file the base
-                // model's runtime reads — so there is nothing to pin in RAM and
-                // no parameter set of its own to open.
-                if (!isAddOn) {
+            // Nothing down here any more. Pin, Unload and Parameters are
+            // toolbar icons; Delete is behind the ⋮ with a confirmation, since
+            // it is the one action on this screen that cannot be undone and
+            // costs a multi-gigabyte re-download — and it used to sit between
+            // two reversible buttons at thumb height with nothing in the way.
+        }
+
+        if (confirmingDelete) {
+            NDialog(onDismissRequest = { confirmingDelete = false }) {
+                NDialogTitle("Delete ${model.displayName}?")
+                // The size is the point of the sentence. "Are you sure?" is a
+                // question nobody can answer; "6.2 GB, downloaded again" is.
+                NDialogBody(
+                    "This removes ${Fmt.bytes(state.filesTotalBytes.coerceAtLeast(model.sizeBytes))} " +
+                        "from this device. Nothing else changes — conversations, images and " +
+                        "transcripts made with it stay. Getting it back means downloading it again.",
+                )
+                NDialogActions {
                     NButton(
-                        if (model.pinned) "Unpin" else "Keep loaded",
-                        onClick = viewModel::togglePin,
+                        "Cancel",
+                        onClick = { confirmingDelete = false },
                         style = NButtonStyle.Secondary,
-                        modifier = Modifier.weight(1f),
                     )
                     NButton(
-                        "Parameters",
-                        onClick = { onOpenParameters(ai.ondevice.core.Tier.EXPERT, state.paramRuntimeId) },
-                        style = NButtonStyle.Secondary,
-                        modifier = Modifier.weight(1f),
+                        "Delete",
+                        onClick = {
+                            confirmingDelete = false
+                            viewModel.delete(onBack)
+                        },
+                        style = NButtonStyle.Primary,
                     )
                 }
-                NButton(
-                    "Delete",
-                    onClick = { viewModel.delete(onBack) },
-                    style = NButtonStyle.Secondary,
-                    modifier = Modifier.weight(1f),
-                )
             }
         }
     }

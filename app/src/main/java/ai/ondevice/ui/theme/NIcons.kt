@@ -120,6 +120,16 @@ object NIcons {
 
     // — navigation and toolbar —
 
+    /** Pin: "keep this in RAM". A push pin seen from the side. */
+    val Pin: ImageVector by lazy {
+        icon(1.7f, stroked = listOf("M9 4h6l-1 5 3 3v2H7v-2l3-3z", "M12 14v6"))
+    }
+
+    /** Eject: the counterpart to Pin — take it back out of RAM. */
+    val Eject: ImageVector by lazy {
+        icon(1.7f, stroked = listOf("M12 5l7 9H5z", "M5 18h14"))
+    }
+
     val ChevronLeft: ImageVector by lazy { icon(1.8f, stroked = listOf("M15 5l-7 7 7 7")) }
     val ChevronDown: ImageVector by lazy { icon(2f, stroked = listOf("M8 10l4 4 4-4")) }
     val Menu: ImageVector by lazy { icon(1.8f, stroked = listOf("M4 7h16M4 12h16M4 17h16")) }

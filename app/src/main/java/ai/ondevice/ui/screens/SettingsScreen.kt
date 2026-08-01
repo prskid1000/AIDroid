@@ -25,6 +25,7 @@ import ai.ondevice.ui.components.NBottomBar
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NCard
 import ai.ondevice.ui.components.NHelp
+import ai.ondevice.ui.components.NIconButton
 import ai.ondevice.ui.components.NInput
 import ai.ondevice.ui.components.NSeg
 import ai.ondevice.ui.components.NSwitch
@@ -34,6 +35,7 @@ import ai.ondevice.ui.components.PhoneScaffold
 import ai.ondevice.ui.components.RootToolbar
 import ai.ondevice.ui.components.SectionKicker
 import ai.ondevice.ui.components.nClickableFlat
+import ai.ondevice.ui.theme.NIcons
 import ai.ondevice.ui.theme.NocturneColors
 import ai.ondevice.ui.theme.NocturneType
 import ai.ondevice.ui.theme.ruleBelow
@@ -50,6 +52,7 @@ import ai.ondevice.ui.vm.SettingsViewModel
 fun SettingsScreen(
     currentRoute: String?,
     onNavigate: (String) -> Unit,
+    onOpenModels: () -> Unit,
     onOpenRuntimes: () -> Unit,
     onOpenTools: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
@@ -57,7 +60,20 @@ fun SettingsScreen(
     val state by viewModel.settings.collectAsStateWithLifecycle()
 
     PhoneScaffold(
-        toolbar = { RootToolbar("Settings") },
+        // Models opens from here now rather than from a sixth tab, next to
+        // Runtimes and Tools — the other two screens about what is installed
+        // rather than about what you are making.
+        toolbar = {
+            RootToolbar("Settings") {
+                NIconButton(
+                    NIcons.Models,
+                    "Models",
+                    onClick = onOpenModels,
+                    size = 34.dp,
+                    iconSize = 15.dp,
+                )
+            }
+        },
         bottomBar = { NBottomBar(BottomDestinations, currentRoute) { onNavigate(it.route) } },
         contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 18.dp),
     ) {

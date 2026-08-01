@@ -25,20 +25,19 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ai.ondevice.core.Fmt
 import ai.ondevice.core.Modality
-import ai.ondevice.ui.BottomDestinations
-import ai.ondevice.ui.components.NBottomBar
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NCard
 import ai.ondevice.ui.components.NCardMeta
 import ai.ondevice.ui.components.NHelp
+import ai.ondevice.ui.components.NIconButton
 import ai.ondevice.ui.components.NInput
 import ai.ondevice.ui.components.NMetaText
 import ai.ondevice.ui.components.NStackedBar
 import ai.ondevice.ui.components.NTag
 import ai.ondevice.ui.components.NTagStyle
 import ai.ondevice.ui.components.PhoneScaffold
-import ai.ondevice.ui.components.RootToolbar
+import ai.ondevice.ui.components.PushToolbar
 import ai.ondevice.ui.components.nClickableFlat
 import ai.ondevice.ui.theme.NIcons
 import ai.ondevice.ui.theme.NocturneColors
@@ -57,8 +56,7 @@ import ai.ondevice.ui.vm.ModelsViewModel
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ModelsScreen(
-    currentRoute: String?,
-    onNavigate: (String) -> Unit,
+    onBack: () -> Unit,
     onAddModel: () -> Unit,
     onOpenModel: (String) -> Unit,
     onOpenDownloads: () -> Unit,
@@ -67,21 +65,26 @@ fun ModelsScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
 
     PhoneScaffold(
+        // A push off Settings rather than a sixth tab. Installing a model is
+        // something you do once and then leave, not somewhere you work from,
+        // and six labels across a phone left each tab narrower than its word.
         toolbar = {
-            RootToolbar("Models") {
-                NButton(
-                    "Add",
-                    onClick = onAddModel,
-                    style = NButtonStyle.Primary,
-                    leadingIcon = NIcons.Plus,
-                    minHeight = 38.dp,
-                )
-            }
+            PushToolbar(
+                title = "Models",
+                onBack = onBack,
+                trailing = {
+                    NIconButton(
+                        NIcons.Plus,
+                        "Add model",
+                        onClick = onAddModel,
+                        style = NButtonStyle.Primary,
+                        size = 34.dp,
+                        iconSize = 15.dp,
+                    )
+                },
+            )
         },
-        bottomBar = {
-            NBottomBar(BottomDestinations, currentRoute) { onNavigate(it.route) }
-        },
-        contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 18.dp),
+        contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 4.dp, bottom = 18.dp),
     ) {
         NInput(
             value = state.filter,
@@ -128,13 +131,30 @@ fun ModelsScreen(
             }
 
             // Disk usage grouped by modality (SPEC §3.5).
-            val textBytes = state.byModality.filterKeys {
-                it == Modality.TEXT || it == Modality.VISION || it == Modality.EMBEDDING
+            //
+            // Vision has its own bucket. It used to be counted as Text, which
+            // made the largest single thing on many devices — a vision model
+            // and its projector — invisible as a category: the meter moved and
+            // no legend entry explained why.
+            //
+            // Everything else lands in "Other" rather than being dropped, so
+            // the legend adds up to the total printed beside it. It was not
+            // arithmetic before: UNKNOWN was in neither bucket, so an
+            // unclassified model counted towards the total and appeared in no
+            // segment, and the two numbers on this row disagreed with no way to
+            // tell which was wrong.
+            val byModality = state.byModality
+            val textBytes = byModality.filterKeys {
+                it == Modality.TEXT || it == Modality.EMBEDDING
             }.values.sum()
-            val diffusionBytes = state.byModality[Modality.DIFFUSION] ?: 0
-            val speechBytes = state.byModality.filterKeys {
+            val visionBytes = byModality[Modality.VISION] ?: 0
+            val diffusionBytes = byModality[Modality.DIFFUSION] ?: 0
+            val speechBytes = byModality.filterKeys {
                 it == Modality.SPEECH_TO_TEXT || it == Modality.TEXT_TO_SPEECH
             }.values.sum()
+            val otherBytes =
+                (state.usedBytes - textBytes - visionBytes - diffusionBytes - speechBytes)
+                    .coerceAtLeast(0)
             val capacity = (state.usedBytes + state.freeStorageBytes).coerceAtLeast(1)
 
             Row(
@@ -145,8 +165,10 @@ fun ModelsScreen(
                 NStackedBar(
                     segments = listOf(
                         textBytes.toFloat() / capacity to NocturneColors.Accent500,
+                        visionBytes.toFloat() / capacity to NocturneColors.Accent300,
                         diffusionBytes.toFloat() / capacity to NocturneColors.Accent700,
                         speechBytes.toFloat() / capacity to NocturneColors.Neutral700,
+                        otherBytes.toFloat() / capacity to NocturneColors.Neutral500,
                     ),
                     modifier = Modifier.weight(1f),
                 )
@@ -163,8 +185,15 @@ fun ModelsScreen(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 StorageLegend("Text", textBytes, NocturneColors.Accent500)
+                StorageLegend("Vision", visionBytes, NocturneColors.Accent300)
                 StorageLegend("Diffusion", diffusionBytes, NocturneColors.Accent700)
                 StorageLegend("Speech", speechBytes, NocturneColors.Neutral700)
+                // Shown only when there is something in it. A permanent
+                // "Other 0 B" is noise; a non-zero one is a model whose
+                // modality nothing worked out, which is worth seeing.
+                if (otherBytes > 0) {
+                    StorageLegend("Other", otherBytes, NocturneColors.Neutral500)
+                }
             }
 
             if (state.groups.isEmpty()) {

@@ -242,7 +242,21 @@ class ModelDetailViewModel @Inject constructor(
             )
             recompute()
         }
+        // Residency changes from other screens too — loading this model on
+        // Chat, or the memory-pressure unload — and a snapshot taken at bind
+        // would leave Unload offered on a model that is no longer resident, or
+        // hidden on one that is. Its own job, cancelled when the screen binds
+        // to something else, so a stale collector cannot answer for a model
+        // this screen has stopped showing.
+        residency?.cancel()
+        residency = viewModelScope.launch {
+            engines.state.collect { engine ->
+                _state.value = _state.value.copy(loaded = engine.loaded?.modelId == modelId)
+            }
+        }
     }
+
+    private var residency: kotlinx.coroutines.Job? = null
 
     /**
      * Everything actually on disk for this model, largest first.
@@ -314,6 +328,27 @@ class ModelDetailViewModel @Inject constructor(
             val updated = SparseParams.parse(model.paramOverridesJson)
                 .with("n_ctx", _state.value.contextTokens)
             db.models().setParamOverrides(model.id, updated.toJsonString())
+        }
+    }
+
+    /**
+     * Drop this model out of RAM, without deleting a byte of it.
+     *
+     * The counterpart to "Keep loaded", and the screen had one without the
+     * other: a model could be pinned but never released, so the only ways to
+     * free several gigabytes were to load a different model or to kill the app.
+     * Residency and installation are different things, and this is the control
+     * for the first of them.
+     *
+     * Unpins on the way out. A pin means "do not evict this", which is not a
+     * thing to leave set on a model the user has just evicted by hand.
+     */
+    fun unload() {
+        val model = _state.value.model ?: return
+        viewModelScope.launch {
+            engines.unload()
+            if (model.pinned) db.models().setPinned(model.id, false)
+            _state.value = _state.value.copy(model = db.models().get(model.id), loaded = false)
         }
     }
 
