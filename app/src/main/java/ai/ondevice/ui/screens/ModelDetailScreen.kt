@@ -326,12 +326,17 @@ fun ModelDetailScreen(
 
         if (confirmingDelete) {
             NDialog(onDismissRequest = { confirmingDelete = false }) {
-                NDialogTitle("Delete ${model.displayName}?")
+                // The name goes in the body, not the title. Repo names run long
+                // and have no spaces to break at, so a title built around one
+                // wraps mid-word — "OmniVoice-Onnx-bidirection / al?" — and the
+                // question stops being readable at the moment it matters most.
+                NDialogTitle("Delete this model?")
                 // The size is the point of the sentence. "Are you sure?" is a
-                // question nobody can answer; "6.2 GB, downloaded again" is.
+                // question nobody can answer; "801 MB, downloaded again" is.
                 NDialogBody(
-                    "This removes ${Fmt.bytes(state.filesTotalBytes.coerceAtLeast(model.sizeBytes))} " +
-                        "from this device. Nothing else changes — conversations, images and " +
+                    "${model.displayName} — " +
+                        "${Fmt.bytes(state.filesTotalBytes.coerceAtLeast(model.sizeBytes))} " +
+                        "removed from this device. Nothing else changes: conversations, images and " +
                         "transcripts made with it stay. Getting it back means downloading it again.",
                 )
                 NDialogActions {

@@ -120,8 +120,18 @@ class ChatViewModel @Inject constructor(
             ?: db.conversations().mostRecent()
             ?: newConversation()
 
+        // A vision model is a text model that can also see. Asking for
+        // Modality.TEXT alone meant a phone whose only language model was
+        // classified VISION — which is most multimodal releases, and Qwen3.5-9B
+        // among them — opened Chat on "No model loaded · Add a model" with the
+        // model sitting installed and the picker empty. The observer at the top
+        // of this class always got this right; the restore path did not, so the
+        // list was correct the moment anything changed and wrong until then.
+        val chatModels = db.models().getInstalled().filter {
+            it.modality == Modality.TEXT || it.modality == Modality.VISION
+        }
         val model = conversation.modelId?.let { db.models().get(it) }
-            ?: db.models().observeInstalledByModality(Modality.TEXT).first().firstOrNull()
+            ?: chatModels.firstOrNull()
 
         val presets = db.presets().observeFor(Modality.TEXT).first()
         val personas = db.personas().observeAll().first()
@@ -137,7 +147,7 @@ class ChatViewModel @Inject constructor(
             systemPrompt = conversation.systemPrompt
                 ?: personas.firstOrNull { it.id == conversation.personaId }?.systemPrompt
                 ?: "",
-            availableModels = db.models().observeInstalledByModality(Modality.TEXT).first(),
+            availableModels = chatModels,
         )
     }
 
@@ -334,11 +344,16 @@ class ChatViewModel @Inject constructor(
                     )
                 }
 
+                // Not offered by the picker — see `pickAttachment` — but a file
+                // manager can return anything, so the refusal stays. It no
+                // longer claims whisper.cpp is missing, which it asserted
+                // whether or not that was true; the reason is that a prompt
+                // takes text, and audio becomes text on the Voice tab.
                 ai.ondevice.data.AttachmentKind.AUDIO -> {
                     _state.value = _state.value.copy(
-                        error = "Audio has to be transcribed before it can enter a prompt, and the " +
-                            "whisper.cpp runtime is not installed.",
-                        errorSuggestion = "Settings → Runtimes installs it. Voice → File transcribes there.",
+                        error = "Audio has to be transcribed before it can enter a prompt.",
+                        errorSuggestion = "Voice → File transcribes it, and the transcript can be " +
+                            "pasted or attached here.",
                     )
                     return@launch
                 }
@@ -1063,6 +1078,26 @@ data class ChatState(
             ?: model?.contextLength
             ?: 8192
     val presetName: String? get() = presets.firstOrNull { it.id == selectedPresetId }?.name
+
+    /**
+     * Whether an image can reach this model, which decides what the file picker
+     * offers.
+     *
+     * Both halves are asked, because they fail separately: the modality is what
+     * the repo said, and the projector is a companion download that can be
+     * skipped or interrupted. A vision model without its `mmproj` file cannot
+     * see any more than a text model can.
+     *
+     * The picker used to offer every image type unconditionally, so on a text
+     * model choosing a photo was several taps ending in a refusal. Refusing at
+     * the end is still right — a file manager can hand back anything — but it
+     * should not be the ordinary path.
+     */
+    val acceptsImages: Boolean
+        get() = model?.modality == Modality.VISION &&
+            ai.ondevice.core.ComponentCheck.forChatImage(
+                SparseParams.parse(model.companionPathsJson).keys.associateWith { "" },
+            ) == null
 }
 
 /**

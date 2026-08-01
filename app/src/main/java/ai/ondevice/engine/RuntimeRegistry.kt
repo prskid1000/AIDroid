@@ -127,6 +127,18 @@ class RuntimeRegistry(private val context: Context) {
      * honest shape: an unanswered question is not the answer "CPU".
      */
     private fun registered(runtimeId: String): List<BackendId> = reported.getOrPut(runtimeId) {
+        // The two ONNX runtimes answer for themselves rather than through a
+        // ggml registry they do not have. ONNX Runtime's device list is not
+        // ggml's: there is no OpenCL provider and no Vulkan provider on Android,
+        // so the GPU is genuinely not an option here however plainly Adreno
+        // exists — and without this the clamp in ComputeDevice would send NPU
+        // straight back to CPU whatever the QNN build offers.
+        if (runtimeId == KOKORO || runtimeId == OMNIVOICE) {
+            return@getOrPut ai.ondevice.speech.OrtProviders.available().also {
+                android.util.Log.i("RuntimeRegistry", "$runtimeId registered ${it.joinToString()}")
+            }
+        }
+
         val info = runCatching {
             when (runtimeId) {
                 LLAMA -> if (LlamaBridge.available) LlamaBridge.nativeSystemInfo() else null

@@ -212,7 +212,8 @@
         "SYNTHESIZE"
       ],
       "backends": [
-        "CPU"
+        "CPU",
+        "HEXAGON"
       ],
       "architectures": [
         "en",
@@ -237,7 +238,8 @@
         "SYNTHESIZE"
       ],
       "backends": [
-        "CPU"
+        "CPU",
+        "HEXAGON"
       ],
       "architectures": [
         "qwen3"

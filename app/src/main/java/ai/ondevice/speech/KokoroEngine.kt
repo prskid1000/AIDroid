@@ -78,7 +78,11 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
      * [directory] is what the downloader produced: an `.onnx` graph, a `voices/`
      * folder of `.bin` packs, and optionally the repo's `tokenizer.json`.
      */
-    suspend fun load(directory: File, threads: Int = 0): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun load(
+        directory: File,
+        threads: Int = 0,
+        backend: ai.ondevice.core.BackendId = ai.ondevice.core.BackendId.CPU,
+    ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             check(ONNX_AVAILABLE) { unavailableReason!! }
 
@@ -121,7 +125,12 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
                     // off costs a little matmul throughput and is the difference
                     // between Kokoro speaking and not.
                     addConfigEntry("session.disable_prepacking", "1")
+
+                    // Settings -> Compute device. ONNX Runtime reaches the NPU
+                    // through QNN or not at all; see [OrtProviders].
+                    OrtProviders.apply(this, backend, TAG)
                 }
+                android.util.Log.i(TAG, "loading ${model.name} on ${OrtProviders.describe(backend)}")
                 val created = env.createSession(model.absolutePath, options)
 
                 // Bind by *name*, not position. Upstream has shipped these

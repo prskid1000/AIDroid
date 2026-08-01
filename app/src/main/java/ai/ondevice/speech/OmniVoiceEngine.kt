@@ -267,7 +267,11 @@ class OmniVoiceEngine {
     fun cloningLooksInstalled(directory: File): Boolean =
         CLONING.all { find(directory, it) != null }
 
-    suspend fun load(directory: File, threads: Int = 0): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun load(
+        directory: File,
+        threads: Int = 0,
+        backend: ai.ondevice.core.BackendId = ai.ondevice.core.BackendId.CPU,
+    ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             check(ONNX_AVAILABLE) { "The ONNX Runtime is not installed in this build." }
 
@@ -289,8 +293,12 @@ class OmniVoiceEngine {
                     OrtSession.SessionOptions().apply {
                         if (threads > 0) setIntraOpNumThreads(threads)
                         setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+                        // Settings -> Compute device; see [OrtProviders]. Applied
+                        // per session because OmniVoice is five graphs, not one.
+                        OrtProviders.apply(this, backend, TAG)
                     }
                 }
+                android.util.Log.i(TAG, "loading OmniVoice on ${OrtProviders.describe(backend)}")
 
                 val loadedTokenizer = QwenTokenizer.load(tokenizerFile).getOrThrow()
                 fun open(file: java.io.File): OrtSession =

@@ -73,7 +73,14 @@ hilt-navigation-compose = { module = "androidx.hilt:hilt-navigation-compose", ve
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 
-onnxruntime-android = { module = "com.microsoft.onnxruntime:onnxruntime-android", version.ref = "onnxruntime" }
+# The QNN build rather than the plain one: same ONNX Runtime, same Java API,
+# plus Qualcomm's libraries and a QNN execution provider. It is the only way an
+# ONNX model reaches the NPU on this phone — ONNX Runtime has no OpenCL or
+# Vulkan provider on Android at all, so without this the Compute device setting
+# can never mean anything on the two voice engines.
+#
+# It costs APK size, and the arm64 split is the only one that carries it.
+onnxruntime-android = { module = "com.microsoft.onnxruntime:onnxruntime-android-qnn", version.ref = "onnxruntime" }
 
 coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
 coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coil" }

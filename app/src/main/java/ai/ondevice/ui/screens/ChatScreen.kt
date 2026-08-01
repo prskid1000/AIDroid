@@ -104,8 +104,21 @@ fun ChatScreen(
             viewModel.attach(it)
         }
     }
+    // What this model can actually receive, not everything the composer knows
+    // how to file. Images are offered only to a vision model that has its
+    // projector; audio is offered to nobody, because `attach` refuses every
+    // audio file there is — it has to be transcribed first, which is the Voice
+    // tab's job. A picker that leads to a refusal is several taps spent to be
+    // told no.
     val pickAttachment = {
-        attachLauncher.launch(arrayOf("image/*", "text/*", "application/pdf", "application/json", "audio/*"))
+        attachLauncher.launch(
+            buildList {
+                if (state.acceptsImages) add("image/*")
+                add("text/*")
+                add("application/pdf")
+                add("application/json")
+            }.toTypedArray(),
+        )
     }
 
     // Import takes a zip written by this app's export. Markdown is deliberately

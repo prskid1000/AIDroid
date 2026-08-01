@@ -189,7 +189,8 @@ object AppModule {
         kokoro: ai.ondevice.speech.KokoroEngine,
         omniVoice: ai.ondevice.speech.OmniVoiceEngine,
         capabilities: DeviceCapabilities,
-    ) = ai.ondevice.speech.SpeechSynthesizer(context, kokoro, omniVoice, capabilities)
+        computeDevice: ai.ondevice.engine.ComputeDevice,
+    ) = ai.ondevice.speech.SpeechSynthesizer(context, kokoro, omniVoice, capabilities, computeDevice)
 
     @Provides
     @Singleton

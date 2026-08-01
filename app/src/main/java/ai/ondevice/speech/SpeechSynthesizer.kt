@@ -40,6 +40,7 @@ class SpeechSynthesizer(
     private val kokoro: KokoroEngine,
     private val omniVoice: OmniVoiceEngine,
     private val capabilities: ai.ondevice.data.hf.DeviceCapabilities,
+    private val computeDevice: ai.ondevice.engine.ComputeDevice,
 ) {
 
     private var tts: TextToSpeech? = null
@@ -361,7 +362,11 @@ class SpeechSynthesizer(
             ),
         )
 
-        kokoro.load(directory, threads = capabilities.inferenceThreads).onFailure { return Result.failure(it) }
+        kokoro.load(
+            directory,
+            threads = capabilities.inferenceThreads,
+            backend = computeDevice.chosen(ai.ondevice.engine.RuntimeRegistry.KOKORO),
+        ).onFailure { return Result.failure(it) }
 
         return kokoro.synthesize(
             KokoroRequest(
@@ -396,7 +401,11 @@ class SpeechSynthesizer(
                     ai.ondevice.core.StarterModels.OMNIVOICE_REPO + ".",
             ),
         )
-        omniVoice.load(directory, threads = capabilities.inferenceThreads).onFailure { return Result.failure(it) }
+        omniVoice.load(
+            directory,
+            threads = capabilities.inferenceThreads,
+            backend = computeDevice.chosen(ai.ondevice.engine.RuntimeRegistry.OMNIVOICE),
+        ).onFailure { return Result.failure(it) }
         return omniVoice.synthesize(
             OmniVoiceRequest(
                 text = request.text,
