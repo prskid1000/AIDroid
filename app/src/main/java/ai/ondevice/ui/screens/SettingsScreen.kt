@@ -19,7 +19,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ai.ondevice.core.Fmt
 import ai.ondevice.ui.BottomDestinations
 import ai.ondevice.ui.components.NBottomBar
-import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NCard
 import ai.ondevice.ui.components.NHelp
 import ai.ondevice.ui.components.NIconButton
@@ -48,6 +47,20 @@ fun SettingsScreen(
     PhoneScaffold(
         toolbar = {
             RootToolbar("Settings") {
+                NIconButton(
+                    NIcons.Tools,
+                    "Tools and MCP servers",
+                    onClick = onOpenTools,
+                    size = 34.dp,
+                    iconSize = 15.dp,
+                )
+                NIconButton(
+                    NIcons.Runtime,
+                    "Runtimes",
+                    onClick = onOpenRuntimes,
+                    size = 34.dp,
+                    iconSize = 15.dp,
+                )
                 NIconButton(
                     NIcons.Models,
                     "Models",
@@ -98,28 +111,12 @@ fun SettingsScreen(
                 )
             }
 
-            // No "Show all parameters" here.
-
-            NButton(
-                "Tools and MCP servers →",
-                onClick = onOpenTools,
-                style = ai.ondevice.ui.components.NButtonStyle.Secondary,
-                block = true,
-                modifier = Modifier.padding(top = 20.dp),
-            )
-
-            NButton(
-                "Runtimes →",
-                onClick = onOpenRuntimes,
-                style = ai.ondevice.ui.components.NButtonStyle.Primary,
-                block = true,
-                modifier = Modifier.padding(top = 8.dp),
-            )
+            // Tools, Runtimes and Models are toolbar icons, not rows.
 
             NHelp(
                 "No account, no telemetry, no network after download. The only outbound calls are the " +
                     "Hugging Face API and the ones you start.",
-                Modifier.padding(top = 16.dp),
+                Modifier.padding(top = 20.dp),
             )
         }
     }

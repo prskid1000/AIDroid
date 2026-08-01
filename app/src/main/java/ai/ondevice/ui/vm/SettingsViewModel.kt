@@ -11,7 +11,6 @@ import ai.ondevice.data.db.RuntimeBundleEntity
 import ai.ondevice.data.hf.DeviceCapabilities
 import ai.ondevice.data.prefs.AppPrefs
 import ai.ondevice.data.secure.TokenStore
-import ai.ondevice.params.ParamRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -198,7 +197,6 @@ class SettingsViewModel @Inject constructor(
     private val db: OnDeviceDatabase,
     private val capabilities: DeviceCapabilities,
     private val storage: ModelStorage,
-    private val paramRepository: ParamRepository,
 ) : ViewModel() {
 
     val settings: StateFlow<SettingsState> = prefs.wifiOnly.map { wifiOnly ->
@@ -218,17 +216,8 @@ class SettingsViewModel @Inject constructor(
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsState())
 
-    private val _manifest = MutableStateFlow(ManifestState())
-    val manifest: StateFlow<ManifestState> = _manifest.asStateFlow()
-
     val runtimes: StateFlow<List<RuntimeBundleEntity>> = db.runtimes().observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    init {
-        viewModelScope.launch {
-            _manifest.value = ManifestState(version = paramRepository.manifest().manifestVersion)
-        }
-    }
 
     fun setWifiOnly(value: Boolean) = viewModelScope.launch { prefs.setWifiOnly(value) }
 
@@ -283,6 +272,3 @@ data class SettingsState(
     val canSelfUpdateRuntimes: Boolean = true,
     val updateChannel: String = "SIDELOAD",
 )
-
-/** Just the version. */
-data class ManifestState(val version: Int = 0)

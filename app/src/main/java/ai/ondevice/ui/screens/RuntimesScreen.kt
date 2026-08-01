@@ -30,11 +30,8 @@ import ai.ondevice.ui.components.NCard
 import ai.ondevice.ui.components.NCardMeta
 import ai.ondevice.ui.components.NHelp
 import ai.ondevice.ui.components.NMetaText
-import ai.ondevice.ui.components.NTag
-import ai.ondevice.ui.components.NTagStyle
 import ai.ondevice.ui.components.PhoneScaffold
 import ai.ondevice.ui.components.PushToolbar
-import ai.ondevice.ui.components.SectionKicker
 import ai.ondevice.ui.theme.NIcons
 import ai.ondevice.ui.theme.NocturneColors
 import ai.ondevice.ui.theme.NocturneType
@@ -48,8 +45,6 @@ fun RuntimesScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val runtimes by viewModel.runtimes.collectAsStateWithLifecycle()
-    val manifest by viewModel.manifest.collectAsStateWithLifecycle()
-    val settings by viewModel.settings.collectAsStateWithLifecycle()
 
     PhoneScaffold(
         toolbar = { PushToolbar("Runtimes", onBack) },
@@ -82,46 +77,6 @@ fun RuntimesScreen(
                         color = NocturneColors.Text.copy(alpha = 0.8f),
                     )
                 }
-            }
-
-            SectionKicker("Parameter manifest", Modifier.padding(top = 8.dp, bottom = 8.dp))
-            NCard(gap = 8.dp) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.Bottom,
-                ) {
-                    Text("v${manifest.version}", style = NocturneType.CardTitleSm, modifier = Modifier.weight(1f))
-                    NTag("bundled", style = NTagStyle.Neutral)
-                }
-                // No "Ed25519 ✓" and no "Auto-check · Wi-Fi only".
-                Text(
-                    "Ships inside the app. Data, not code — it can retier, relabel and reveal " +
-                        "parameters the installed engine already supports. It cannot add capability " +
-                        "the engine lacks; that is what an engine update is for.",
-                    style = NocturneType.CardBody,
-                    color = NocturneColors.Text.copy(alpha = 0.8f),
-                )
-            }
-
-            // §17.1/§17.2 — be explicit about why an engine update is a package.
-            NCard(Modifier.padding(top = 16.dp), ring = NocturneColors.Neutral800) {
-                Text("How engine updates arrive", style = NocturneType.CardTitleSm)
-                Text(
-                    if (settings.canSelfUpdateRuntimes) {
-                        "This is the sideload build. Updates are signed packages verified against the " +
-                            "pinned certificate and installed through the package manager — Android's " +
-                            "W^X enforcement rejects loading a native library from writable storage, " +
-                            "so a downloaded .so is never dlopen'd."
-                    } else {
-                        "This is the Play build. Native code arrives as Play Feature Delivery modules, " +
-                            "installed read-only into the app's lib directory. Play policy forbids " +
-                            "downloading executable code from anywhere else, so the in-app updater " +
-                            "degrades to a store link."
-                    },
-                    style = NocturneType.CardBody,
-                    color = NocturneColors.Text.copy(alpha = 0.8f),
-                )
             }
 
             NHelp(

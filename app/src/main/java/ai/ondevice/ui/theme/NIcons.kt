@@ -115,6 +115,23 @@ object NIcons {
         icon(1.7f, stroked = listOf("M12 5l7 9H5z", "M5 18h14"))
     }
 
+    /** Tools: a plug, because that is what an MCP server is. */
+    val Tools: ImageVector by lazy {
+        icon(1.7f, stroked = listOf("M9 3v4M15 3v4", rrect(7f, 7f, 10f, 7f, 2f), "M12 14v6"))
+    }
+
+    /** Runtimes: a chip with pins — the engines are the silicon-facing part. */
+    val Runtime: ImageVector by lazy {
+        icon(
+            1.6f,
+            stroked = listOf(
+                rrect(7f, 7f, 10f, 10f, 1.6f),
+                "M9.8 3v4M14.2 3v4M9.8 17v4M14.2 17v4",
+                "M3 9.8h4M3 14.2h4M17 9.8h4M17 14.2h4",
+            ),
+        )
+    }
+
     val ChevronLeft: ImageVector by lazy { icon(1.8f, stroked = listOf("M15 5l-7 7 7 7")) }
     val ChevronDown: ImageVector by lazy { icon(2f, stroked = listOf("M8 10l4 4 4-4")) }
     val Menu: ImageVector by lazy { icon(1.8f, stroked = listOf("M4 7h16M4 12h16M4 17h16")) }
