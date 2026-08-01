@@ -50,13 +50,25 @@ class EngineManager(
 
     val llama: InferenceEngine? get() = engineFor(RuntimeRegistry.LLAMA)
 
-    suspend fun load(model: ModelEntity, paramOverrides: SparseParams = SparseParams.EMPTY): Result<LoadedModel> =
+    /**
+     * @param force rebuild the context even when this model is already loaded.
+     *   n_ctx, the KV cache types, the thread count and flash attention are all
+     *   settled when llama_init_from_model runs and cannot be changed after it.
+     *   Without this, "Apply and reload" found the model already loaded, took
+     *   the shortcut below and returned success having changed nothing — the
+     *   setting stayed on screen and never reached the engine.
+     */
+    suspend fun load(
+        model: ModelEntity,
+        paramOverrides: SparseParams = SparseParams.EMPTY,
+        force: Boolean = false,
+    ): Result<LoadedModel> =
         loadMutex.withLock {
             val engine = llama ?: return Result.failure(
                 IllegalStateException("No llama.cpp runtime is installed."),
             )
 
-            if (engine.loadedModelId == model.id) {
+            if (!force && engine.loadedModelId == model.id) {
                 return _state.value.loaded?.let { Result.success(it) }
                     ?: Result.failure(IllegalStateException("Inconsistent load state"))
             }

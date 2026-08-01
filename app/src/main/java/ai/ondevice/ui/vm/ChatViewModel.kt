@@ -435,6 +435,9 @@ class ChatViewModel @Inject constructor(
                             _state.value = _state.value.copy(
                                 contextUsed = event.promptTokens,
                                 cachedTokens = event.cachedTokens,
+                                streaming = _state.value.streaming?.copy(
+                                    promptTokens = event.promptTokens,
+                                ),
                             )
                         }
                         is GenerationEvent.ThinkingDelta -> {
@@ -953,6 +956,12 @@ data class StreamingMessage(
     val thinkingMillis: Long? = null,
     val thinkingTokens: Int? = null,
     val thinkingComplete: Boolean = false,
+    /**
+     * How many tokens went in, once they have. Null while the prompt is still
+     * being read — which on a phone is a minute of work with nothing on screen,
+     * and is what "it froze" turned out to mean.
+     */
+    val promptTokens: Int? = null,
 )
 
 /** The two shapes a conversation can leave the app in. */

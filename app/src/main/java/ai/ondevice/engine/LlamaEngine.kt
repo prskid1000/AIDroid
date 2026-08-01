@@ -175,7 +175,10 @@ class LlamaEngine(
             "prompt tokens=${start.int("promptTokens") ?: 0} " +
                 "cached=${start.int("cachedTokens") ?: 0} " +
                 "messages=${request.messages.size} images=${images.size} tools=${request.tools.size} " +
-                "template=${formatted.string("templateSource")?.takeIf { it.isNotBlank() } ?: "runtime default"} " +
+                // Where the template came from, never the template. It is the
+                // whole Jinja source, and logging it put ninety kilobytes into
+                // logcat on every single turn.
+                "template=${templateOrigin(formatted)} " +
                 "at ${"%.1f".format(start.float("promptPerSecond") ?: 0f)} t/s",
         )
 
@@ -314,8 +317,7 @@ class LlamaEngine(
                 text = text,
                 tokens = tokens,
                 template = model.chatTemplate,
-                templateSource = formatted.string("templateSource")?.takeIf { it.isNotBlank() }
-                    ?.let { "gguf.chat_template" } ?: "runtime default",
+                templateSource = templateOrigin(formatted),
                 totalTokens = tokens.size,
                 imageTokens = request.messages.sumOf { it.imagePaths.size } * IMAGE_TOKENS,
                 cachedTokens = 0,
@@ -421,6 +423,10 @@ class LlamaEngine(
         }
         return message.imagePaths.joinToString("") { "${model.mediaMarker}\n" } + message.content
     }
+
+    /** "gguf.chat_template" or "runtime default" — the source, not the source code. */
+    private fun templateOrigin(formatted: JsonObject): String =
+        if (formatted.string("templateSource").isNullOrBlank()) "runtime default" else "gguf.chat_template"
 
     /** Every image in the conversation, in the order its markers appear. */
     private fun imagePaths(request: GenerateRequest): List<String> =

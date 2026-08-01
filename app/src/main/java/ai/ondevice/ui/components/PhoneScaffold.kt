@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -54,7 +55,14 @@ fun PhoneScaffold(
         modifier
             .fillMaxSize()
             .background(NocturneColors.Bg)
-            .padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()),
+            .padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding())
+            // The activity is edge-to-edge, so the window is no longer resized
+            // when the keyboard opens and `adjustResize` in the manifest counts
+            // for nothing. Without this the chat composer — and every other
+            // field that sits low on a screen — is drawn *underneath* the
+            // keyboard: you cannot see what you are typing and Send is not
+            // where it appears to be.
+            .imePadding(),
     ) {
         if (toolbar != null) toolbar()
         Column(

@@ -10,6 +10,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 
 #include <android/log.h>
@@ -117,6 +118,18 @@ od_engine * as_engine(jlong handle) {
     return reinterpret_cast<od_engine *>(handle);
 }
 
+/**
+ * Every core but one.
+ *
+ * Counted with _SC_NPROCESSORS_CONF rather than hardware_concurrency(), which
+ * reports the cores that are *online*: on a phone that idles half its cluster
+ * the answer arrives as 5, and the model then runs on 4 threads for the rest of
+ * its life because the count was taken at the one moment the CPU was asleep.
+ */
+int auto_thread_count() {
+    return std::max(1, static_cast<int>(sysconf(_SC_NPROCESSORS_CONF)) - 1);
+}
+
 // -------------------------------------------------------------------------- Value coercion.
 
 bool as_bool(const json & v, bool fallback) {
@@ -202,8 +215,17 @@ const std::map<std::string, param_row> & param_table() {
         // and offers no way to act on them, so listing them would put three
         // knobs on the parameter screen that read back whatever they are set to
         // and change nothing.
-        { "n_threads",       { true,  [](od_engine & e, const json & v) { e.params.cpuparams.n_threads = as_int(v, e.params.cpuparams.n_threads); } } },
-        { "n_threads_batch", { true,  [](od_engine & e, const json & v) { e.params.cpuparams_batch.n_threads = as_int(v, e.params.cpuparams_batch.n_threads); } } },
+        // Zero or less means "you decide", which is what upstream's own default
+        // of -1 means and what the screen's "reset" writes. Passing it through
+        // verbatim would hand ggml a thread count of -1.
+        { "n_threads",       { true,  [](od_engine & e, const json & v) {
+              const int n = as_int(v, e.params.cpuparams.n_threads);
+              e.params.cpuparams.n_threads = n > 0 ? n : auto_thread_count();
+          } } },
+        { "n_threads_batch", { true,  [](od_engine & e, const json & v) {
+              const int n = as_int(v, e.params.cpuparams_batch.n_threads);
+              e.params.cpuparams_batch.n_threads = n > 0 ? n : auto_thread_count();
+          } } },
         { "n_parallel",      { true,  [](od_engine & e, const json & v) { e.params.n_parallel = as_int(v, e.params.n_parallel); } } },
         { "use_mmap",        { true,  [](od_engine & e, const json & v) {
               const bool mlock = e.params.load_mode == LLAMA_LOAD_MODE_MLOCK ||
@@ -571,9 +593,7 @@ Java_ai_ondevice_engine_LlamaBridge_nativeLoad(JNIEnv * env, jobject, jstring jp
     engine->params.n_batch    = 512;
     engine->params.n_ubatch   = 256;
     engine->params.n_gpu_layers = 0;
-    // Every core but one.
-    engine->params.cpuparams.n_threads =
-        std::max(1, static_cast<int>(std::thread::hardware_concurrency()) - 1);
+    engine->params.cpuparams.n_threads       = auto_thread_count();
     engine->params.cpuparams_batch.n_threads = engine->params.cpuparams.n_threads;
     engine->params.warmup     = false;
 
@@ -622,6 +642,16 @@ Java_ai_ondevice_engine_LlamaBridge_nativeLoad(JNIEnv * env, jobject, jstring jp
               " — there was not enough memory for the KV cache.");
         return 0;
     }
+
+    // Stop has to be able to land *inside* a decode, not only between two of
+    // them. A 700-token prompt goes in as a single batch and is a minute of
+    // uninterruptible work on a phone; checking the flag between batches leaves
+    // a Stop pressed during it doing nothing at all. ggml asks this before each
+    // graph node and abandons the graph the moment it answers true.
+    llama_set_abort_callback(
+        engine->ctx,
+        [](void * user_data) -> bool { return static_cast<od_engine *>(user_data)->cancelled; },
+        engine);
 
     engine->vocab     = llama_model_get_vocab(engine->model);
     engine->templates = common_chat_templates_init(engine->model, engine->params.chat_template);
@@ -985,13 +1015,22 @@ Java_ai_ondevice_engine_LlamaBridge_nativeStartGeneration(
     }
     e->t_prompt_us = ggml_time_us() - t0;
 
+    // A Stop that arrived in the gap between the last batch finishing and here.
+    if (e->cancelled) {
+        llama_memory_seq_rm(llama_get_memory(e->ctx), 0, 0, -1);
+        e->cached.clear();
+        return jni_from_string(env, dump_json(json{ { "cancelled", true } }));
+    }
+
     e->n_prompt    = static_cast<int>(n_prompt);
     e->n_cache_hit = static_cast<int>(n_common);
     e->n_generated = 0;
     e->generated.clear();
     e->generated_tokens.clear();
     e->generating   = true;
-    e->cancelled    = false;
+    // Not cleared here. It is cleared once, at the top of this function, before
+    // any of the work a Stop is meant to interrupt — clearing it again after
+    // the prompt is in throws away a cancel that arrived while it was going in.
     e->saw_stop     = false;
     e->stop_reason.clear();
     e->last_msg     = common_chat_msg();
@@ -1106,8 +1145,11 @@ Java_ai_ondevice_engine_LlamaBridge_nativeNextToken(JNIEnv * env, jobject, jlong
         if (!out["done"].get<bool>()) {
             std::vector<llama_token> one{ token };
             if (llama_decode(e->ctx, llama_batch_get_one(one.data(), 1)) != 0) {
-                out["done"]       = true;
-                out["stopReason"] = "CONTEXT_FULL";
+                out["done"] = true;
+                // The abort callback fails the decode too, and telling someone
+                // who just pressed Stop that their context filled up would be a
+                // different answer to a question they did not ask.
+                out["stopReason"] = e->cancelled ? "CANCELLED" : "CONTEXT_FULL";
             } else {
                 e->cached.push_back(token);
             }

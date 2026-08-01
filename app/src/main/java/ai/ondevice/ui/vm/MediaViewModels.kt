@@ -584,7 +584,7 @@ data class ImageState(
 
     /** Combinations that will not work, said before Generate rather than after. */
     val missingComponents: List<ai.ondevice.core.MissingComponent>
-        get() = ai.ondevice.core.ComponentCheck.forDiffusion(availableAttachments)
+        get() = ai.ondevice.core.ComponentCheck.forDiffusion(availableAttachments, model?.architecture)
     val progress: Float
         get() = if (progressSteps > 0) (step.toFloat() / progressSteps).coerceIn(0f, 1f) else 0f
     /** The denoise dial appears when, and only when, there is a source. */

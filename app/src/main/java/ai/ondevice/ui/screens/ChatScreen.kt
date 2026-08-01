@@ -646,6 +646,25 @@ private fun StreamingBubble(
     trace: ai.ondevice.engine.ResourceTrace?,
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Reading the prompt is the longest part of a turn on a phone and the
+        // only part with nothing to show for it. Said out loud, because a
+        // minute of an empty screen is indistinguishable from a hang.
+        if (streaming.content.isBlank() && streaming.thinking.isBlank()) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                NDot(color = NocturneColors.Accent)
+                Text(
+                    streaming.promptTokens
+                        ?.let { "Read $it tokens · answering…" }
+                        ?: "Reading the conversation…",
+                    style = NocturneType.Meta.copy(fontSize = NocturneType.Row.fontSize),
+                    color = NocturneColors.TextMuted,
+                )
+            }
+        }
         if (streaming.thinking.isNotBlank()) {
             ThinkingBlock(
                 thinking = streaming.thinking,

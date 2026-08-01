@@ -156,7 +156,7 @@ class ParamsViewModel @Inject constructor(
         if (_state.value.runtimeId != RuntimeRegistry.LLAMA) return
         viewModelScope.launch {
             val model = db.models().get(modelId) ?: return@launch
-            engines.load(model, _state.value.values)
+            engines.load(model, _state.value.values, force = true)
             _state.value = _state.value.copy(pendingReloadKeys = emptySet())
         }
     }
