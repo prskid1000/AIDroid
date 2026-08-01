@@ -445,7 +445,21 @@ class ModelResolver(
         return (kept + recovered).distinct()
     }
 
+    /** The containers weights come in, as opposed to the notes shipped beside them. */
+    private val WEIGHT_CONTAINERS = setOf(
+        "safetensors", "gguf", "ckpt", "pth", "pt", "bin", "onnx", "npz", "npy",
+    )
+
     private fun companionRole(name: String): CompanionRole? {
+        // A role is a file the runtime loads, so the extension decides before
+        // the name does. Without this "upscal" matched an example workflow
+        // diagram and offered a 21 KB JSON as an upscaler, and "vae" matched
+        // the config.json sitting beside the VAE.
+        //
+        // Its own list rather than AttachmentRole's: this enum also covers
+        // mmproj projectors, Silero VAD and Kokoro's voice packs, which that
+        // one has never heard of.
+        if (name.substringAfterLast('.', "").lowercase() !in WEIGHT_CONTAINERS) return null
         val n = name.lowercase()
         return when {
             n.contains("mmproj") -> CompanionRole.VISION_PROJECTOR

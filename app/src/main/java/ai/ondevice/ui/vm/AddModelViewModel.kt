@@ -169,8 +169,14 @@ class AddModelViewModel @Inject constructor(
             }
             .flatMap { it.candidates }
             .map { it.file }
-            .filter { AttachmentRole.classify(it.filename) == role }
+            // The group already knows what it holds — the resolver put it
+            // there. Asking a second classifier to agree only invited them to
+            // disagree, which they did: a diffusers VAE lives at
+            // `vae/diffusion_pytorch_model.safetensors`, and one of the two
+            // reads the directory while the other reads the filename.
             .distinctBy { it.filename }
+            // The weights, not the config beside them.
+            .filter { !it.filename.endsWith(".json", ignoreCase = true) }
 
         if (promoted.isEmpty()) return Narrowed(model, applied = false)
 

@@ -83,7 +83,25 @@ enum class AttachmentRole(
 
     companion object {
         /** Classify a repo or file from its *metadata*, never from a curated list of known model names. */
+        /**
+         * The containers weights actually come in.
+         *
+         * A role describes a file the runtime will load, and the repos that
+         * ship one also ship notes about it — `config.json`, a README, a
+         * ComfyUI workflow. Matching on the name alone read
+         * `SD3.5L_plus_SD3.5M_upscaling_example_workflow.json` as an upscaler,
+         * because it does contain "upscal", and offered a 21 KB diagram as a
+         * model.
+         */
+        private val WEIGHT_CONTAINERS = setOf(
+            "safetensors", "gguf", "ckpt", "pth", "pt", "bin", "onnx", "npz", "npy",
+        )
+
+        private fun isWeightFile(filename: String) =
+            filename.substringAfterLast('.', "").lowercase() in WEIGHT_CONTAINERS
+
         fun classify(filename: String, tags: List<String> = emptyList()): AttachmentRole? {
+            if (!isWeightFile(filename)) return null
             val name = filename.substringAfterLast('/').lowercase()
             val path = filename.lowercase()
             val tagSet = tags.map { it.lowercase() }.toSet()
@@ -96,10 +114,16 @@ enum class AttachmentRole(
                 "lora" in tagSet || name.contains("lora") -> LORA
                 name.contains("ip-adapter") || name.contains("ip_adapter") -> IP_ADAPTER
                 name.startsWith("taesd") || name.contains("taesd") -> TAESD
-                name.contains("vae") -> VAE
-                name.contains("clip_l") || name.contains("clip-l") -> CLIP_L
-                name.contains("clip_g") || name.contains("clip-g") -> CLIP_G
-                name.contains("t5xxl") || name.contains("t5-xxl") -> T5XXL
+                // Read the whole path, not just the filename. The diffusers
+                // layout names the role in the *directory* and calls every file
+                // `diffusion_pytorch_model.safetensors`, so a VAE fetched that
+                // way came back unclassified while the resolver, which reads the
+                // path, had already filed it correctly. Two classifiers, two
+                // answers, for the same file.
+                path.contains("vae") -> VAE
+                path.contains("clip_l") || path.contains("clip-l") -> CLIP_L
+                path.contains("clip_g") || path.contains("clip-g") -> CLIP_G
+                path.contains("t5xxl") || path.contains("t5-xxl") -> T5XXL
                 name.contains("esrgan") || name.contains("upscal") -> UPSCALER
                 "textual_inversion" in tagSet -> EMBEDDING
                 else -> null
