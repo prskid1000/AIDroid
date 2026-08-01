@@ -231,8 +231,28 @@ fun NTableHeaderCell(
 }
 
 /**
- * `.dialog-backdrop` + `.dialog` — a modal at the top elevation over a
- * neutral-900 50% scrim.
+ * A modal: the card, and nothing behind it.
+ *
+ * There is no backdrop wash, by two deliberate removals.
+ *
+ * Ours was `Neutral900` at 50 %, drawn into a `fillMaxSize` box — and both
+ * halves were wrong. `Neutral900` is `#292B31`, the darkest step of the neutral
+ * *ramp* but lighter than [NocturneColors.Bg] at `#161826`, which the ramp does
+ * not reach; so it lifted the screen towards grey instead of pushing it back.
+ * And `fillMaxSize` filled the dialog *window*, which Compose sizes to the
+ * platform's dialog width unless told otherwise, so the wash came out as a pale
+ * rectangle floating in the middle of a dark screen — dimming a strip either
+ * side of the card and nothing else.
+ *
+ * The platform's own `FLAG_DIM_BEHIND` is cleared for the same reason. On a
+ * scheme this dark the app behind is already near-black; a second darkening
+ * buys no separation and reads as the screen having gone wrong. Elevation and a
+ * ring do the work instead, which is what they are for.
+ *
+ * `usePlatformDefaultWidth = false` stays, so the invisible dismiss region is
+ * the whole display rather than a strip: tapping anywhere outside the card
+ * closes it. The card keeps its own `widthIn(max = 440)`, so nothing about its
+ * size depended on the window being narrow.
  */
 @Composable
 fun NDialog(
@@ -240,11 +260,20 @@ fun NDialog(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    androidx.compose.ui.window.Dialog(onDismissRequest = onDismissRequest) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        // DialogProperties has no switch for the dim, so it is cleared on the
+        // window Compose put this content in.
+        val view = androidx.compose.ui.platform.LocalView.current
+        androidx.compose.runtime.SideEffect {
+            (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
+                ?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+        }
         Box(
             Modifier
                 .fillMaxSize()
-                .background(NocturneColors.DialogScrim)
                 .nClickableFlat(onClick = onDismissRequest)
                 .padding(Space.s4),
             contentAlignment = Alignment.Center,
@@ -254,6 +283,9 @@ fun NDialog(
                     .widthIn(max = 440.dp)
                     .fillMaxWidth()
                     .background(NocturneColors.Surface, Radius.Lg)
+                    // The card's own edge, since nothing behind it is dimmed to
+                    // separate the two any more.
+                    .ring(NocturneColors.Divider, Radius.Lg)
                     .elev(Elevation.lg, Radius.Lg)
                     .nClickableFlat { /* swallow: taps inside must not dismiss */ }
                     .padding(Space.s4),

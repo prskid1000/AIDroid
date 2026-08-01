@@ -86,7 +86,7 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
         runCatching {
             check(ONNX_AVAILABLE) { unavailableReason!! }
 
-            val model = findModel(directory)
+            val model = findModel(directory, backend)
                 ?: error(
                     "No .onnx file in ${directory.name}. A Kokoro install needs the graph " +
                         "itself, not only its voice packs.",
@@ -527,7 +527,10 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
      * repository it came from.
      */
     fun looksInstalled(directory: File): Boolean =
-        findModel(directory) != null && voicePacks(directory).isNotEmpty()
+        // Any graph will do for "is this a Kokoro install". Which one gets
+        // loaded is a question about the device, and this question is not.
+        findModel(directory, ai.ondevice.core.BackendId.CPU) != null &&
+            voicePacks(directory).isNotEmpty()
 
     /** The style packs in [directory], identified by their exact byte length. */
     fun voicePacks(directory: File): List<File> =
@@ -550,11 +553,62 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
      * chosen first even when it is four times larger, because a graph that
      * cannot produce a number is not a smaller option, it is not an option.
      */
-    private fun findModel(directory: File): File? =
-        directory.walkTopDown()
+    /**
+     * The graph to load, chosen for the device it is going to run on.
+     *
+     * Repos ship several precisions of the same voice, and which one is right is
+     * not a property of the file — it is a property of the pairing. The Hexagon
+     * DSP is an integer accelerator: QNN takes a quantised graph and refuses a
+     * float one outright, session creation and all, rather than partitioning
+     * around what it cannot do —
+     *
+     *     ORT_FAIL - qnn_model.cc:73 ParseGraphInputOrOutput
+     *     Dynamic shape is not supported yet, for output:
+     *     /encoder/text_encoder/lstm/Transpose_output_0
+     *
+     * — which is Kokoro's fp32 export, whose text encoder is an LSTM over a
+     * sentence and so has shapes as variable as the sentence. The quantised
+     * export of the same model loads on the NPU and speaks.
+     *
+     * So the answer is to hand the NPU a graph it can take, not to hand it one
+     * it cannot and then quietly do the work somewhere else. Both files are
+     * already on disk; picking between them is free, and it is the difference
+     * between the setting working and the setting being ignored.
+     *
+     * fp16 stays last whatever the device. Those activations produce NaN on this
+     * arm64 build, which [synthesize] reports rather than playing.
+     */
+    private fun findModel(directory: File, backend: ai.ondevice.core.BackendId): File? {
+        val graphs = directory.walkTopDown()
             .filter { it.isFile && it.extension.equals("onnx", ignoreCase = true) }
-            .sortedWith(compareBy({ if (usesFloat16Activations(it)) 1 else 0 }, { it.length() }))
+            .toList()
+        val wantsQuantised = backend == ai.ondevice.core.BackendId.HEXAGON
+        return graphs
+            .sortedWith(
+                compareBy(
+                    { if (usesFloat16Activations(it)) 1 else 0 },
+                    { if (wantsQuantised && !isQuantised(it)) 1 else 0 },
+                    // Smallest of whatever survives. On a phone the compact
+                    // export is the sane default, and it is what this has always
+                    // picked when only one precision was installed.
+                    { it.length() },
+                ),
+            )
             .firstOrNull()
+    }
+
+    /**
+     * Whether a graph's name marks it as integer-quantised, which is what the
+     * DSP can execute.
+     *
+     * By name, for the same reason as [usesFloat16Activations]: the alternative
+     * is parsing the protobuf looking for QuantizeLinear nodes, and upstream's
+     * naming is consistent. A file that is quantised and not named so simply
+     * does not get preferred — it still loads, and QNN still answers for it.
+     */
+    private fun isQuantised(file: File): Boolean =
+        Regex("(^|[_-])(quantized|quantised|int8|uint8|qint8|quint8|qdq)([_-]|\\.)", RegexOption.IGNORE_CASE)
+            .containsMatchIn(file.name)
 
     /**
      * Whether a graph's name marks it as float16-activation.

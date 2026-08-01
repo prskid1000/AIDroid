@@ -111,21 +111,10 @@ object NocturneColors {
     /** `.table tbody tr:hover` tint — text at 4%. */
     val TableRowHover = Text.copy(alpha = 0.04f)
 
-    /** `.dialog-backdrop`: neutral-900 at 50%. */
-    /**
-     * The wash behind a modal. Black, not a ramp step.
-     *
-     * It was `Neutral900` at 50 %, and `Neutral900` is `#292B31` — the darkest
-     * step of the *neutral ramp*, but lighter than [Bg] at `#161826`, which the
-     * ramp does not contain. So the scrim lifted the screen towards grey
-     * instead of pushing it back: the dialog sat on a pale rectangle, the
-     * background read as brighter than the thing in front of it, and the
-     * separation the scrim exists to create ran the wrong way.
-     *
-     * Black is the only value guaranteed to darken whatever is behind it,
-     * whatever the surface underneath happens to be.
-     */
-    val DialogScrim = Color(0xFF000000).copy(alpha = 0.62f)
+    // No `.dialog-backdrop` token. The canvas specifies neutral-900 at 50%, and
+    // on this ground that is a *lightening* — neutral-900 is #292B31 and Bg is
+    // #161826, so the ramp does not go dark enough to dim anything. NDialog
+    // shows the card on elevation and a ring instead, with no wash at all.
 
     /** Disabled controls drop to 45% opacity. */
     const val DisabledAlpha = 0.45f

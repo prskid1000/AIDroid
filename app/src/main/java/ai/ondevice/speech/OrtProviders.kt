@@ -30,6 +30,52 @@ import android.util.Log
 object OrtProviders {
 
     /**
+     * Open a session on [backend], falling back to the CPU if it will not take
+     * the graph.
+     *
+     * The fallback is not defensive tidiness, it is the whole contract. QNN does
+     * not partition around what it cannot do — it refuses the session:
+     *
+     *     ORT_FAIL - qnn_model.cc:73 ParseGraphInputOrOutput
+     *     Dynamic shape is not supported yet,
+     *     for output: /encoder/text_encoder/lstm/Transpose_output_0
+     *
+     * That is Kokoro's full-precision export, whose text encoder is an LSTM over
+     * a sentence, so its shapes are as variable as the sentence is. The
+     * quantised export happens to partition and load; the fp32 one does not
+     * load at all. Without this, turning the NPU on in Settings would stop a
+     * voice that had been working — an accelerator making the app worse than not
+     * having it.
+     *
+     * So the device choice is a preference, exactly as it is everywhere else in
+     * this app: asked for, and clamped to what actually works. The retry builds
+     * fresh options because `SessionOptions` cannot have a provider removed.
+     */
+    fun createSession(
+        env: ai.onnxruntime.OrtEnvironment,
+        path: String,
+        backend: BackendId,
+        tag: String,
+        configure: OrtSession.SessionOptions.() -> Unit,
+    ): OrtSession {
+        val wanted = OrtSession.SessionOptions().apply {
+            configure()
+            apply(this, backend, tag)
+        }
+        if (backend == BackendId.CPU) return env.createSession(path, wanted)
+
+        return runCatching { env.createSession(path, wanted) }.getOrElse { failure ->
+            Log.w(
+                tag,
+                "${backend.label} would not take ${path.substringAfterLast('/')} — " +
+                    "loading on the CPU instead: ${failure.message?.lineSequence()?.firstOrNull()}",
+            )
+            runCatching { wanted.close() }
+            env.createSession(path, OrtSession.SessionOptions().apply(configure))
+        }
+    }
+
+    /**
      * Add the execution provider for [backend], if this build and this phone
      * have one.
      *

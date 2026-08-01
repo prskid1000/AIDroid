@@ -32,6 +32,7 @@ class ModelsViewModel @Inject constructor(
     private val storage: ModelStorage,
     private val engines: EngineManager,
     private val capabilities: DeviceCapabilities,
+    private val downloader: Downloader,
 ) : ViewModel() {
 
     private val filter = MutableStateFlow("")
@@ -42,7 +43,10 @@ class ModelsViewModel @Inject constructor(
         filter,
         orphans,
         engines.state,
-        db.downloads().observeAll(),
+        // The downloader's own jobs, not the `download_jobs` rows. The table
+        // records what was asked for; only the live job knows how fast it is
+        // going, and without that there is no time remaining to report.
+        downloader.observeJobs(),
     ) { models, query, orphanReport, engineState, jobs ->
         val filtered = if (query.isBlank()) {
             models
@@ -73,6 +77,13 @@ class ModelsViewModel @Inject constructor(
             },
             pausedDownloads = jobs.count { it.state == ai.ondevice.core.DownloadState.PAUSED },
             failedDownloads = jobs.count { it.state == ai.ondevice.core.DownloadState.FAILED },
+            // The longest wait among the running jobs, which is when the queue
+            // is done rather than when the next file is. They share the link, so
+            // summing them would overstate it and taking the shortest would
+            // promise a finish that is not one.
+            downloadEtaSeconds = jobs
+                .filter { it.state == ai.ondevice.core.DownloadState.RUNNING }
+                .maxOfOrNull { it.etaSeconds } ?: 0L,
             // The library row is written when a download starts, not when it
             // finishes, so a model still arriving looked installed and said
             // "never used". Every picker offered it, and selecting one meant
@@ -163,6 +174,8 @@ data class ModelsState(
     val activeDownloads: Int = 0,
     val pausedDownloads: Int = 0,
     val failedDownloads: Int = 0,
+    /** Time left on the slowest running job; 0 before a rate is known. */
+    val downloadEtaSeconds: Long = 0,
     /** Models whose bytes have not all arrived yet, keyed by model id. */
     val pending: Map<String, PendingInstall> = emptyMap(),
 ) {
@@ -174,6 +187,12 @@ data class ModelsState(
             if (activeDownloads > 0) add("$activeDownloads in progress")
             if (pausedDownloads > 0) add("$pausedDownloads paused")
             if (failedDownloads > 0) add("$failedDownloads failed")
+            // Only while something is running, and only once a rate exists —
+            // an ETA computed from no throughput is a number with nothing
+            // behind it.
+            if (activeDownloads > 0 && downloadEtaSeconds > 0) {
+                add(ai.ondevice.core.Fmt.eta(downloadEtaSeconds))
+            }
         }.joinToString(" · ").ifBlank { "Nothing queued" }
 }
 

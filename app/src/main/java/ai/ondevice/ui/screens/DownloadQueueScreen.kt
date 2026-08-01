@@ -194,7 +194,18 @@ private fun ActiveJobCard(job: DownloadJob, viewModel: DownloadsViewModel) {
             NMetaText("·")
             NMetaText("${Fmt.bytes(job.bytesDone)} of ${Fmt.bytes(job.bytesTotal)}")
             Box(Modifier.weight(1f))
-            if (job.bytesPerSecond > 0) NMetaText(Fmt.transferRate(job.bytesPerSecond))
+            // Rate and time remaining. The rate alone answers "is it moving";
+            // only the ETA answers "can I wait for this", which on a 5 GB model
+            // over a phone connection is the question actually being asked.
+            // `etaSeconds` has been computed on the job all along and shown
+            // nowhere.
+            if (job.bytesPerSecond > 0) {
+                NMetaText(Fmt.transferRate(job.bytesPerSecond))
+                if (running && job.etaSeconds > 0) {
+                    NMetaText("·")
+                    NMetaText(Fmt.eta(job.etaSeconds))
+                }
+            }
         }
 
         // The per-file breakdown: shards and companions, each with its own state.
