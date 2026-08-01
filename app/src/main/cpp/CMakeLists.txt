@@ -83,6 +83,27 @@ set(GGML_OPENMP             OFF CACHE BOOL "" FORCE)  # no libomp in the NDK sys
 set(GGML_BUILD_TESTS        OFF CACHE BOOL "" FORCE)
 set(GGML_BUILD_EXAMPLES     OFF CACHE BOOL "" FORCE)
 
+if (ANDROID_ABI STREQUAL "arm64-v8a")
+    # Without this, ggml gets the NDK's baseline -march=armv8-a and every
+    # quantised dot product falls back to the plain-NEON path: __ARM_FEATURE_DOTPROD
+    # is undefined, so `vdotq_s32` is compiled out of ggml_vec_dot_q4_K_q8_K and
+    # the whole q4_K x q8_K matmul runs on 16-bit multiply-accumulates.
+    #
+    # It costs generation almost nothing — that is bandwidth-bound, waiting on
+    # the weights either way — and costs prompt processing a factor of four,
+    # which is compute-bound. Measured on this device with a 9B at Q4_K_M:
+    # prompt 7.6 t/s against generation 5.3 t/s, a ratio that should be five to
+    # twenty to one and was instead one and a half.
+    #
+    # armv8.2 with dotprod and fp16 arithmetic, not armv8.6 with i8mm: dotprod
+    # has been in every ARM core since the A55 and A75 in 2017, so every phone
+    # that can run Android 12 has it, while i8mm arrived with the A710 in 2021
+    # and a Snapdragon 888 or 870 would take a SIGILL on the first matmul.
+    # Reaching i8mm safely means GGML_CPU_ALL_VARIANTS, which needs
+    # GGML_BACKEND_DL and a shared-library ggml — a different build shape.
+    set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod+fp16" CACHE STRING "" FORCE)
+endif()
+
 if (ANDROID_ABI STREQUAL "x86_64")
     # The emulator's CPU is whatever the host exposes through the hypervisor, and
     # a SIGILL on an unsupported instruction is indistinguishable from a bug in
