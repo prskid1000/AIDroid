@@ -94,32 +94,68 @@ class AddModelViewModel @Inject constructor(
         recomputeVerdict()
     }
 
-    /** Choose which file fills a companion role. */
+    /**
+     * Choose which file fills a companion role — including none of them.
+     *
+     * A required role used to snap back to its selection when you tried to
+     * clear it, on the reasoning that the model is unusable without one. That
+     * reasoning aged out: a role is now filled from the library, by any
+     * installed file that fits, so the copy sitting in this repo is one
+     * candidate rather than the only one. Somebody who already has the SDXL
+     * VAE has no use for a second, and refusing to let them say so meant
+     * downloading it anyway.
+     *
+     * What it does not mean is that the model will run. Nothing chosen here
+     * shows as a warning below, and the Image tab says the same before a run.
+     */
     fun chooseCompanion(role: ai.ondevice.data.hf.CompanionRole, filename: String) {
         val group = _state.value.resolved?.companions?.firstOrNull { it.role == role } ?: return
         val current = _state.value.companionChoice[role] ?: group.selected
         val parts = group.kind == ai.ondevice.data.hf.CompanionGroup.Kind.PARTS
-        val next = when {
-            parts && filename in current -> current - filename
-            parts -> current + filename
-            filename in current -> emptySet()
-            else -> setOf(filename)
-        }
-        apply(role, next.ifEmpty { if (role.required) current else next })
+        apply(
+            role,
+            when {
+                parts && filename in current -> current - filename
+                parts -> current + filename
+                filename in current -> emptySet()
+                else -> setOf(filename)
+            },
+        )
     }
 
-    /** Take all of a role's files, or none of them. */
+    /**
+     * Take a role's files, or none of them.
+     *
+     * "All" means all only where the role takes several — voice packs. A role
+     * that takes one file gets the preferred one, never every precision of it
+     * at once, which is a bug this app has already had.
+     */
     fun chooseAllCompanions(role: ai.ondevice.data.hf.CompanionRole, all: Boolean) {
         val group = _state.value.resolved?.companions?.firstOrNull { it.role == role } ?: return
-        val everything = group.candidates.map { it.file.filename }.toSet()
-        val next = when {
-            all -> everything
-            role.required -> setOfNotNull(
+        val everything = if (group.kind == ai.ondevice.data.hf.CompanionGroup.Kind.PARTS) {
+            group.candidates.map { it.file.filename }.toSet()
+        } else {
+            setOfNotNull(
                 ai.ondevice.data.hf.CompanionGrouping.preferred(group.candidates)?.file?.filename,
             )
-            else -> emptySet()
         }
-        apply(role, next)
+        apply(role, if (all) everything else emptySet())
+    }
+
+    /** "Just the weights" — every companion off in one tap, for a library that already has them. */
+    fun skipAllCompanions() {
+        val groups = _state.value.resolved?.companions ?: return
+        _state.value = _state.value.copy(
+            companionChoice = groups.associate { it.role to emptySet<String>() },
+        )
+        recomputeVerdict()
+    }
+
+    /** Back to what the resolver picked. */
+    fun restoreCompanionDefaults() {
+        val groups = _state.value.resolved?.companions ?: return
+        _state.value = _state.value.copy(companionChoice = groups.associate { it.role to it.selected })
+        recomputeVerdict()
     }
 
     private fun apply(role: ai.ondevice.data.hf.CompanionRole, selection: Set<String>) {

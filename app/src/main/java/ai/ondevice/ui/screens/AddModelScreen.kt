@@ -294,6 +294,27 @@ fun AddModelScreen(
 
                 if (resolved.companions.isNotEmpty()) {
                     SectionKicker("Companions", Modifier.padding(top = 20.dp, bottom = 8.dp))
+
+                    // One tap for "I have these already". A role is filled from
+                    // the library now, so the copy in this repo is a
+                    // convenience, not the only source.
+                    val anyChosen = resolved.companions.any { group ->
+                        (state.companionChoice[group.role] ?: group.selected).isNotEmpty()
+                    }
+                    Row(
+                        Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        NButton(
+                            if (anyChosen) "Weights only" else "Restore defaults",
+                            onClick = {
+                                if (anyChosen) viewModel.skipAllCompanions()
+                                else viewModel.restoreCompanionDefaults()
+                            },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+
                     resolved.companions.forEach { group ->
                         val picked = state.companionChoice[group.role] ?: group.selected
 
@@ -306,20 +327,28 @@ fun AddModelScreen(
                         ) {
                             Text(group.role.label, style = NocturneType.CardTitleSm, modifier = Modifier.weight(1f))
                             // Fifty-five voice packs is a lot of tapping to say
-                            // "actually, none of these".
-                            if (parts && group.candidates.size > 1) {
-                                val allPicked = picked.size == group.candidates.size
-                                Text(
-                                    if (allPicked) "none" else "all",
-                                    style = NocturneType.Meta,
-                                    color = NocturneColors.Accent,
-                                    modifier = Modifier
-                                        .nClickableFlat {
-                                            viewModel.chooseAllCompanions(group.role, !allPicked)
-                                        }
-                                        .padding(horizontal = 8.dp, vertical = 2.dp),
-                                )
-                            }
+                            // "actually, none of these" — and one file is one
+                            // tap too many when the answer is "I have it".
+                            val allPicked = picked.size == group.candidates.size
+                            Text(
+                                if (picked.isEmpty()) {
+                                    if (parts) "all" else "take it"
+                                } else if (parts && !allPicked) {
+                                    "all"
+                                } else {
+                                    "none"
+                                },
+                                style = NocturneType.Meta,
+                                color = NocturneColors.Accent,
+                                modifier = Modifier
+                                    .nClickableFlat {
+                                        viewModel.chooseAllCompanions(
+                                            group.role,
+                                            picked.isEmpty() || (parts && !allPicked),
+                                        )
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                            )
                             Text(
                                 Fmt.bytes(group.candidates.filter { it.file.filename in picked }
                                     .sumOf { it.file.sizeBytes }),
@@ -328,6 +357,17 @@ fun AddModelScreen(
                             )
                         }
                         group.note?.let { NHelp(it, Modifier.padding(bottom = 4.dp)) }
+
+                        // Skipping is allowed and is not free. Say which of the
+                        // two it is rather than disabling the control.
+                        if (picked.isEmpty() && group.role.required) {
+                            NHelp(
+                                "Nothing taken. The model needs a ${group.role.label.lowercase()} " +
+                                    "from somewhere before it runs — install one separately and " +
+                                    "choose it under All Parameters.",
+                                Modifier.padding(bottom = 4.dp),
+                            )
+                        }
 
                         group.candidates.forEach { candidate ->
                             val chosen = candidate.file.filename in picked

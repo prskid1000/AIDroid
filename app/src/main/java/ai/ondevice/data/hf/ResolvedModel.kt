@@ -130,9 +130,21 @@ enum class CompanionRole(val cardinality: Cardinality) {
             VAD -> "Silero VAD"
         }
 
-    /** Whether the primary model is unusable without it. */
+    /**
+     * Whether the primary model is unusable without it.
+     *
+     * Per role, not per architecture, which makes this advice rather than a
+     * rule — a T5-XXL is indispensable to SD 3.5 and meaningless to SDXL, and
+     * this cannot tell them apart. It reads as a warning and blocks nothing:
+     * the file that fills a role can come from anywhere in the library, so
+     * skipping the copy in one repo is a legitimate choice.
+     *
+     * CLIP-G is here because SDXL conditions on *both* encoders — ViT-L and
+     * ViT-bigG — and a prompt read through only one of them is half a prompt.
+     * It was missing, which is why an SDXL card asked for CLIP-L alone.
+     */
     val required: Boolean
-        get() = this == VISION_PROJECTOR || this == VAE || this == CLIP_L ||
+        get() = this == VISION_PROJECTOR || this == VAE || this == CLIP_L || this == CLIP_G ||
             this == T5XXL || this == LLM_ENCODER || this == VOICES
 }
 
