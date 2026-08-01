@@ -27,6 +27,7 @@ class RuntimeRegistry(private val context: Context) {
                 jniContract = r.jniContract,
                 formats = r.formats.mapNotNull { f -> runCatching { ModelFormat.valueOf(f) }.getOrNull() }.toSet(),
                 architectures = r.architectures.toSet(),
+                languages = r.languages.toSet(),
                 capabilities = r.capabilities.mapNotNull { c -> runCatching { Capability.valueOf(c) }.getOrNull() }.toSet(),
                 backends = r.backends,
                 installed = r.installed,
@@ -37,6 +38,17 @@ class RuntimeRegistry(private val context: Context) {
 
     fun descriptor(id: String): RuntimeDescriptor? = descriptors.firstOrNull { it.id == id }
 
+    /**
+     * Every architecture the installed runtimes can load.
+     *
+     * Kokoro's entry declares [RuntimeDescriptor.languages] and no
+     * architectures, and that separation is the point: its espeak language list
+     * used to live in this field, so `en`, `es`, `fr`, `hi`, `id`, `it` and `pt`
+     * were all "architectures". The resolver infers an architecture from a
+     * repo's tags when the GGUF header does not carry one, and an ordinary HF
+     * language tag then matched — which is how FLUX.2 Klein and Real-ESRGAN
+     * both ended up recorded as architecture `en`.
+     */
     val knownArchitectures: Set<String> by lazy {
         descriptors.filter { it.installed }.flatMap { it.architectures }.toSet()
     }
@@ -112,6 +124,16 @@ data class RuntimeDescriptor(
     val jniContract: Int,
     val formats: Set<ModelFormat>,
     val architectures: Set<String>,
+    /**
+     * What this runtime can *pronounce*, for the one where that is the gate.
+     *
+     * Kokoro publishes a single ONNX graph; what decides whether an install is
+     * usable is whether the staged espeak data can turn text into the phonemes
+     * that graph expects. That is a language list, not an architecture list, and
+     * keeping it in its own field stops [RuntimeRegistry.knownArchitectures]
+     * treating `en` as a model architecture.
+     */
+    val languages: Set<String> = emptySet(),
     val capabilities: Set<Capability>,
     /** What runtimes.json declares this runtime is built to run on, verbatim. */
     val backends: List<String>,
@@ -138,6 +160,7 @@ private data class RuntimeEntry(
     val jniContract: Int = 3,
     val formats: List<String> = emptyList(),
     val architectures: List<String> = emptyList(),
+    val languages: List<String> = emptyList(),
     val capabilities: List<String> = emptyList(),
     val backends: List<String> = emptyList(),
     val installed: Boolean = false,

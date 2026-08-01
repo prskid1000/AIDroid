@@ -75,7 +75,10 @@ abstract class OnDeviceDatabase : RoomDatabase() {
 
         /** One [Migration] per version step, in order, from 1 to [DATABASE_VERSION]. */
         val MIGRATIONS: Array<androidx.room.migration.Migration> =
-            arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            arrayOf(
+                MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
+                MIGRATION_5_6, MIGRATION_6_7,
+            )
     }
 }
 
@@ -196,4 +199,27 @@ private val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
     }
 }
 
-internal const val DATABASE_VERSION = 6
+/**
+ * Clear the architectures that were never architectures.
+ *
+ * Kokoro's espeak language list lived in the same manifest field as every other
+ * runtime's architecture list, so `en`, `es`, `fr`, `hi`, `it` and `pt` were all
+ * things the resolver believed a model could be built on. When a GGUF header
+ * carries no architecture the resolver infers one from the repo's tags, and an
+ * ordinary Hugging Face language tag then matched: FLUX.2 Klein and Real-ESRGAN
+ * were both stored as architecture `en`.
+ *
+ * None of the six is a real architecture in llama.cpp's 138 or sd.cpp's 46, so
+ * clearing them is unambiguous. Null means "not known yet", which is what it
+ * always meant, and the next resolve fills it in properly.
+ */
+private val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL(
+            "UPDATE `models` SET `architecture` = NULL " +
+                "WHERE `architecture` IN ('en', 'es', 'fr', 'hi', 'it', 'pt')",
+        )
+    }
+}
+
+internal const val DATABASE_VERSION = 7

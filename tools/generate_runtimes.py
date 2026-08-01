@@ -67,14 +67,21 @@ def whisper_architectures(repo: pathlib.Path) -> list[str]:
     return ["whisper"]
 
 
-def kokoro_architectures(repo: pathlib.Path) -> list[str]:
+def kokoro_languages(repo: pathlib.Path) -> list[str]:
     """Kokoro's front end is espeak-ng, and that is what is vendored.
 
-    The "architecture" a Kokoro install is gated on is not the ONNX graph --
-    every published Kokoro export is the same graph -- it is whether this build
-    can turn text into the phonemes the graph expects. So the allowlist is the
-    set of languages the staged espeak data can pronounce, read from the
-    dictionaries actually present in assets rather than from a list here.
+    What gates a Kokoro install is not the ONNX graph -- every published Kokoro
+    export is the same graph -- it is whether this build can turn text into the
+    phonemes the graph expects. So this reads the languages the staged espeak
+    data can pronounce, from the dictionaries actually present in assets rather
+    than from a list here.
+
+    This used to be written into the `architectures` field, and that was a real
+    bug rather than a naming quibble: the app unions every runtime's
+    architecture list, and the resolver infers an architecture from a repo's
+    tags when the GGUF header carries none. An ordinary Hugging Face `en`
+    language tag then matched, so FLUX.2 Klein and Real-ESRGAN were both
+    recorded as architecture `en`. Languages live in their own field now.
     """
     staged = ROOT / "app" / "src" / "main" / "assets" / "espeak-ng-data"
     if not staged.is_dir():
@@ -111,15 +118,17 @@ def main() -> int:
     existing = json.loads(ASSET.read_text(encoding="utf-8"))
     by_id = {r["id"]: r for r in existing["runtimes"]}
 
+    # The field each reader fills. Kokoro's is "languages" and everything else's
+    # is "architectures"; they are different questions and were one field.
     readers = {
-        "llama.cpp": (NATIVE / "llama.cpp", llama_architectures),
-        "whisper.cpp": (NATIVE / "whisper.cpp", whisper_architectures),
-        "stable-diffusion.cpp": (NATIVE / "stable-diffusion.cpp", sd_architectures),
-        "kokoro": (NATIVE / "espeak-ng", kokoro_architectures),
+        "llama.cpp": (NATIVE / "llama.cpp", llama_architectures, "architectures"),
+        "whisper.cpp": (NATIVE / "whisper.cpp", whisper_architectures, "architectures"),
+        "stable-diffusion.cpp": (NATIVE / "stable-diffusion.cpp", sd_architectures, "architectures"),
+        "kokoro": (NATIVE / "espeak-ng", kokoro_languages, "languages"),
     }
 
     removed_any = False
-    for runtime_id, (repo, reader) in readers.items():
+    for runtime_id, (repo, reader, field) in readers.items():
         if not repo.exists():
             print(f"  skip {runtime_id}: {repo} is not checked out")
             continue
@@ -129,15 +138,20 @@ def main() -> int:
             continue
 
         tag, commit = describe(repo)
-        architectures = reader(repo)
-        removed = sorted(set(entry.get("architectures", [])) - set(architectures))
+        values = reader(repo)
+        removed = sorted(set(entry.get(field, [])) - set(values))
         if removed:
             removed_any = True
-            print(f"  !! {runtime_id} DROPS {len(removed)} architecture(s): {', '.join(removed)}")
+            print(f"  !! {runtime_id} DROPS {len(removed)} {field[:-1]}(s): {', '.join(removed)}")
 
         entry["buildTag"] = tag
         entry["upstreamCommit"] = commit
-        entry["architectures"] = architectures
+        entry[field] = values
+        # Kokoro's espeak list lived under `architectures` until the app started
+        # matching Hugging Face language tags against it. Clear the old home so
+        # regenerating actually removes them rather than leaving both.
+        if field == "languages":
+            entry["architectures"] = []
         entry["installed"] = True
         # Every runtime runs on the CPU, and there is nothing else to run on.
         #
@@ -151,12 +165,12 @@ def main() -> int:
         # one accelerator here, Qualcomm's QNN, refuses both graphs for having
         # dynamic shapes.
         entry["backends"] = ["CPU"]
-        print(f"  {runtime_id}: {tag} ({commit}) — {len(architectures)} architectures")
+        print(f"  {runtime_id}: {tag} ({commit}) — {len(values)} {field}")
 
     ASSET.write_text(json.dumps(existing, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     if removed_any:
-        print("\nArchitectures were removed. SPEC 17.6 #5 requires that to be deliberate.")
+        print("\nEntries were removed. SPEC 17.6 #5 requires that to be deliberate.")
         return 1
     return 0
 

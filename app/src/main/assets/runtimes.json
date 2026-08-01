@@ -210,7 +210,8 @@
       "backends": [
         "CPU"
       ],
-      "architectures": [
+      "architectures": [],
+      "languages": [
         "en",
         "es",
         "fr",
