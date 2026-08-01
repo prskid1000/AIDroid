@@ -91,7 +91,10 @@ class DiffusionEngine(
             // What the loader decided this checkpoint is, now that it has read
             // the tensors. Nothing else in the app can know it as reliably.
             detectedVersion = SdBridge.nativeDetectedVersion().takeIf { it.isNotBlank() }
-            detectedVersion?.let { android.util.Log.i(TAG, "recognised as $it") }
+            bareDiffusion = SdBridge.nativeIsBareDiffusion()
+            detectedVersion?.let {
+                android.util.Log.i(TAG, "recognised as $it" + if (bareDiffusion) " (denoiser only)" else "")
+            }
             Unit
         }
     }
@@ -102,6 +105,18 @@ class DiffusionEngine(
      */
     @Volatile
     var detectedVersion: String? = null
+        private set
+
+    /**
+     * Whether the loaded file is the denoiser on its own.
+     *
+     * A full checkpoint carries its text encoders and its VAE and needs nothing
+     * supplied; a quantised release carries neither. Which one a file is cannot
+     * be read off its architecture — SDXL ships both ways — so this is the
+     * loader's finding, not a guess.
+     */
+    @Volatile
+    var bareDiffusion: Boolean = false
         private set
 
     fun unload() {

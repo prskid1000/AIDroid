@@ -22,6 +22,9 @@ object SdBridge {
     /** What the loader worked out the last checkpoint to be, e.g. "Flux.2 klein". */
     external fun nativeDetectedVersion(): String
 
+    /** True when the last load found a denoiser alone rather than a full checkpoint. */
+    external fun nativeIsBareDiffusion(): Boolean
+
     external fun nativeLoad(
         modelPath: String,
         vaePath: String,

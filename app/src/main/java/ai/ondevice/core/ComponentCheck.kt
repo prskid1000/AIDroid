@@ -49,6 +49,17 @@ object ComponentCheck {
         available: List<ModelAttachment>,
         architecture: String? = null,
         installedRoles: Set<AttachmentRole> = emptySet(),
+        /**
+         * Whether the checkpoint is the denoiser alone.
+         *
+         * The loader's finding where there has been a load, and null before
+         * one. This is a property of the *file*, not of the family: SDXL ships
+         * both as a full checkpoint that carries its two CLIPs and its VAE, and
+         * as a quantised denoiser that carries none of them. Saying "SDXL keeps
+         * its decoder in the file" is true of the first and wrong about the
+         * second, and the second is what anybody running SDXL on a phone has.
+         */
+        bareDenoiser: Boolean? = null,
     ): List<MissingComponent> {
         val enabled = available.filter { it.enabled }.map { it.role }.toSet()
         val installed = available.map { it.role }.toSet() + installedRoles
@@ -58,11 +69,18 @@ object ComponentCheck {
         // per family and not per role: SDXL takes CLIP-L and CLIP-G, FLUX.1
         // CLIP-L and T5-XXL, FLUX.2 a language model, Chroma T5 alone.
         val family = DiffusionDefaults.forName(architecture)
-        val needed = buildList {
-            family?.encoders?.forEach { key ->
-                AttachmentRole.entries.firstOrNull { it.paramKey == key }?.let(::add)
+        // A full checkpoint supplies its own everything, so nothing is missing.
+        val selfContained = bareDenoiser == false
+        val needed = if (selfContained) {
+            emptyList()
+        } else {
+            buildList {
+                family?.encoders?.forEach { key ->
+                    AttachmentRole.entries.firstOrNull { it.paramKey == key }?.let(::add)
+                }
+                // Before a load, fall back to what the family usually ships.
+                if (bareDenoiser == true || family?.vaeSeparate == true) add(AttachmentRole.VAE)
             }
-            if (family?.vaeSeparate == true) add(AttachmentRole.VAE)
         }
         val unfilled = needed.filter { it !in enabled }.map { role ->
             MissingComponent(

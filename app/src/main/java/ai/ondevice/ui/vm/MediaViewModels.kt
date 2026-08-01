@@ -60,6 +60,7 @@ class ImageViewModel @Inject constructor(
             _state.value = _state.value.copy(
                 model = model,
                 runtimeInstalled = runtimeInstalled,
+                bareDenoiser = presumedBare(model),
             )
             // Free when the row already knows what it is; the load does it
             // otherwise, once the runtime has read the file.
@@ -99,6 +100,17 @@ class ImageViewModel @Inject constructor(
         }
     }
 
+    /**
+     * What to assume before the first load.
+     *
+     * Nobody publishes a full checkpoint as a quantised GGUF — the format
+     * exists to ship the denoiser on its own — so a GGUF is treated as one
+     * until the loader says otherwise. A safetensors file could be either, and
+     * is left to whatever the family usually ships.
+     */
+    private fun presumedBare(model: ModelEntity?): Boolean? =
+        if (model?.format == ai.ondevice.core.ModelFormat.GGUF) true else null
+
     /** The diffusion entries that can be the *base* model, which is not the same set as the diffusion entries. */
     private fun baseModelsOnly(models: List<ModelEntity>): List<ModelEntity> =
         models.filter { it.attachmentRole == null }
@@ -115,6 +127,7 @@ class ImageViewModel @Inject constructor(
             previewBitmap = null,
             recognisedAs = null,
             defaultsNote = null,
+            bareDenoiser = presumedBare(model),
         )
         viewModelScope.launch {
             db.models().touch(model.id, System.currentTimeMillis())
@@ -167,12 +180,20 @@ class ImageViewModel @Inject constructor(
     /** Pull back anything the Advanced screen changed. */
     fun refreshFromOverrides() {
         viewModelScope.launch {
-            val model = db.models().observeInstalledByModality(Modality.DIFFUSION).first().firstOrNull()
+            // The *base* model, not whichever diffusion row was touched last.
+            // Components are rows in the same table with the same modality, and
+            // since a run stamps every model it loads, the most recently used
+            // one is often the VAE — whose overrides carry no steps or CFG, so
+            // reading them reset the form to the built-in defaults.
+            val model = baseModelsOnly(
+                db.models().observeInstalledByModality(Modality.DIFFUSION).first(),
+            ).firstOrNull()
             val runtimeInstalled = db.runtimes().get(RUNTIME_ID)?.state != RuntimeState.NOT_INSTALLED
             val p = SparseParams.parse(model?.paramOverridesJson)
             _state.value = _state.value.copy(
                 model = model,
                 runtimeInstalled = runtimeInstalled,
+                bareDenoiser = _state.value.bareDenoiser ?: presumedBare(model),
                 steps = p.int("steps") ?: _state.value.steps,
                 cfgScale = p.float("cfg_scale") ?: _state.value.cfgScale,
                 width = p.int("width") ?: _state.value.width,
@@ -238,6 +259,7 @@ class ImageViewModel @Inject constructor(
                     // carried no `general.architecture` — so the settings this
                     // family needs are applied here, in time for this run.
                     if (loaded.isSuccess) {
+                        _state.value = _state.value.copy(bareDenoiser = diffusion.bareDiffusion)
                         applyArchitectureDefaults(diffusion.detectedVersion)
                     }
                     if (loaded.isFailure) {
@@ -833,6 +855,11 @@ data class ImageState(
     val installing: List<ai.ondevice.data.db.InstallingModel> = emptyList(),
     /** What stable-diffusion.cpp said this checkpoint is, once it has read it. */
     val recognisedAs: String? = null,
+    /**
+     * Whether the file is the denoiser alone, and so needs its encoders and its
+     * decoder supplied — the loader's answer after a load, null before one.
+     */
+    val bareDenoiser: Boolean? = null,
     /** Shown once, when recognising the model changed the settings under it. */
     val defaultsNote: String? = null,
 ) {
@@ -864,6 +891,7 @@ data class ImageState(
             availableAttachments,
             recognisedAs ?: model?.architecture,
             installedRoles,
+            bareDenoiser,
         )
     val progress: Float
         get() = if (progressSteps > 0) (step.toFloat() / progressSteps).coerceIn(0f, 1f) else 0f

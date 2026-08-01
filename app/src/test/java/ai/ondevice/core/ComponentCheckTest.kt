@@ -86,4 +86,26 @@ class ComponentCheckTest {
     fun `an unrecognised architecture is not lectured about parts nobody can name`() {
         assertEquals(emptyList<String>(), missingRoles("some model published next year"))
     }
+
+    // Whether the parts are in the file is a property of the file, not of the
+    // family. SDXL ships both ways, and the quantised one is what runs here.
+
+    @Test
+    fun `a full checkpoint is asked for nothing, whatever its family`() {
+        assertEquals(
+            emptyList<String>(),
+            ComponentCheck.forDiffusion(emptyList(), "SDXL", bareDenoiser = false).map { it.what },
+        )
+        assertEquals(
+            emptyList<String>(),
+            ComponentCheck.forDiffusion(emptyList(), "Flux", bareDenoiser = false).map { it.what },
+        )
+    }
+
+    @Test
+    fun `a quantised SDXL is asked for the decoder a full one would carry`() {
+        val bare = ComponentCheck.forDiffusion(emptyList(), "SDXL", bareDenoiser = true).map { it.what }
+        assertTrue("$bare", bare.any { it.contains("VAE") })
+        assertTrue("$bare", bare.any { it.contains("CLIP-G") })
+    }
 }

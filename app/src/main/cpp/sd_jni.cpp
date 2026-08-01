@@ -104,6 +104,17 @@ std::string g_last_error;
 std::mutex  g_version_mutex;
 std::string g_version;
 
+/**
+ * Whether the last load went through the bare-denoiser door.
+ *
+ * A full checkpoint carries its denoiser, its text encoders and its VAE in one
+ * file and needs nothing supplied. Every quantised release is the denoiser
+ * alone. Which one a file is cannot be told from its architecture — SDXL ships
+ * both ways — and the loader is the only thing that finds out, by trying the
+ * first and falling back to the second.
+ */
+std::atomic<bool> g_bare_diffusion{false};
+
 void note_version(const char * text) {
     if (text == nullptr) return;
     const std::string line(text);
@@ -332,6 +343,12 @@ Java_ai_ondevice_engine_SdBridge_nativeSupportedParams(JNIEnv * env, jobject) {
  * from the tensors it finds and announces it, and one of the few things that
  * has to follow from it is the sampler settings a family expects.
  */
+/** True when the loaded file is the denoiser alone, so its parts must be supplied. */
+JNIEXPORT jboolean JNICALL
+Java_ai_ondevice_engine_SdBridge_nativeIsBareDiffusion(JNIEnv *, jobject) {
+    return g_bare_diffusion.load() ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeDetectedVersion(JNIEnv * env, jobject) {
     std::lock_guard<std::mutex> lock(g_version_mutex);
@@ -370,6 +387,7 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
 
     // A version left over from the last checkpoint would be read as this one's.
     { std::lock_guard<std::mutex> lock(g_version_mutex); g_version.clear(); }
+    g_bare_diffusion.store(false);
 
     static std::once_flag once;
     std::call_once(once, [] {
@@ -461,6 +479,7 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
             g_last_error.clear();
         }
         SLOGI("not a full checkpoint; retrying as a bare diffusion model");
+        g_bare_diffusion.store(true);
         params.model_path           = nullptr;
         params.diffusion_model_path = model.c_str();
         engine->ctx = new_sd_ctx(&params);
