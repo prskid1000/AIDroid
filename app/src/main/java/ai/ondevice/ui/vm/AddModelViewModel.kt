@@ -99,12 +99,15 @@ class AddModelViewModel @Inject constructor(
                     // ourselves rather than guessing at the KV term.
                     val first = outcome.model.quants.firstOrNull()
                     val enriched = if (first != null) resolver.enrichFromHeader(outcome.model, first) else outcome.model
-                    val forRole = narrowToRole(enriched, _state.value.intendedRole)
+                    val narrowed = narrowToRole(enriched, _state.value.intendedRole)
+                    val forRole = narrowed.model
                     val defaultQuant = pickDefaultQuant(forRole)
                     _state.value = _state.value.copy(
                         resolving = false,
                         resolved = forRole,
                         selectedQuant = defaultQuant?.name,
+                        // Only claimed when it happened.
+                        roleWasSuggested = narrowed.applied,
                         companionChoice = forRole.companions.associate { it.role to it.selected },
                         contextTokens = (forRole.contextLength ?: 8192).coerceAtMost(8192),
                     )
@@ -115,19 +118,67 @@ class AddModelViewModel @Inject constructor(
     }
 
     /**
-     * Keep only the files that can fill the role the card was offered for.
+     * Offer the files that fill the role the card was for, and only those.
      *
-     * Left alone when no role is implied, and when narrowing would empty the
-     * list — a repo whose filenames do not announce their role should be shown
-     * whole rather than shown as nothing.
+     * A repo does not agree with us about what its main event is. Asked for
+     * SD 3.5's VAE, the resolver calls the text encoders the primary files and
+     * files the VAE away as a companion — so the list showed CLIP-L, CLIP-G and
+     * two T5s, none of which is a VAE, under a heading claiming it had narrowed
+     * to VAEs. Worse, taking the 168 MB VAE meant also taking a primary file,
+     * the cheapest being 246 MB of an encoder nobody asked for.
+     *
+     * Where the role's files are companions, they are promoted to *be* the
+     * choice and the companions are dropped: a component card then downloads
+     * the component and nothing else. Where nothing in the repo fills the role,
+     * the model is returned untouched and unlabelled — a repo whose filenames
+     * do not announce a role is better shown whole than shown as nothing, and
+     * better shown without a claim than with a false one.
      */
-    private fun narrowToRole(model: ResolvedModel, role: AttachmentRole?): ResolvedModel {
-        if (role == null) return model
-        val kept = model.quants.filter { variant ->
+    private fun narrowToRole(model: ResolvedModel, role: AttachmentRole?): Narrowed {
+        if (role == null) return Narrowed(model, applied = false)
+
+        val fromQuants = model.quants.filter { variant ->
             variant.files.any { AttachmentRole.classify(it.filename) == role }
         }
-        return if (kept.isEmpty()) model else model.copy(quants = kept)
+        if (fromQuants.isNotEmpty()) {
+            return Narrowed(model.copy(quants = fromQuants), applied = true)
+        }
+
+        // The two role enums do not know about each other; their names are the
+        // only thing they share, and for these roles they agree.
+        val promoted = model.companions
+            .filter { group ->
+                ai.ondevice.core.AttachmentRole.entries
+                    .firstOrNull { it.name == group.role.name } == role
+            }
+            .flatMap { it.candidates }
+            .map { it.file }
+            .filter { AttachmentRole.classify(it.filename) == role }
+            .distinctBy { it.filename }
+
+        if (promoted.isEmpty()) return Narrowed(model, applied = false)
+
+        return Narrowed(
+            model.copy(
+                quants = promoted
+                    .map { file ->
+                        QuantVariant(
+                            name = file.filename.substringAfterLast('/').removeSuffix(".safetensors"),
+                            files = listOf(file),
+                            note = "${role.label} · nothing else is downloaded",
+                        )
+                    }
+                    .sortedBy { it.totalBytes },
+                // Already the thing being chosen; offering them twice would
+                // download the file and then download it again.
+                companions = emptyList(),
+            ),
+            applied = true,
+        )
     }
+
+    /** A narrowing, and whether it happened — the label may only claim the second. */
+    private data class Narrowed(val model: ResolvedModel, val applied: Boolean)
 
     fun selectQuant(name: String) {
         _state.value = _state.value.copy(selectedQuant = name)
