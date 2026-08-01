@@ -546,26 +546,9 @@ private fun SpeakPanel(
     // — the script —
     SectionKicker("Script", Modifier.padding(top = 18.dp, bottom = 8.dp))
 
-    // OmniVoice takes direction inline, and there is no way to discover that from a text box.
     if (provider == ai.ondevice.speech.SynthProvider.OMNIVOICE) {
-        NCard(gap = 6.dp) {
-            Text("Direction goes in the text", style = NocturneType.CardTitleSm)
-            Text(
-                "[laughter]   a sound, where you want it — also [sigh], [surprise-ah]\n" +
-                    "[B EY1 S]    spell out an English word — this one says \"base\"\n" +
-                    "打ZHE2       a Chinese character, then its pinyin and tone number",
-                style = NocturneType.MonoXs,
-                color = NocturneColors.Text.copy(alpha = 0.8f),
-            )
-            Text(
-                "Who is speaking: Advanced · voice design, or copy a voice below.",
-                style = NocturneType.CardBody,
-                color = NocturneColors.Text.copy(alpha = 0.8f),
-            )
-        }
-
         // — the voice to copy —
-        NCard(gap = 8.dp, modifier = Modifier.padding(top = 8.dp)) {
+        NCard(gap = 8.dp) {
             // The same shape as Transcribe's clip: a title row that carries the verbs as icons, and the clip itself playable underneath.
             Row(
                 Modifier.fillMaxWidth(),
