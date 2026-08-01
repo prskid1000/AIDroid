@@ -292,47 +292,42 @@ private fun TranscribePanel(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         state.waveform.forEach { level ->
+            // Animated per bar rather than per frame: the recorder reads about
+            // sixteen times a second and the eye reads that as a flicker, so
+            // each bar eases to its new height instead of jumping to it.
+            val height by androidx.compose.animation.core.animateFloatAsState(
+                targetValue = if (state.recording) level else 0f,
+                animationSpec = androidx.compose.animation.core.tween(120),
+                label = "level",
+            )
             Box(
                 Modifier
                     .weight(1f)
-                    .fillMaxHeight(if (state.recording) level.coerceIn(0.05f, 1f) else 0.05f)
+                    // A floor, so silence is a line rather than nothing at all.
+                    .fillMaxHeight(height.coerceIn(0.04f, 1f))
                     .background(
-                        if (state.recording && level > 0.45f) {
-                            NocturneColors.Accent500
-                        } else {
-                            NocturneColors.Neutral700
-                        },
+                        // Loud enough to be clipping soon, in the colour that
+                        // means "look at this" everywhere else in the app.
+                        if (height > 0.8f) NocturneColors.Accent500 else NocturneColors.Neutral700,
                         RoundedCornerShape(2.dp),
                     ),
             )
         }
     }
 
-    Row(
-        Modifier.fillMaxWidth().padding(top = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // "idle" is wrong while the take is being decoded, and that is exactly when it used to say so.
-        val transcribing = state.loading && !state.recording
+    // Only while something is happening. An "idle" caption under a silent
+    // meter said nothing the silent meter had not already said.
+    val transcribing = state.loading && !state.recording
+    if (state.recording || state.paused || transcribing) {
         Text(
             when {
                 state.paused -> "❙❙ held ${Fmt.duration(state.elapsedMillis)}"
                 state.recording -> "● REC ${Fmt.duration(state.elapsedMillis)}"
-                transcribing -> "◐ transcribing"
-                else -> "○ idle"
+                else -> "◐ transcribing the whole take, in one pass"
             },
             style = NocturneType.MonoSm,
-            color = if (state.recording || transcribing) {
-                NocturneColors.Accent
-            } else {
-                NocturneColors.TextMuted
-            },
-        )
-        Text(
-            if (transcribing) "the whole take, in one pass" else "transcribes on stop",
-            style = NocturneType.MonoSm,
-            color = NocturneColors.TextMuted,
+            color = NocturneColors.Accent,
+            modifier = Modifier.padding(top = 12.dp),
         )
     }
 
@@ -556,26 +551,14 @@ private fun SpeakPanel(
         NCard(gap = 6.dp) {
             Text("Direction goes in the text", style = NocturneType.CardTitleSm)
             Text(
-                "Non-verbal sounds are tags written where you want them: " +
-                    "\"[laughter] You really got me.\" Supported are [laughter], [sigh], " +
-                    "[confirmation-en], [question-en], [question-ah], [question-oh], " +
-                    "[question-ei], [question-yi], [surprise-ah], [surprise-oh], [surprise-wa], " +
-                    "[surprise-yo] and [dissatisfaction-hnn]. Anything else in brackets is read " +
-                    "as an English pronunciation.",
-                style = NocturneType.CardBody,
+                "[laughter]   a sound, where you want it — also [sigh], [surprise-ah]\n" +
+                    "[B EY1 S]    spell out an English word — this one says \"base\"\n" +
+                    "打ZHE2       a Chinese character, then its pinyin and tone number",
+                style = NocturneType.MonoXs,
                 color = NocturneColors.Text.copy(alpha = 0.8f),
             )
             Text(
-                "Fix a pronunciation in English with CMU dictionary symbols in capitals: " +
-                    "\"He plays the [B EY1 S] guitar while catching a [B AE1 S] fish.\" " +
-                    "In Chinese, write the pinyin with a tone number in capitals after the " +
-                    "character: \"打ZHE2出售\".",
-                style = NocturneType.CardBody,
-                color = NocturneColors.Text.copy(alpha = 0.8f),
-            )
-            Text(
-                "Who is speaking is not set here — describe them under Advanced · voice design, " +
-                    "e.g. \"female, low pitch, british accent\", or copy a real voice below.",
+                "Who is speaking: Advanced · voice design, or copy a voice below.",
                 style = NocturneType.CardBody,
                 color = NocturneColors.Text.copy(alpha = 0.8f),
             )

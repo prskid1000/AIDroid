@@ -79,7 +79,6 @@ class ChatViewModel @Inject constructor(
                     loadingModel = engine.loading,
                     chatTemplate = engine.loaded?.chatTemplate,
                     templateSource = engine.loaded?.templateSource ?: "gguf.chat_template",
-                    supportsThinking = engine.loaded?.supportsThinking == true,
                     loadedTemplateKwargsJson = engine.loaded?.templateKwargsJson ?: "{}",
                 )
             }
@@ -772,15 +771,6 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /** The Thinking switch, written as the template argument it actually is. */
-    fun setThinking(enabled: Boolean) {
-        val current = ChatState.parseKwargs(_state.value.templateKwargsJson)
-        val merged = kotlinx.serialization.json.JsonObject(
-            current + ("enable_thinking" to kotlinx.serialization.json.JsonPrimitive(enabled)),
-        )
-        setTemplateKwargs(merged.toString())
-    }
-
     /** `--chat-template-kwargs`, verbatim. Anything but a JSON object is ignored by the runtime. */
     fun setTemplateKwargs(json: String) {
         setLiveParam("chat_template_kwargs", json)
@@ -946,8 +936,6 @@ data class ChatState(
     /** The template the loaded model is actually rendering with. */
     val chatTemplate: String? = null,
     val templateSource: String = "gguf.chat_template",
-    /** Whether the loaded template has a reasoning mode to switch off. */
-    val supportsThinking: Boolean = false,
     /** What the runtime held when the model loaded; [templateKwargsJson] is the live answer. */
     val loadedTemplateKwargsJson: String = "{}",
     val error: String? = null,
@@ -964,19 +952,9 @@ data class ChatState(
             ?: 8192
     val presetName: String? get() = presets.firstOrNull { it.id == selectedPresetId }?.name
 
-    /**
-     * The template arguments in force: what has been set this session, else
-     * what the model loaded with. The switch and the JSON box are two views of
-     * this one value, so neither can show something the other has overwritten.
-     */
+    /** The template arguments in force: what has been set this session, else what the model loaded with. */
     val templateKwargsJson: String
         get() = liveOverrides.string("chat_template_kwargs") ?: loadedTemplateKwargsJson
-
-    /** Upstream's own default is on, so anything but an explicit `false` is on. */
-    val thinkingEnabled: Boolean
-        get() = parseKwargs(templateKwargsJson)["enable_thinking"]
-            ?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content != "false" }
-            ?: true
 
     /** Whether an image can reach this model, which decides what the file picker offers. */
     val acceptsImages: Boolean
@@ -984,16 +962,6 @@ data class ChatState(
             ai.ondevice.core.ComponentCheck.forChatImage(
                 SparseParams.parse(model.companionPathsJson).keys.associateWith { "" },
             ) == null
-
-    companion object {
-        /** Half-typed JSON is the normal state of a text box, so a parse failure is empty rather than an error. */
-        fun parseKwargs(json: String): Map<String, kotlinx.serialization.json.JsonElement> = runCatching {
-            kotlinx.serialization.json.Json
-                .parseToJsonElement(json)
-                .let { it as kotlinx.serialization.json.JsonObject }
-                .toMap()
-        }.getOrDefault(emptyMap())
-    }
 }
 
 /** A file the user attached but has not sent yet. */

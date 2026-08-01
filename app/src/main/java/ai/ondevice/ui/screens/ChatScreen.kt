@@ -231,7 +231,6 @@ fun ChatScreen(
                 onSelectModel = viewModel::setModel,
                 onSystemPromptChange = viewModel::setSystemPrompt,
                 onChatTemplateChange = viewModel::setChatTemplate,
-                onThinkingChange = viewModel::setThinking,
                 onTemplateKwargsChange = viewModel::setTemplateKwargs,
                 onLiveParam = viewModel::setLiveParam,
                 onOpenParametersAtTier = onOpenParameters,

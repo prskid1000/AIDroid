@@ -26,7 +26,6 @@ import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NDot
 import ai.ondevice.ui.components.NHelp
-import ai.ondevice.ui.components.NSwitch
 import ai.ondevice.ui.components.NSlider
 import ai.ondevice.ui.components.NTextArea
 import ai.ondevice.ui.components.SectionKicker
@@ -47,7 +46,6 @@ fun ChatSettingsSheet(
     onSelectModel: (ModelEntity) -> Unit,
     onSystemPromptChange: (String) -> Unit,
     onChatTemplateChange: (String?) -> Unit,
-    onThinkingChange: (Boolean) -> Unit,
     onTemplateKwargsChange: (String) -> Unit,
     onLiveParam: (String, Any?) -> Unit,
     onOpenParametersAtTier: (Tier) -> Unit,
@@ -177,40 +175,12 @@ fun ChatSettingsSheet(
                         textStyle = NocturneType.Row,
                     )
 
-                    // — thinking —
-                    //
-                    // Only for templates that have a reasoning mode, which the
-                    // runtime answers by rendering one throwaway turn. A switch
-                    // shown against a model that ignores it would be a switch
-                    // that does nothing.
-                    if (state.supportsThinking) {
-                        SectionKicker("Thinking", Modifier.padding(top = 20.dp, bottom = 8.dp))
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(9.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                "Reason before answering",
-                                style = NocturneType.Row,
-                                modifier = Modifier.weight(1f),
-                            )
-                            NSwitch(state.thinkingEnabled, onCheckedChange = onThinkingChange)
-                        }
-                        NHelp(
-                            "Goes to the template, not the sampler: off, the prompt ends without " +
-                                "opening a reasoning block and the model answers directly. Faster, " +
-                                "and worse at anything that needs working out.",
-                            Modifier.padding(top = 6.dp),
-                        )
-                    }
-
                     // — template arguments —
                     //
-                    // The switch above is one key in this object. A model card
-                    // that says `--chat-template-kwargs '{"…":…}'` is naming
-                    // exactly this, so it is offered whole rather than as a
-                    // switch per key somebody has to add each time.
+                    // A model card that says `--chat-template-kwargs '{"…":…}'`
+                    // is naming exactly this, so it is offered whole rather
+                    // than as a switch per key somebody has to add each time —
+                    // enable_thinking included.
                     SectionKicker("Template arguments", Modifier.padding(top = 20.dp, bottom = 8.dp))
                     var kwargsDraft by remember(state.templateKwargsJson) {
                         mutableStateOf(state.templateKwargsJson)

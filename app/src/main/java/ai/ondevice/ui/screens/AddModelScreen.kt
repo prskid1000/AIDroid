@@ -425,27 +425,12 @@ fun AddModelScreen(
             }
 
             if (state.resolved == null && state.refusal == null && !state.resolving) {
-                EmptyResolveHint()
                 StarterTable(onPick = { repoId ->
                     viewModel.onQueryChange(repoId)
                     viewModel.resolve()
                 })
             }
         }
-    }
-}
-
-@Composable
-private fun EmptyResolveHint() {
-    NCard(Modifier.padding(top = 8.dp)) {
-        Text("Runtime-locked, not model-locked", style = NocturneType.CardTitleSm)
-        Text(
-            "Any model whose artifacts match a bundled runtime and fits this device is usable — " +
-                "paste its ID. A model released tomorrow works without an app update, provided its " +
-                "architecture is already known to the runtime.",
-            style = NocturneType.CardBody,
-            color = NocturneColors.Text.copy(alpha = 0.8f),
-        )
     }
 }
 

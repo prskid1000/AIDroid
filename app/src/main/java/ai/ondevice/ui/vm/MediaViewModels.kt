@@ -182,6 +182,7 @@ class ImageViewModel @Inject constructor(
                     _state.value = _state.value.copy(liveTrace = trace)
                 }
             }
+            db.models().touch(model.id, started)
             try {
                 if (!diffusion.isCurrent(model.id)) {
                     _state.value = _state.value.copy(loadingModel = true)
@@ -875,6 +876,7 @@ class VoiceViewModel @Inject constructor(
             )
             val request = currentRequest(text)
             val startedAt = System.currentTimeMillis()
+            _state.value.ttsModel?.let { db.models().touch(it.id, startedAt) }
             val recording = recorder.start(viewModelScope)
             val liveJob = launch {
                 recording.live.collect { trace ->
@@ -1047,6 +1049,7 @@ class VoiceViewModel @Inject constructor(
         val speech = db.models().observeInstalledByModality(Modality.SPEECH_TO_TEXT).first()
             .firstOrNull() ?: return
         _state.value = _state.value.copy(transcribingReference = true)
+        db.models().touch(speech.id, System.currentTimeMillis())
         val text = runCatching {
             if (!transcriber.isCurrent(speech.id)) {
                 transcriber.load(
@@ -1120,11 +1123,11 @@ class VoiceViewModel @Inject constructor(
             transcriber.listen(captureTo = captureFile).collect { event ->
                 when (event) {
                     is CaptureEvent.Level -> {
-                        levels.addLast(event.peak)
+                        levels.addLast(meterLevel(event.peak))
                         while (levels.size > WAVEFORM_BARS) levels.removeFirst()
                         _state.value = _state.value.copy(
                             elapsedMillis = event.elapsedMillis,
-                            waveform = List(WAVEFORM_BARS - levels.size) { 0.05f } + levels.toList(),
+                            waveform = List(WAVEFORM_BARS - levels.size) { 0f } + levels.toList(),
                         )
                     }
                     is CaptureEvent.Failed -> {
@@ -1210,6 +1213,7 @@ class VoiceViewModel @Inject constructor(
         val file = java.io.File(path)
         val name = _state.value.sourceName ?: file.name
         viewModelScope.launch {
+            db.models().touch(model.id, System.currentTimeMillis())
             _state.value = _state.value.copy(loading = true, error = null, fileProgress = 0f)
             if (!transcriber.isCurrent(model.id)) {
                 val loaded = transcriber.load(
@@ -1374,6 +1378,25 @@ enum class VoiceMode(val label: String) {
 
 /** One bar per read of the input buffer, sized to the canvas' waveform. */
 private const val WAVEFORM_BARS = 40
+
+/** Quietest level the meter draws at all, in dBFS. */
+private const val METER_FLOOR_DB = -55f
+
+/**
+ * A raw amplitude as a bar height.
+ *
+ * The recorder reports peak amplitude, which is linear, and loudness is not:
+ * ordinary speech into a phone peaks around -25 dBFS, which is 0.056 linear
+ * and drew a bar 5% tall. Forty of those is the flat dashed line the meter
+ * looked like however loudly anyone spoke. On a dB scale the same speech fills
+ * a little over half the bar and a shout fills it, which is what a level meter
+ * is for.
+ */
+private fun meterLevel(peak: Float): Float {
+    if (peak <= 0f) return 0f
+    val db = 20f * kotlin.math.log10(peak.coerceIn(1e-5f, 1f))
+    return ((db - METER_FLOOR_DB) / -METER_FLOOR_DB).coerceIn(0f, 1f)
+}
 
 /** A reference clip is decoded at the rate OmniVoice works in, so nothing has to guess later what a bare FloatArray is. */
 private const val REFERENCE_SAMPLE_RATE = ai.ondevice.speech.OmniVoiceEngine.SAMPLE_RATE

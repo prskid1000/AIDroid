@@ -72,7 +72,6 @@ class LlamaEngine(
                 heads = info.int("heads") ?: 0,
                 chatTemplate = info.string("chatTemplate")?.takeIf { it.isNotBlank() },
                 templateSource = info.string("templateSource") ?: "gguf.chat_template",
-                supportsThinking = info.bool("supportsThinking") == true,
                 // The end-of-generation tokens the *vocabulary* declares.
                 stopSequences = info["eogTokens"]?.jsonArray
                     ?.mapNotNull { it.jsonPrimitive.contentOrNull }

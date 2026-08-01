@@ -48,8 +48,6 @@ data class LoadedModel(
     val chatTemplate: String?,
     /** Where [chatTemplate] came from: the GGUF, or a `chat_template` override. */
     val templateSource: String = "gguf.chat_template",
-    /** Whether this template has a reasoning mode at all, per the runtime. */
-    val supportsThinking: Boolean = false,
     /** `--chat-template-kwargs` as the runtime currently holds it. */
     val templateKwargsJson: String = "{}",
     val stopSequences: List<String>,

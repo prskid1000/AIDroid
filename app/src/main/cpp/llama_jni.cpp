@@ -622,17 +622,6 @@ Java_ai_ondevice_engine_LlamaBridge_nativeInfo(JNIEnv * env, jobject, jlong hand
     info["templateSource"] = e->params.chat_template.empty() ? "gguf.chat_template" : "override";
     info["threads"]       = e->params.cpuparams.n_threads;
 
-    // Whether this template has a reasoning mode to switch off, asked of the
-    // template rather than guessed from the architecture name. Upstream
-    // answers it by rendering one throwaway turn, which is why it can throw.
-    info["supportsThinking"] = [&] {
-        try {
-            return common_chat_templates_support_enable_thinking(e->templates.get());
-        } catch (const std::exception &) {
-            return false;
-        }
-    }();
-
     json kwargs = json::object();
     for (const auto & [key, value] : e->chat_template_kwargs) {
         try {
