@@ -725,8 +725,12 @@ private fun AttachmentsSection(
                             color = if (attachment.enabled) NocturneColors.Accent else NocturneColors.TextMuted,
                         )
                     }
+                    // Which file is in the slot — by the name it is known by,
+                    // which is the one given by hand where there is one. This
+                    // read the path directly and so never saw a rename, in the
+                    // one place a renamed component is most likely to be read.
                     Text(
-                        attachment.path.substringAfterLast('/'),
+                        attachment.displayName,
                         style = NocturneType.MonoXs,
                         color = NocturneColors.TextMuted,
                         modifier = Modifier.padding(top = 2.dp),
