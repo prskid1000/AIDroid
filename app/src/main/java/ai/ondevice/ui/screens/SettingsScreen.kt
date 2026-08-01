@@ -11,6 +11,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -19,6 +22,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ai.ondevice.core.Fmt
 import ai.ondevice.ui.BottomDestinations
 import ai.ondevice.ui.components.NBottomBar
+import ai.ondevice.ui.components.NButton
+import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NCard
 import ai.ondevice.ui.components.NHelp
 import ai.ondevice.ui.components.NIconButton
@@ -103,12 +108,42 @@ fun SettingsScreen(
                     style = NocturneType.CardBody,
                     color = NocturneColors.Text.copy(alpha = 0.8f),
                 )
+                // The field held "" and wrote on every keystroke, so it
+                // cleared itself after each character and stored one letter at
+                // a time. A token is pasted in one go and is worth nothing
+                // partially typed, so it is edited here and committed on Save.
+                var typed by rememberSaveable { mutableStateOf("") }
                 NInput(
-                    value = "",
-                    onValueChange = { viewModel.setToken(it.takeIf { v -> v.isNotBlank() }) },
+                    value = typed,
+                    onValueChange = { typed = it },
                     placeholder = "hf_…",
                     textStyle = NocturneType.MonoValue,
                 )
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    NButton(
+                        "Save token",
+                        onClick = {
+                            viewModel.setToken(typed.trim())
+                            typed = ""
+                        },
+                        style = NButtonStyle.Primary,
+                        enabled = typed.isNotBlank(),
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (state.hasToken) {
+                        NButton(
+                            "Remove",
+                            onClick = {
+                                viewModel.setToken(null)
+                                typed = ""
+                            },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
             }
 
             // Tools, Runtimes and Models are toolbar icons, not rows.
