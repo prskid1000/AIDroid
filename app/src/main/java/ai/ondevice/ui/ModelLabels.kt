@@ -20,13 +20,20 @@ import ai.ondevice.data.db.ModelEntity
  * a person the most: what slot it fills, at what precision, and finally the
  * filename — trimmed to the shortest tail that is unique among these paths, so
  * a folder appears only when the filename alone cannot separate them.
+ *
+ * A label set by hand on the model's own screen replaces the repo name and is
+ * normally the end of it: the app qualifies what it derived, and a person who
+ * has named something has said what they meant. Two models given the *same*
+ * hand-written name are qualified like any other namesake, because the point is
+ * to be able to tell them apart.
  */
 fun List<ModelEntity>.pickerLabels(): List<String> {
     val fileLabels = FileLabels.distinguish(map { it.localPath })
     return Labels.unique(
         map { model ->
             Labels.Item(
-                name = model.displayName,
+                // A name typed by hand is the answer, not a starting point.
+                name = model.label,
                 qualifiers = listOf(
                     model.attachmentRole?.label,
                     model.quant,
@@ -42,5 +49,5 @@ fun List<ModelEntity>.pickerLabels(): List<String> {
 fun List<ModelEntity>.labelFor(model: ModelEntity?): String? {
     if (model == null) return null
     val index = indexOfFirst { it.id == model.id }
-    return if (index >= 0) pickerLabels()[index] else model.displayName
+    return if (index >= 0) pickerLabels()[index] else model.label
 }

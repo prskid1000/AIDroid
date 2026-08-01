@@ -110,6 +110,18 @@ class ModelsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Name this model by hand, or clear the name and go back to the repo's.
+     *
+     * Blank is stored as null rather than as an empty string, so "no label" is
+     * one state and not two — every reader can ask a single question.
+     */
+    fun setCustomLabel(modelId: String, label: String) {
+        viewModelScope.launch {
+            db.models().setCustomLabel(modelId, label.trim().takeIf { it.isNotBlank() })
+        }
+    }
+
     fun load(model: ModelEntity) {
         viewModelScope.launch { engines.load(model) }
     }
@@ -194,6 +206,14 @@ class ModelDetailViewModel @Inject constructor(
 
     private val _state = MutableStateFlow(ModelDetailState())
     val state: StateFlow<ModelDetailState> = _state.asStateFlow()
+
+    /** See ModelsViewModel.setCustomLabel — the same rule, for the model on screen. */
+    fun setCustomLabel(label: String) {
+        val id = _state.value.model?.id ?: return
+        viewModelScope.launch {
+            db.models().setCustomLabel(id, label.trim().takeIf { it.isNotBlank() })
+        }
+    }
 
     /** The runtime that would actually load this model, for the Parameters button. */
     private fun runtimeIdFor(model: ModelEntity): String = when (model.modality) {

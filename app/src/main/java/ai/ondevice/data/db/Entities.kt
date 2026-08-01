@@ -58,9 +58,21 @@ data class ModelEntity(
     val paramOverridesJson: String,
     val defaultPresetId: String?,
     val displayName: String,
+    /**
+     * A name given by hand, which outranks everything derived.
+     *
+     * `displayName` is the repo, and the app can only ever qualify it with what
+     * it happens to know — the role, the quant, a folder. That is enough to
+     * tell two rows apart and not enough to say which one you meant. A person
+     * naming a file "SDXL decoder" has settled the question outright.
+     */
+    val customLabel: String? = null,
     /** Which add-on slot this model fills, or null for a base model. */
     val attachmentRole: AttachmentRole? = null,
-)
+) {
+    /** What to call this model wherever it is shown or picked. */
+    val label: String get() = customLabel?.takeIf { it.isNotBlank() } ?: displayName
+}
 
 /**
  * A model row whose bytes have not all landed yet.

@@ -77,7 +77,7 @@ abstract class OnDeviceDatabase : RoomDatabase() {
         val MIGRATIONS: Array<androidx.room.migration.Migration> =
             arrayOf(
                 MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
-                MIGRATION_5_6, MIGRATION_6_7,
+                MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
             )
     }
 }
@@ -222,4 +222,12 @@ private val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
     }
 }
 
-internal const val DATABASE_VERSION = 7
+private val MIGRATION_7_8 = object : androidx.room.migration.Migration(7, 8) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        // Null until somebody types one; nothing to backfill, because the name
+        // this replaces is still there to fall back to.
+        db.execSQL("ALTER TABLE `models` ADD COLUMN `customLabel` TEXT")
+    }
+}
+
+internal const val DATABASE_VERSION = 8

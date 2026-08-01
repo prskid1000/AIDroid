@@ -47,6 +47,7 @@ import ai.ondevice.ui.components.NTag
 import ai.ondevice.ui.components.NTagStyle
 import ai.ondevice.ui.components.PhoneScaffold
 import ai.ondevice.ui.components.PushToolbar
+import ai.ondevice.ui.components.NInput
 import ai.ondevice.ui.components.SectionKicker
 import ai.ondevice.ui.components.nClickableFlat
 import ai.ondevice.ui.theme.NIcons
@@ -74,7 +75,7 @@ fun ModelDetailScreen(
     PhoneScaffold(
         toolbar = {
             PushToolbar(
-                title = model?.let { "${it.displayName} · ${it.quant.orEmpty()}" } ?: "Model",
+                title = model?.let { "${it.label} · ${it.quant.orEmpty()}" } ?: "Model",
                 onBack = onBack,
                 trailing = {
                     // The actions live up here, as icons, the way every other push screen in the app puts them.
@@ -138,6 +139,51 @@ fun ModelDetailScreen(
                 if (model.sha256 != null) NTag("sha256 ✓", style = NTagStyle.Neutral)
                 if (model.pinned) NTag("pinned in RAM", style = NTagStyle.Outline)
             }
+
+            // A name of your own, which every list then uses.
+            //
+            // The app can only qualify what it derived — a role, a quant, a
+            // folder — and that tells two rows apart without saying which one
+            // you meant. Naming it settles that outright, and this is the one
+            // screen that is unambiguously about this model.
+            SectionKicker("Name", Modifier.padding(bottom = 8.dp))
+            var typedLabel by rememberSaveable(model.id) {
+                mutableStateOf(model.customLabel.orEmpty())
+            }
+            NInput(
+                value = typedLabel,
+                onValueChange = { typedLabel = it },
+                placeholder = model.displayName,
+                minHeight = 42.dp,
+            )
+            Row(
+                Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                NButton(
+                    "Save name",
+                    onClick = { viewModel.setCustomLabel(typedLabel) },
+                    style = NButtonStyle.Primary,
+                    enabled = typedLabel.trim() != model.customLabel.orEmpty(),
+                    modifier = Modifier.weight(1f),
+                )
+                if (!model.customLabel.isNullOrBlank()) {
+                    NButton(
+                        "Use repo name",
+                        onClick = {
+                            typedLabel = ""
+                            viewModel.setCustomLabel("")
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            NHelp(
+                "Shown wherever this model is listed or picked. Leave it empty and the repo's " +
+                    "name is used, qualified with the role or quant only when something else " +
+                    "shares it.",
+                Modifier.padding(bottom = 18.dp),
+            )
 
             // Not every model has every property, and this screen used to act as though they all did.
             val isAddOn = model.attachmentRole != null

@@ -55,6 +55,10 @@ interface ModelDao {
     )
     suspend fun getInstalled(): List<ModelEntity>
 
+    /** A name given by hand. Blank is stored as null, so "cleared" is one state. */
+    @Query("UPDATE models SET customLabel = :label WHERE id = :modelId")
+    suspend fun setCustomLabel(modelId: String, label: String?)
+
     /** Set once, by the downloader, when the last file of a model verifies. */
     @Query("UPDATE models SET completedAt = :at WHERE id = :modelId")
     suspend fun markCompleted(modelId: String, at: Long)

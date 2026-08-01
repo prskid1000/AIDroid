@@ -307,7 +307,7 @@ private fun EmptyChat(state: ChatState, onOpenModels: () -> Unit) {
                     "Nothing is loaded yet. Add a model and the chat runs entirely on this device — after " +
                         "download there is no network at all."
                 } else {
-                    "${state.model.displayName} is installed. Send a message and it loads on first use; " +
+                    "${state.model.label} is installed. Send a message and it loads on first use; " +
                         "the KV cache is reused across turns so follow-ups don't reprocess the prompt."
                 },
                 style = NocturneType.CardBody,
@@ -936,7 +936,7 @@ private fun ChatComposer(
                 ai.ondevice.ui.components.NInput(
                     value = state.input,
                     onValueChange = onInputChange,
-                    placeholder = state.model?.let { "Message ${it.displayName}…" } ?: "No model loaded",
+                    placeholder = state.model?.let { "Message ${it.label}…" } ?: "No model loaded",
                     singleLine = false,
                     minHeight = 44.dp,
                     textStyle = NocturneType.Message,

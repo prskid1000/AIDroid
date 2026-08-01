@@ -206,7 +206,7 @@ fun ModelsScreen(
                             verticalAlignment = Alignment.Top,
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Text(model.displayName, style = NocturneType.CardTitle)
+                                Text(model.label, style = NocturneType.CardTitle)
                                 Text(
                                     listOfNotNull(
                                         model.quant,

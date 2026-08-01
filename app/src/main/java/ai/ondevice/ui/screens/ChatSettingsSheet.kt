@@ -69,7 +69,7 @@ fun ChatSettingsSheet(
                     ) {
                         Column(Modifier.weight(1f)) {
                             Text(
-                                state.model?.displayName ?: "No model selected",
+                                state.model?.label ?: "No model selected",
                                 style = NocturneType.CardTitleSm,
                             )
                             Text(
@@ -141,7 +141,7 @@ fun ChatSettingsSheet(
                                 ) {
                                     Column(Modifier.weight(1f)) {
                                         Text(
-                                            model.displayName,
+                                            model.label,
                                             style = NocturneType.Row,
                                             color = if (selected) NocturneColors.Accent200 else NocturneColors.Text,
                                         )
