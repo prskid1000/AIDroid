@@ -41,6 +41,13 @@ enum class AttachmentRole(
     CLIP_G("CLIP-G", "clip_g"),
     T5XXL("T5-XXL", "t5xxl"),
 
+    /**
+     * FLUX.2's text encoder, which is a language model rather than CLIP or T5
+     * — Qwen3 for Klein, Mistral Small for dev. It is the size of a chat model
+     * and is the reason a 4B diffusion model costs more than 4B to run.
+     */
+    LLM_ENCODER("Text encoder (LLM)", "llm"),
+
     /** Textual-inversion embeddings, loaded from a directory. */
     EMBEDDING("Embedding", "embd_dir", multiple = true),
 

@@ -83,14 +83,26 @@ def kokoro_architectures(repo: pathlib.Path) -> list[str]:
 
 
 def sd_architectures(repo: pathlib.Path) -> list[str]:
-    """Read the SDVersion enum out of stable-diffusion.cpp's model.h."""
-    header = repo / "model.h"
-    if not header.exists():
-        return ["sd1", "sd2", "sdxl", "sd3", "flux"]
+    """Read the SDVersion enum out of stable-diffusion.cpp's model.h.
+
+    The header moved from the repo root into src/ upstream, and because a
+    missing file used to fall back silently, the allowlist sat frozen at five
+    architectures while sd.cpp grew twenty more — including the FLUX.2 family.
+    A header that cannot be found is an error now: a stale allowlist rejects
+    models the engine can actually run, and says nothing about why.
+    """
+    candidates = [repo / "src" / "model.h", repo / "model.h"]
+    header = next((c for c in candidates if c.exists()), None)
+    if header is None:
+        raise SystemExit(
+            "cannot find stable-diffusion.cpp's model.h in "
+            + " or ".join(str(c.relative_to(repo)) for c in candidates)
+            + " — its layout moved again and this reader has to follow it."
+        )
     source = header.read_text(encoding="utf-8")
     block = re.search(r"enum\s+SDVersion\s*\{(.*?)\};", source, re.S)
     if not block:
-        return ["sd1", "sd2", "sdxl", "sd3", "flux"]
+        raise SystemExit(f"no `enum SDVersion` in {header}")
     names = re.findall(r"VERSION_(\w+)", block.group(1))
     return sorted({n.lower() for n in names if n not in ("COUNT", "Count")})
 

@@ -68,22 +68,55 @@ object StarterModels {
         ),
 
         // — images —
+        //
+        // FLUX.2 Klein is what the app leads with now. It does two things SD
+        // cannot: it follows a written instruction, and it edits a picture you
+        // hand it rather than only making one from nothing. The 4B is the one
+        // a phone can hold — the 9B needs an 8B text encoder beside it and
+        // comes to about 11 GB before the image is even started.
+        //
+        // It costs more than its own size, and the reason is [FLUX_ENCODER]:
+        // FLUX.2 reads the prompt with a language model, not with CLIP.
+        StarterModel(
+            repoId = "leejet/FLUX.2-klein-4B-GGUF",
+            modality = Modality.DIFFUSION,
+            summary = "Follows instructions and edits a picture you give it. " +
+                "Four steps. Needs the Qwen3 4B encoder and the FLUX.2 VAE below.",
+            sizeHint = "~2.5 GB at Q4, ~5.4 GB with its two required parts",
+        ),
         StarterModel(
             repoId = "second-state/stable-diffusion-v1-5-GGUF",
             modality = Modality.DIFFUSION,
-            summary = "SD 1.5. The smallest thing that makes a real picture.",
+            summary = "SD 1.5. The smallest thing that makes a real picture, and " +
+                "the only one here that needs nothing beside it.",
             sizeHint = "~2.0 GB at Q4",
-        ),
-        StarterModel(
-            repoId = "city96/stable-diffusion-3.5-medium-gguf",
-            modality = Modality.DIFFUSION,
-            summary = "SD 3.5 medium. Better prompt following, wants a big phone.",
-            sizeHint = "~3.5 GB at Q4",
         ),
     )
 
+    /** The text encoder FLUX.2 Klein 4B reads its prompt with. */
+    const val FLUX_ENCODER = "unsloth/Qwen3-4B-GGUF"
+
     /** The things that attach to a diffusion model. */
     val ADDONS: List<StarterModel> = listOf(
+        // — the two FLUX.2 Klein cannot run without —
+        StarterModel(
+            repoId = FLUX_ENCODER,
+            modality = Modality.DIFFUSION,
+            role = AttachmentRole.LLM_ENCODER,
+            summary = "FLUX.2 Klein 4B reads its prompt with this. Required, and the " +
+                "reason a 4B image model costs 5 GB. Pick Q4_K_M.",
+            sizeHint = "~2.5 GB at Q4_K_M",
+        ),
+        StarterModel(
+            repoId = "Comfy-Org/flux2-klein-4B",
+            modality = Modality.DIFFUSION,
+            role = AttachmentRole.VAE,
+            summary = "FLUX.2's decoder — split_files/vae/flux2-vae.safetensors. " +
+                "Required: Klein produces latents and nothing else can read them.",
+            sizeHint = "~336 MB",
+        ),
+
+        // — the rest, which are choices rather than requirements —
         StarterModel(
             repoId = "comfyanonymous/ControlNet-v1-1_fp16_safetensors",
             modality = Modality.DIFFUSION,
@@ -95,21 +128,22 @@ object StarterModels {
             repoId = "h94/IP-Adapter",
             modality = Modality.DIFFUSION,
             role = AttachmentRole.IP_ADAPTER,
-            summary = "Style from a reference picture instead of from words.",
+            summary = "Style from a reference picture instead of from words. SD 1.5.",
             sizeHint = "~44 MB for sd15",
         ),
         StarterModel(
             repoId = "latent-consistency/lcm-lora-sdv1-5",
             modality = Modality.DIFFUSION,
             role = AttachmentRole.LORA,
-            summary = "The useful first LoRA: usable pictures in 4–8 steps instead of 28.",
+            summary = "The useful first LoRA: usable pictures in 4–8 steps instead of 28. " +
+                "SD 1.5 — Klein is already a four-step model.",
             sizeHint = "~135 MB",
         ),
         StarterModel(
             repoId = "madebyollin/taesd",
             modality = Modality.DIFFUSION,
             role = AttachmentRole.TAESD,
-            summary = "The tiny decoder behind the live preview. Cheap, and worth it.",
+            summary = "The tiny decoder behind the live preview. Cheap, and worth it. SD 1.5.",
             sizeHint = "~5 MB",
         ),
         StarterModel(

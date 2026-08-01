@@ -74,6 +74,7 @@ class DiffusionEngine(
                 ipAdapterPath = pathFor(AttachmentRole.IP_ADAPTER),
                 embeddingsPath = pathFor(AttachmentRole.EMBEDDING),
                 clipVisionPath = pathFor(AttachmentRole.CLIP_VISION),
+                llmPath = pathFor(AttachmentRole.LLM_ENCODER),
                 threads = threads,
             )
             check(newHandle != 0L) { "The runtime returned no handle for $modelPath." }

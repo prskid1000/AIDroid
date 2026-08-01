@@ -309,7 +309,7 @@ JNIEXPORT jlong JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeLoad(
         JNIEnv * env, jobject, jstring jmodel, jstring jvae, jstring jtaesd, jstring jcontrolNet,
         jstring jclipL, jstring jclipG, jstring jt5xxl, jstring jipAdapter, jstring jembeddings,
-        jstring jclipVision, jint threads) {
+        jstring jclipVision, jstring jllm, jint threads) {
     const auto model      = jni_to_string(env, jmodel);
     const auto vae        = jni_to_string(env, jvae);
     const auto taesd      = jni_to_string(env, jtaesd);
@@ -322,6 +322,10 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
     const auto embeddings = jni_to_string(env, jembeddings);
     // An IP-Adapter cannot work without this.
     const auto clipVision = jni_to_string(env, jclipVision);
+    // FLUX.2 reads its prompt with a language model rather than with CLIP and
+    // T5 — Qwen3 for Klein, Mistral Small for dev — so the text encoder is a
+    // GGUF the size of a chat model and arrives through its own path.
+    const auto llm        = jni_to_string(env, jllm);
 
     static std::once_flag once;
     std::call_once(once, [] {
@@ -349,6 +353,7 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
     params.ip_adapter_path  = ipAdapter.empty() ? nullptr : ipAdapter.c_str();
     params.embeddings_connectors_path = embeddings.empty() ? nullptr : embeddings.c_str();
     params.clip_vision_path = clipVision.empty() ? nullptr : clipVision.c_str();
+    params.llm_path         = llm.empty() ? nullptr : llm.c_str();
     params.n_threads        = threads > 0 ? threads : od_default_threads();
     params.enable_mmap      = true;
     // Flash attention stays off.

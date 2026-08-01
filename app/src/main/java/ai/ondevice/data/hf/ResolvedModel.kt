@@ -106,6 +106,8 @@ enum class CompanionRole(val cardinality: Cardinality) {
     CLIP_L(Cardinality.ONE),
     CLIP_G(Cardinality.ONE),
     T5XXL(Cardinality.ONE),
+    /** FLUX.2's prompt encoder: a whole language model, not a CLIP. */
+    LLM_ENCODER(Cardinality.ONE),
     TAESD(Cardinality.ONE),
     CONTROLNET(Cardinality.ONE),
     UPSCALER(Cardinality.ONE),
@@ -120,6 +122,7 @@ enum class CompanionRole(val cardinality: Cardinality) {
             CLIP_L -> "CLIP-L text encoder"
             CLIP_G -> "CLIP-G text encoder"
             T5XXL -> "T5-XXL text encoder"
+            LLM_ENCODER -> "Text encoder (language model)"
             TAESD -> "TAESD (live preview)"
             CONTROLNET -> "ControlNet"
             UPSCALER -> "Upscaler"
@@ -129,7 +132,8 @@ enum class CompanionRole(val cardinality: Cardinality) {
 
     /** Whether the primary model is unusable without it. */
     val required: Boolean
-        get() = this == VISION_PROJECTOR || this == VAE || this == CLIP_L || this == T5XXL || this == VOICES
+        get() = this == VISION_PROJECTOR || this == VAE || this == CLIP_L ||
+            this == T5XXL || this == LLM_ENCODER || this == VOICES
 }
 
 /** SPEC §3.2 step 5: companions are detected and auto-paired. */

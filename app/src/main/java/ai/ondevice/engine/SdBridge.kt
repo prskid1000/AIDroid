@@ -32,6 +32,8 @@ object SdBridge {
         embeddingsPath: String,
         /** Required whenever [ipAdapterPath] is set — see AttachmentRole.CLIP_VISION. */
         clipVisionPath: String,
+        /** FLUX.2's text encoder, which is a language model rather than CLIP or T5. */
+        llmPath: String,
         threads: Int,
     ): Long
 
