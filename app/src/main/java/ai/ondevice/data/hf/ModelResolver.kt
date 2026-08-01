@@ -114,7 +114,28 @@ class ModelResolver(
             }
         }
 
-        if (info.isGated) return@withContext gatedRefusal(repoId)
+        // `gated` describes the repo, not the caller.
+        //
+        // Hugging Face serves this metadata to anyone — the file list included
+        // — so a repo marked "auto" reads as gated whether or not the person
+        // asking has accepted its licence and stored a token. Refusing on the
+        // flag alone turned away exactly the people who had done both, and no
+        // amount of pasting a token could clear it because the token was never
+        // the thing being tested.
+        //
+        // Only a file request answers "may *I* read this", so that is what is
+        // asked, and only an auth failure counts: a network error means the
+        // question went unanswered, not that the answer was no.
+        if (info.isGated) {
+            val probe = info.siblings.firstOrNull()?.rfilename
+            if (probe != null) {
+                val denied = api.pathsInfo(repoId, listOf(probe), repoRef.revision)
+                    .exceptionOrNull()
+                    .let { it as? HfException }
+                    ?.isAuthFailure == true
+                if (denied) return@withContext gatedRefusal(repoId)
+            }
+        }
 
         val files = info.siblings.map { it.rfilename }
 
@@ -699,15 +720,33 @@ class ModelResolver(
 
     // — the refusals of §3.2, each with its own remedy —
 
+    /**
+     * Two different problems wore one sentence.
+     *
+     * A gated repo answers 403 for two reasons: no token, or a token whose
+     * owner has not accepted the licence. Telling somebody who has already
+     * pasted a token to paste a token sends them round the loop they are
+     * already in — the step they are missing is the licence, which is accepted
+     * on the repo page while signed in as that token's owner.
+     */
     private fun gatedRefusal(repoId: String) = Resolution.Refused(
         kind = RefusalKind.GATED,
         title = "Gated repo",
         subject = repoId,
-        detail = "Accept the licence on Hugging Face, then paste a token. The token is stored in " +
-            "the Android Keystore and used for nothing else.",
+        detail = if (api.hasToken) {
+            "A token is stored and was sent, so what is missing is the licence: open the repo " +
+                "page, accept it while signed in as the account the token belongs to, then " +
+                "resolve again."
+        } else {
+            "Accept the licence on Hugging Face, then paste a token. The token is stored in " +
+                "the Android Keystore and used for nothing else."
+        },
         remedies = listOf(
             Remedy("Open repo page", RemedyAction.OpenUrl("${HfApi.BASE}/$repoId"), primary = true),
-            Remedy("Enter token", RemedyAction.EnterToken),
+            Remedy(
+                if (api.hasToken) "Replace token" else "Enter token",
+                RemedyAction.EnterToken,
+            ),
         ),
     )
 

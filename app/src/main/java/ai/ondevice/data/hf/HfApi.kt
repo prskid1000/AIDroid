@@ -16,6 +16,9 @@ class HfApi(
     private val tokens: TokenStore,
 ) {
 
+    /** Whether a token will be attached to requests — not the token itself. */
+    val hasToken: Boolean get() = tokens.hfToken != null
+
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
