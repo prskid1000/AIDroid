@@ -40,6 +40,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ai.ondevice.core.Fmt
 import ai.ondevice.core.TranscriptFormat
 import ai.ondevice.ui.BottomDestinations
+import ai.ondevice.ui.labelFor
+import ai.ondevice.ui.pickerLabels
 import ai.ondevice.ui.components.NBottomBar
 import ai.ondevice.ui.components.NAudioPlayer
 import ai.ondevice.ui.components.NBottomSheet
@@ -775,13 +777,14 @@ private fun VoiceSettingsSheet(
         // Which *model* provides the engine, as distinct from which engine.
         val engineModels = state.ttsModels.filter { state.ttsModelProviders[it.id] == provider }
         if (provider != ai.ondevice.speech.SynthProvider.SYSTEM && engineModels.isNotEmpty()) {
+            val engineLabels = engineModels.pickerLabels()
             NDropdown(
-                options = engineModels.map { it.displayName },
-                selected = engineModels.firstOrNull { it.id == state.ttsModel?.id }?.displayName
-                    ?: engineModels.first().displayName,
-                onSelect = { name ->
-                    engineModels.firstOrNull { it.displayName == name }
-                        ?.let(viewModel::selectTtsModel)
+                options = engineLabels,
+                selected = engineModels.labelFor(state.ttsModel) ?: engineLabels.first(),
+                onSelect = { label ->
+                    engineLabels.indexOf(label)
+                        .takeIf { it >= 0 }
+                        ?.let { viewModel.selectTtsModel(engineModels[it]) }
                 },
                 modifier = Modifier.padding(top = 8.dp),
             )
@@ -959,13 +962,17 @@ private fun TranscribeSettings(
         )
         return
     }
-    val labels = state.sttModels.map { it.quant ?: it.displayName }
+    // Was `quant ?: displayName`, which collides the moment two whisper builds
+    // share a quant — and the match ran on that same string, so the wrong one
+    // was selected rather than merely mislabelled.
+    val labels = state.sttModels.pickerLabels()
     NDropdown(
         options = labels,
-        selected = state.sttModel?.let { it.quant ?: it.displayName },
+        selected = state.sttModels.labelFor(state.sttModel),
         onSelect = { label ->
-            state.sttModels.firstOrNull { (it.quant ?: it.displayName) == label }
-                ?.let(viewModel::selectSttModel)
+            labels.indexOf(label)
+                .takeIf { it >= 0 }
+                ?.let { viewModel.selectSttModel(state.sttModels[it]) }
         },
     )
     NHelp(

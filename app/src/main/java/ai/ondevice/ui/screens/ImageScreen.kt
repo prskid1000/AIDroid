@@ -42,6 +42,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import ai.ondevice.core.Fmt
 import ai.ondevice.ui.BottomDestinations
+import ai.ondevice.ui.labelFor
+import ai.ondevice.ui.pickerLabels
 import ai.ondevice.ui.components.NBottomBar
 import ai.ondevice.ui.components.NBottomSheet
 import ai.ondevice.ui.components.NButton
@@ -427,12 +429,17 @@ private fun ImageSettingsSheet(
         // Which model runs is the user's choice.
         if (state.availableModels.isNotEmpty()) {
             SectionKicker("Model", Modifier.padding(bottom = 8.dp))
+            // Labels have to be unique here, not merely readable: the dropdown
+            // hands back the label, so two models sharing a display name meant
+            // choosing the second selected the first.
+            val modelLabels = state.availableModels.pickerLabels()
             NDropdown(
-                options = state.availableModels.map { it.displayName },
-                selected = state.model?.displayName,
-                onSelect = { name ->
-                    state.availableModels.firstOrNull { it.displayName == name }
-                        ?.let(viewModel::selectModel)
+                options = modelLabels,
+                selected = state.availableModels.labelFor(state.model),
+                onSelect = { label ->
+                    modelLabels.indexOf(label)
+                        .takeIf { it >= 0 }
+                        ?.let { viewModel.selectModel(state.availableModels[it]) }
                 },
                 placeholder = "Choose a model…",
                 modifier = Modifier.padding(bottom = 14.dp),

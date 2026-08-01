@@ -86,6 +86,9 @@ fun DownloadQueueScreen(
                 complete.forEach { job ->
                     NCard(Modifier.padding(bottom = 7.dp), gap = 6.dp) {
                         Text(job.displayName, style = NocturneType.CardTitle)
+                        jobSubtitle(job)?.let {
+                            Text(it, style = NocturneType.MonoXs, color = NocturneColors.TextMuted)
+                        }
                         NCardMeta { NMetaText("${Fmt.bytes(job.bytesTotal)} · sha256 verified") }
                     }
                 }
@@ -130,6 +133,9 @@ private fun ActiveJobCard(job: DownloadJob, viewModel: DownloadsViewModel) {
         ) {
             Column(Modifier.weight(1f)) {
                 Text(job.displayName, style = NocturneType.CardTitle)
+                jobSubtitle(job)?.let {
+                    Text(it, style = NocturneType.MonoXs, color = NocturneColors.TextMuted)
+                }
                 Text(
                     if (job.state == DownloadState.PAUSED) {
                         "paused — ${Fmt.percent(job.fraction)} done"
@@ -296,3 +302,19 @@ private fun FailedJobCard(job: DownloadJob, viewModel: DownloadsViewModel) {
         }
     }
 }
+
+/**
+ * What a queued job is, when its name is not enough.
+ *
+ * `displayName` is the repo, and one repo can be queued several times over: the
+ * SD 3.5 encoder repo yields CLIP-L, CLIP-G and a T5, each its own job, each
+ * showing the same title. The file being fetched is the thing that differs.
+ */
+private fun jobSubtitle(job: ai.ondevice.data.download.DownloadJob): String? =
+    job.files
+        .map { it.filename.substringAfterLast('/') }
+        .distinct()
+        .takeIf { it.isNotEmpty() }
+        ?.let { names ->
+            if (names.size == 1) names.first() else "${names.first()} +${names.size - 1} more"
+        }

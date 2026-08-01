@@ -94,19 +94,26 @@ class ParamsViewModel @Inject constructor(
     }
 
     /** Every installed file a `path` parameter could legitimately name. */
-    private suspend fun installedFiles(): List<ai.ondevice.params.PathChoice> =
-        db.models().getInstalled().mapNotNull { model ->
+    private suspend fun installedFiles(): List<ai.ondevice.params.PathChoice> {
+        val installed = db.models().getInstalled().filter { java.io.File(it.localPath).isFile }
+        // The filename was the label, and the diffusers layout gives every
+        // component the same one — `vae/diffusion_pytorch_model.safetensors`
+        // and `controlnet/diffusion_pytorch_model.safetensors` read as one row
+        // twice. Each label is the shortest tail of its path that no other
+        // installed file shares, so a folder appears only when it has to.
+        val fileLabels = ai.ondevice.core.FileLabels.distinguish(installed.map { it.localPath })
+        return installed.map { model ->
             val file = java.io.File(model.localPath)
-            if (!file.isFile) return@mapNotNull null
             val role = model.attachmentRole
             ai.ondevice.params.PathChoice(
-                label = if (role != null) file.name else model.displayName,
-                detail = "${model.displayName} · ${file.name} · " +
+                label = if (role != null) fileLabels.getValue(model.localPath) else model.displayName,
+                detail = "${model.displayName} · ${fileLabels.getValue(model.localPath)} · " +
                     ai.ondevice.core.Fmt.bytes(file.length()),
                 path = model.localPath,
                 role = role,
             )
         }
+    }
 
     private fun modalityOf(runtimeId: String) = when (runtimeId) {
         RuntimeRegistry.STABLE_DIFFUSION -> Modality.DIFFUSION
