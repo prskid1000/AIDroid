@@ -438,6 +438,9 @@ class ImageViewModel @Inject constructor(
         val offered = applicableKeys(model)
         _state.value = _state.value.copy(
             availableAttachments = available,
+            // Everything the library holds, chosen or not, so a warning can
+            // tell "you have no CLIP-G" from "you have one and have not picked it".
+            installedRoles = installed.mapNotNull { it.attachmentRole }.toSet(),
             // Installed, fits this model, and nobody has said which one — the
             // difference between "you have nothing" and "you have not picked".
             unchosenRoles = installed
@@ -824,6 +827,8 @@ data class ImageState(
     val availableModels: List<ModelEntity> = emptyList(),
     /** Roles with a file installed that fits, and no file chosen. */
     val unchosenRoles: List<ai.ondevice.core.AttachmentRole> = emptyList(),
+    /** Every role the library can fill, whichever model it belongs to. */
+    val installedRoles: Set<ai.ondevice.core.AttachmentRole> = emptySet(),
     /** Diffusion downloads still running, so "none" can be told from "not yet". */
     val installing: List<ai.ondevice.data.db.InstallingModel> = emptyList(),
     /** What stable-diffusion.cpp said this checkpoint is, once it has read it. */
@@ -855,7 +860,11 @@ data class ImageState(
 
     /** Combinations that will not work, said before Generate rather than after. */
     val missingComponents: List<ai.ondevice.core.MissingComponent>
-        get() = ai.ondevice.core.ComponentCheck.forDiffusion(availableAttachments, model?.architecture)
+        get() = ai.ondevice.core.ComponentCheck.forDiffusion(
+            availableAttachments,
+            recognisedAs ?: model?.architecture,
+            installedRoles,
+        )
     val progress: Float
         get() = if (progressSteps > 0) (step.toFloat() / progressSteps).coerceIn(0f, 1f) else 0f
     /** The denoise dial appears when, and only when, there is a source. */

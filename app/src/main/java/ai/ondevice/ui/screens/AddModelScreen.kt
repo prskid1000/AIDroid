@@ -360,7 +360,7 @@ fun AddModelScreen(
 
                         // Skipping is allowed and is not free. Say which of the
                         // two it is rather than disabling the control.
-                        if (picked.isEmpty() && group.role.required) {
+                        if (picked.isEmpty() && group.role.requiredBy(resolved.architecture)) {
                             NHelp(
                                 "Nothing taken. The model needs a ${group.role.label.lowercase()} " +
                                     "from somewhere before it runs — install one separately and " +

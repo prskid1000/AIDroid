@@ -256,15 +256,20 @@ class ModelResolver(
             )
         }
 
+        // Step 3 continued — the architecture must be one the bundled runtime
+        // knows. Worked out before the companions, because which of them the
+        // model cannot run without is a property of its family: SDXL reads its
+        // prompt through two CLIPs, FLUX.1 through CLIP-L and T5, FLUX.2
+        // through a language model, and none of that is knowable from a role.
+        val arch = info.gguf?.architecture ?: inferArchitectureFromTags(info)
+
         val companions = detectCompanions(
             files = files,
             sizes = sizeLookup,
             variantFiles = quants.flatMap { variant -> variant.files.map { it.filename } }.toSet(),
+            architecture = arch,
         )
         val modality = classifyModality(info, format, files, companions)
-
-        // Step 3 continued — the architecture must be one the bundled runtime knows.
-        val arch = info.gguf?.architecture ?: inferArchitectureFromTags(info)
         if (format == ModelFormat.GGUF && arch != null && !registry.supportsArchitecture(arch)) {
             return@withContext unsupportedArchRefusal(repoId, arch)
         }
@@ -369,6 +374,7 @@ class ModelResolver(
         files: List<String>,
         sizes: Map<String, HfPathInfo>,
         variantFiles: Set<String> = emptySet(),
+        architecture: String? = null,
     ): List<CompanionGroup> = CompanionGrouping.group(
         files.mapNotNull { name ->
             if (name in variantFiles) return@mapNotNull null
@@ -385,6 +391,7 @@ class ModelResolver(
                 role = role,
             )
         }.distinctBy { it.role to it.file.filename },
+        architecture = architecture,
     )
 
     /** Correct the filename's verdict against the file's own tensor names. */

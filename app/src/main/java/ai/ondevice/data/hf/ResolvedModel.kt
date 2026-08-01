@@ -130,22 +130,62 @@ enum class CompanionRole(val cardinality: Cardinality) {
             VAD -> "Silero VAD"
         }
 
+    /** The manifest key this role's file is passed under, where it has one. */
+    private val paramKey: String?
+        get() = when (this) {
+            CLIP_L -> "clip_l"
+            CLIP_G -> "clip_g"
+            T5XXL -> "t5xxl"
+            LLM_ENCODER -> "llm"
+            else -> null
+        }
+
     /**
-     * Whether the primary model is unusable without it.
+     * Whether the model is unusable without this, for the architecture it is.
      *
-     * Per role, not per architecture, which makes this advice rather than a
-     * rule — a T5-XXL is indispensable to SD 3.5 and meaningless to SDXL, and
-     * this cannot tell them apart. It reads as a warning and blocks nothing:
-     * the file that fills a role can come from anywhere in the library, so
-     * skipping the copy in one repo is a legitimate choice.
+     * Which text encoders a diffusion model needs is a property of its family,
+     * not of the role, and the two answers are very different:
      *
-     * CLIP-G is here because SDXL conditions on *both* encoders — ViT-L and
-     * ViT-bigG — and a prompt read through only one of them is half a prompt.
-     * It was missing, which is why an SDXL card asked for CLIP-L alone.
+     * | family    | reads its prompt through        | decoder      |
+     * |-----------|---------------------------------|--------------|
+     * | SD 1.x/2.x| CLIP-L                          | in the file  |
+     * | SDXL      | CLIP-L **and** CLIP-G           | in the file  |
+     * | SD 3.x    | CLIP-L, CLIP-G (T5-XXL if kept) | separate     |
+     * | FLUX.1    | CLIP-L and T5-XXL               | separate     |
+     * | FLUX.2    | a language model — Qwen3, Mistral| separate     |
+     * | Chroma    | T5-XXL alone, CLIP-L dropped    | separate     |
+     * | Qwen-Image| a Qwen2.5-VL                    | separate     |
+     *
+     * Asked per role alone this could only ever be wrong for somebody: a T5-XXL
+     * is indispensable to FLUX.1 and dead weight on SDXL, and SDXL was being
+     * told CLIP-L was enough when it conditions on two encoders.
+     *
+     * It is advice, not a gate. Every companion can be skipped, because the
+     * file filling a role may already be in the library; what this decides is
+     * whether skipping earns a warning.
      */
-    val required: Boolean
+    fun requiredBy(architecture: String?): Boolean {
+        val family = ai.ondevice.core.DiffusionDefaults.forName(architecture)
+        // Nothing to do with diffusion — these stand on their own.
+        if (this == VISION_PROJECTOR || this == VOICES) return true
+        if (family == null) return legacyRequired
+        return when (this) {
+            VAE -> family.vaeSeparate
+            else -> paramKey?.let { it in family.encoders } ?: false
+        }
+    }
+
+    /**
+     * What to say when the architecture is not known yet — a GGUF with no
+     * `general.architecture` and no tag to infer from, which is most bare
+     * diffusion releases until stable-diffusion.cpp has opened the file.
+     */
+    private val legacyRequired: Boolean
         get() = this == VISION_PROJECTOR || this == VAE || this == CLIP_L || this == CLIP_G ||
             this == T5XXL || this == LLM_ENCODER || this == VOICES
+
+    @Deprecated("Ask requiredBy(architecture) — what a model needs depends on which model it is.")
+    val required: Boolean get() = legacyRequired
 }
 
 /** SPEC §3.2 step 5: companions are detected and auto-paired. */

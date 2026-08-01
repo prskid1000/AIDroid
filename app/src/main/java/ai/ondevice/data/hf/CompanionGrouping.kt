@@ -32,7 +32,10 @@ object CompanionGrouping {
     }
 
     /** Group [companions] by role and decide what to download. */
-    fun group(companions: List<CompanionFile>): List<CompanionGroup> =
+    fun group(
+        companions: List<CompanionFile>,
+        architecture: String? = null,
+    ): List<CompanionGroup> =
         companions.groupBy { it.role }.map { (role, candidates) ->
             val identities = candidates.groupBy { identity(it.file.filename) }
             val kind = when {
@@ -43,7 +46,7 @@ object CompanionGrouping {
             CompanionGroup(
                 role = role,
                 candidates = candidates,
-                selected = defaultSelection(role, candidates, kind),
+                selected = defaultSelection(role, candidates, kind, architecture),
                 kind = kind,
             )
         }.sortedBy { it.role.ordinal }
@@ -52,6 +55,7 @@ object CompanionGrouping {
         role: CompanionRole,
         candidates: List<CompanionFile>,
         kind: CompanionGroup.Kind,
+        architecture: String?,
     ): Set<String> = when (kind) {
         CompanionGroup.Kind.PARTS -> candidates.map { it.file.filename }.toSet()
 
@@ -59,7 +63,11 @@ object CompanionGrouping {
 
         // Which ControlNet, or which upscale factor, is a question about the picture someone wants rather than about this device.
         CompanionGroup.Kind.CHOICES ->
-            if (role.required) setOfNotNull(preferred(candidates)?.file?.filename) else emptySet()
+            if (role.requiredBy(architecture)) {
+                setOfNotNull(preferred(candidates)?.file?.filename)
+            } else {
+                emptySet()
+            }
     }
 
     /** The one to take when they are interchangeable. */

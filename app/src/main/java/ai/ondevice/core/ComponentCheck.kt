@@ -48,9 +48,39 @@ object ComponentCheck {
     fun forDiffusion(
         available: List<ModelAttachment>,
         architecture: String? = null,
+        installedRoles: Set<AttachmentRole> = emptySet(),
     ): List<MissingComponent> {
         val enabled = available.filter { it.enabled }.map { it.role }.toSet()
-        val installed = available.map { it.role }.toSet()
+        val installed = available.map { it.role }.toSet() + installedRoles
+
+        // What this family reads its prompt with, and whether its decoder is a
+        // separate file. Asked of the architecture, because the answer differs
+        // per family and not per role: SDXL takes CLIP-L and CLIP-G, FLUX.1
+        // CLIP-L and T5-XXL, FLUX.2 a language model, Chroma T5 alone.
+        val family = DiffusionDefaults.forName(architecture)
+        val needed = buildList {
+            family?.encoders?.forEach { key ->
+                AttachmentRole.entries.firstOrNull { it.paramKey == key }?.let(::add)
+            }
+            if (family?.vaeSeparate == true) add(AttachmentRole.VAE)
+        }
+        val unfilled = needed.filter { it !in enabled }.map { role ->
+            MissingComponent(
+                what = "No ${role.label} for ${architecture ?: "this model"}",
+                because = if (role == AttachmentRole.VAE) {
+                    "a quantised release is the denoiser alone, so the decoder that turns the " +
+                        "latent into pixels has to come from a separate file"
+                } else {
+                    "this architecture reads its prompt through it, and without one there is " +
+                        "nothing to turn the words into conditioning"
+                },
+                state = when {
+                    role in installed && role !in enabled ->
+                        MissingComponent.State.INSTALLED_NOT_ATTACHED
+                    else -> MissingComponent.State.NOT_INSTALLED
+                },
+            )
+        }
 
         val mismatched = if (architecture.isNullOrBlank() ||
             architecture.lowercase() in UNET_ARCHITECTURES
@@ -67,7 +97,7 @@ object ComponentCheck {
             }
         }
 
-        return mismatched + enabled.mapNotNull { role ->
+        return unfilled + mismatched + enabled.mapNotNull { role ->
             val requirement = role.requires ?: return@mapNotNull null
             val needed = role.required ?: return@mapNotNull null
             if (needed in enabled) return@mapNotNull null
