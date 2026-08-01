@@ -265,7 +265,14 @@ fun NBottomSheet(
 ) {
     androidx.compose.ui.window.Dialog(
         onDismissRequest = onDismiss,
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false,
+            // Without this the dialog's window consumes the system-bar insets
+            // before anything inside can read them, so the sheet's own
+            // navigation-bar padding measured zero and its last control sat
+            // under the gesture strip with nowhere left to scroll.
+            decorFitsSystemWindows = false,
+        ),
     ) {
         Box(
             Modifier
@@ -303,11 +310,18 @@ fun NBottomSheet(
                         .weight(1f)
                         .verticalScroll(androidx.compose.foundation.rememberScrollState())
                         .padding(start = 18.dp, end = 18.dp)
-                        // The navigation bar sits over the sheet, not beside it.
+                        // The navigation bar sits over the sheet, not beside
+                        // it, and the gesture strip over that. Enough room that
+                        // the last control in a sheet is a control rather than
+                        // something you can see but not reach.
                         .padding(
-                            bottom = 20.dp +
+                            bottom = 24.dp +
                                 WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
-                        ),
+                        )
+                        // Belt as well as braces: a device that reports no
+                        // navigation-bar inset at all still leaves a thumb's
+                        // width under the last row, clear of the gesture strip.
+                        .padding(bottom = 40.dp),
                     content = content,
                 )
             }

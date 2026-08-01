@@ -436,7 +436,7 @@ private fun ImageSettingsSheet(
         AttachmentsSection(state, viewModel)
 
         NButton(
-            "Advanced · schedule, clip_skip, SLG",
+            "All Parameters",
             onClick = onOpenAdvanced,
             style = NButtonStyle.Secondary,
             block = true,

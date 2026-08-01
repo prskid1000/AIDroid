@@ -595,13 +595,31 @@ Java_ai_ondevice_engine_LlamaBridge_nativeLoad(JNIEnv * env, jobject, jstring jp
         return 0;
     }
 
+    // A quantized KV cache without flash attention is a trap, not a trade.
+    // ggml's ordinary attention path has no quantized kernels, so it
+    // dequantizes K and V on every op of every layer of every token: the phone
+    // pegs every core and produces nothing. Upstream pairs the two for this
+    // reason. Asking for one here turns the other on rather than leaving the
+    // user with a setting that only looks like it saved memory.
+    const bool quantized_kv =
+        (engine->params.cache_type_k != GGML_TYPE_F16 && engine->params.cache_type_k != GGML_TYPE_F32) ||
+        (engine->params.cache_type_v != GGML_TYPE_F16 && engine->params.cache_type_v != GGML_TYPE_F32);
+    if (quantized_kv && engine->params.flash_attn_type != LLAMA_FLASH_ATTN_TYPE_ENABLED) {
+        LOGI("quantized KV cache requested; enabling flash attention, which it requires");
+        engine->params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+    }
+
     llama_context_params cparams = common_context_params_to_llama(engine->params);
     engine->ctx = llama_init_from_model(engine->model, cparams);
     if (engine->ctx == nullptr) {
+        const auto n_ctx = std::to_string(engine->params.n_ctx);
         delete engine;
-        jni_throw(env, "Model loaded but the context could not be created at n_ctx=" +
-                       std::to_string(engine->params.n_ctx) +
-                       " — there was not enough memory for the KV cache.");
+        jni_throw(env, quantized_kv
+            ? "Model loaded but the context could not be created at n_ctx=" + n_ctx +
+              " with a quantized KV cache. Not every model's attention can be flash-attended, "
+              "and a quantized cache needs it. Set cache_type_k and cache_type_v back to f16."
+            : "Model loaded but the context could not be created at n_ctx=" + n_ctx +
+              " — there was not enough memory for the KV cache.");
         return 0;
     }
 

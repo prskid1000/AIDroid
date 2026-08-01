@@ -688,6 +688,12 @@ class ChatViewModel @Inject constructor(
 
     /** Cancellation unwinds the engine Flow, whose teardown frees native memory. */
     fun stop() {
+        // The native side first, and from this thread. Cancelling the job only
+        // stops the coroutine at its next suspension point, and there is no
+        // suspension point inside a JNI call — so a Stop pressed while a long
+        // prompt or an image is going in would otherwise sit unnoticed until
+        // the work it was meant to stop had finished.
+        (engines.llama as? ai.ondevice.engine.LlamaEngine)?.cancel()
         generationJob?.cancel()
         generationJob = null
     }

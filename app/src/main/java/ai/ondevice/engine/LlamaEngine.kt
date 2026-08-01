@@ -328,6 +328,20 @@ class LlamaEngine(
         if (handle == 0L) 0 else LlamaBridge.nativeTokenCount(handle, text)
     }
 
+    /**
+     * Stop whatever is running, now.
+     *
+     * Cancelling the coroutine is not enough and cannot be: a JNI call is not
+     * interruptible, so while the producer sits inside `nativeStartGeneration`
+     * — which is where an image encode and a long prompt both live — the flow
+     * never unwinds, `onCompletion` never runs, and the native side is never
+     * told. This sets the flag from whichever thread pressed the button. It
+     * takes no lock, so it cannot wait behind the work it is stopping.
+     */
+    fun cancel() {
+        if (handle != 0L) LlamaBridge.nativeCancel(handle)
+    }
+
     /** Drop the KV without unloading — §8.3's first response to memory pressure. */
     fun clearCache() {
         if (handle != 0L) LlamaBridge.nativeClearCache(handle)

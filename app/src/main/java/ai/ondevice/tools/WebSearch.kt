@@ -39,8 +39,15 @@ class WebSearch(client: OkHttpClient) {
      *   snippets only, which is fast and usually enough.
      */
     suspend fun search(query: String, maxResults: Int = 5, fetchPages: Int = 0): List<Result> {
-        val html = withContext(Dispatchers.IO) { get(SEARCH_URL + encode(query)) }
-            ?: throw IllegalStateException("the search could not be reached")
+        val html = withContext(Dispatchers.IO) { get(SEARCH_URL + encode(query) + "&source=web") }
+            ?: throw IllegalStateException(rateLimited.getAndSet(false).let { limited ->
+                if (limited) {
+                    "the search is rate limited for this network. Opening " +
+                        "https://search.brave.com in a browser once usually clears it"
+                } else {
+                    "the search could not be reached"
+                }
+            })
 
         val results = parse(html, maxResults)
         if (results.isEmpty() || fetchPages <= 0) return results
@@ -83,6 +90,13 @@ class WebSearch(client: OkHttpClient) {
         }
     }
 
+    /**
+     * Set when the last search came back 429. Brave rate-limits by IP and it is
+     * worth saying so, because the remedy is unusual and it works: opening the
+     * same search in a browser clears it for that address.
+     */
+    private val rateLimited = java.util.concurrent.atomic.AtomicBoolean(false)
+
     private fun get(url: String): String? {
         val request = Request.Builder()
             .url(url)
@@ -95,6 +109,7 @@ class WebSearch(client: OkHttpClient) {
 
         return runCatching {
             http.newCall(request).execute().use { response ->
+                if (response.code == HTTP_TOO_MANY_REQUESTS) rateLimited.set(true)
                 if (!response.isSuccessful) return@use null
                 val type = response.header("content-type").orEmpty().lowercase()
                 if (!type.contains("html") && !type.contains("xml") && type.isNotEmpty()) return@use null
@@ -189,6 +204,7 @@ class WebSearch(client: OkHttpClient) {
         const val MIN_LINE_CHARS = 25
         const val MAX_PAGE_CHARS = 3000
         const val MAX_PAGE_BYTES = 1_500_000L
+        const val HTTP_TOO_MANY_REQUESTS = 429
 
         val COMMENTS = Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL)
         val BOILERPLATE = Regex(

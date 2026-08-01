@@ -894,11 +894,7 @@ private fun VoiceSettingsSheet(
 
         // Each engine's own parameter set.
         NButton(
-            when (provider) {
-                ai.ondevice.speech.SynthProvider.OMNIVOICE -> "Advanced · voice design, language, steps"
-                ai.ondevice.speech.SynthProvider.KOKORO -> "Advanced · language, chunking, trim, gain"
-                else -> "Advanced · system engine"
-            },
+            "All Parameters",
             onClick = {
                 onOpenAdvanced(
                     when (provider) {

@@ -302,18 +302,15 @@ fun ChatSettingsSheet(
                         onReset = { onLiveParam("temp", null) },
                     )
 
+                    // One button, because there was only ever one screen: the
+                    // other opened it at a different tier, which is the first
+                    // control on it.
                     NButton(
-                        "Advanced parameters",
-                        onClick = { onOpenParametersAtTier(Tier.ADVANCED) },
-                        style = NButtonStyle.Secondary,
-                        block = true,
-                        modifier = Modifier.padding(top = 14.dp),
-                    )
-                    NButton(
-                        "All parameters →",
+                        "All Parameters",
                         onClick = { onOpenParametersAtTier(Tier.EXPERT) },
                         style = NButtonStyle.Primary,
                         block = true,
+                        modifier = Modifier.padding(top = 14.dp),
                     )
     }
 }
