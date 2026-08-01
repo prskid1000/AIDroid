@@ -169,6 +169,7 @@ fun OnDeviceApp(
             AddModelScreen(
                 onBack = { navController.popBackStack() },
                 onShowRefusals = { navController.navigate(Routes.RESOLVE_RESULTS) },
+                onEnterToken = { navController.navigate(Routes.SETTINGS) },
                 onDownloadStarted = {
                     navController.navigate(Routes.DOWNLOADS) {
                         popUpTo(Routes.ADD_MODEL) { inclusive = true }

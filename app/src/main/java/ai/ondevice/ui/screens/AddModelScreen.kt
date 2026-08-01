@@ -14,9 +14,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -24,6 +26,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ai.ondevice.core.AttachmentRole
 import ai.ondevice.core.Fmt
 import ai.ondevice.core.Modality
+import ai.ondevice.data.hf.RemedyAction
 import ai.ondevice.core.VerdictTone
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
@@ -54,9 +57,39 @@ fun AddModelScreen(
     onBack: () -> Unit,
     onShowRefusals: () -> Unit,
     onDownloadStarted: () -> Unit,
+    onEnterToken: () -> Unit,
     viewModel: AddModelViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    // Remedies used to be recorded and dropped: applyRemedy parked the action
+    // in `pendingAction` and nothing anywhere read it, so "Open repo page" and
+    // "Enter token" were two buttons that did nothing. A gated repo is exactly
+    // the case where they matter — the licence is accepted on the page, and the
+    // token is pasted on Settings — so a refusal offered the two steps out and
+    // performed neither.
+    LaunchedEffect(state.pendingAction) {
+        when (val action = state.pendingAction) {
+            is RemedyAction.OpenUrl -> {
+                runCatching {
+                    context.startActivity(
+                        android.content.Intent(
+                            android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse(action.url),
+                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }
+                viewModel.clearPendingAction()
+            }
+            RemedyAction.EnterToken -> {
+                onEnterToken()
+                viewModel.clearPendingAction()
+            }
+            null -> Unit
+            else -> viewModel.clearPendingAction()
+        }
+    }
 
     PhoneScaffold(
         toolbar = { PushToolbar("Add model", onBack) },

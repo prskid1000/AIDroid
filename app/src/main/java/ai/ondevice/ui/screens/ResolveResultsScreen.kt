@@ -66,6 +66,16 @@ fun ResolveResultsScreen(onBack: () -> Unit) {
     }
 }
 
+/** What each remedy does, said in a glyph as well as in words. */
+private fun remedyIcon(action: RemedyAction) = when (action) {
+    // Leaves the app for a browser.
+    is RemedyAction.OpenUrl, is RemedyAction.OpenMirror -> NIcons.Share
+    // Goes to the one screen that holds a token.
+    RemedyAction.EnterToken -> NIcons.Settings
+    is RemedyAction.SearchRepo -> NIcons.Models
+    else -> null
+}
+
 /** One refusal, rendered the same way wherever it appears — on S1 under the paste field, or gathered here. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -115,6 +125,7 @@ fun RefusalCard(
                 remedy.label,
                 onClick = { onRemedy(remedy.action) },
                 style = NButtonStyle.Primary,
+                leadingIcon = remedyIcon(remedy.action),
                 block = true,
                 minHeight = 40.dp,
             )
@@ -130,6 +141,7 @@ fun RefusalCard(
                         remedy.label,
                         onClick = { onRemedy(remedy.action) },
                         style = NButtonStyle.Secondary,
+                        leadingIcon = remedyIcon(remedy.action),
                         modifier = Modifier.weight(1f, fill = false),
                     )
                 }
