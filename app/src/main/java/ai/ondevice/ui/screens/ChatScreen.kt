@@ -81,19 +81,20 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     var sheetOpen by rememberSaveable { mutableStateOf(false) }
 
-    // One picker for all three kinds.
+    // One picker for all three kinds, and it takes several at once: a question
+    // about two photographs is one message, not two.
     val context = LocalContext.current
     val attachLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument(),
-    ) { uri ->
-        uri?.let {
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris ->
+        uris.forEach { uri ->
             runCatching {
                 context.contentResolver.takePersistableUriPermission(
-                    it,
+                    uri,
                     android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
                 )
             }
-            viewModel.attach(it)
+            viewModel.attach(uri)
         }
     }
     // What this model can actually receive, not everything the composer knows how to file.

@@ -55,8 +55,12 @@ class LlamaEngine(
             if (handle != 0L) freeHandle()
 
             // The projector is a load-time argument, not a parameter the user
-            // sets: mtmd builds its graph against these weights.
-            val loadParams = request.companionPaths[VISION_PROJECTOR]
+            // sets: mtmd builds its graph against these weights. The key is
+            // matched without regard to case because it is written lower-cased
+            // at download and named in upper case by the enum it comes from.
+            val loadParams = request.companionPaths.entries
+                .firstOrNull { it.key.equals(VISION_PROJECTOR, ignoreCase = true) }
+                ?.value
                 ?.takeIf { it.isNotBlank() }
                 ?.let { request.params.overlaidWith(SparseParams.of("mmproj" to it)) }
                 ?: request.params
@@ -386,9 +390,14 @@ class LlamaEngine(
      * loaded.
      */
     private fun withMarkers(message: EngineMessage): String {
-        val marker = loaded?.mediaMarker.orEmpty()
-        if (marker.isEmpty() || message.imagePaths.isEmpty()) return message.content
-        return message.imagePaths.joinToString("") { "$marker\n" } + message.content
+        val model = loaded ?: return message.content
+        // Both halves read the same flag on purpose. A marker inserted without
+        // a projector to consume it is not a no-op — it reaches the model as
+        // the literal text `<__media__>`, which is exactly what it looks like.
+        if (!model.vision || model.mediaMarker.isEmpty() || message.imagePaths.isEmpty()) {
+            return message.content
+        }
+        return message.imagePaths.joinToString("") { "${model.mediaMarker}\n" } + message.content
     }
 
     /** Every image in the conversation, in the order its markers appear. */
