@@ -186,6 +186,13 @@ add_subdirectory("${VENDOR_DIR}/stable-diffusion.cpp" "${CMAKE_CURRENT_BINARY_DI
 # because it is what SD 1.x, SD 2 and SDXL use, and T5 because SD 3 pairs it
 # with CLIP and is the one such model that is nearly mobile-sized.
 #
+# Qwen 2 was dropped under that reasoning and has been put back, because the
+# reasoning stopped being true rather than because it was wrong. FLUX.2 Klein
+# is 1.4 GB at Q4 and reads its prompt with a Qwen3, which tokenises as Qwen 2
+# does; it loaded, allocated four gigabytes, and then had no way to turn the
+# prompt into tokens. Its header is 8 MB against the 232 MB of all twelve, so
+# the saving that motivated the cut is almost entirely intact.
+#
 # Done by swapping one file out of the target rather than by patching the
 # checkout: native/ is fetched by tools/fetch-native.sh and gitignored, so an
 # edit in there would vanish on the next fetch.

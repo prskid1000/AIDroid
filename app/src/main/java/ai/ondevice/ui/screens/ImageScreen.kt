@@ -201,23 +201,26 @@ fun ImageScreen(
             )
 
             // ControlNet's reference is a different input, not a second source:
-            // it contributes structure, never pixels.
-            SourceImageField(
-                label = "Control image · optional",
-                uri = state.controlImageUri,
-                emptyLabel = "Add a pose, depth or edge map to steer composition",
-                onPick = pickControl,
-                onClear = { viewModel.setControlImage(null) },
-            )
-            if (state.controlImageUri != null) {
-                LabeledSlider(
-                    label = "Control strength",
-                    value = state.controlStrength,
-                    display = String.format("%.2f", state.controlStrength),
-                    range = 0f..1f,
-                    onChange = viewModel::setControlStrength,
-                    modifier = Modifier.padding(top = 8.dp),
+            // it contributes structure, never pixels. It appears with a
+            // ControlNet armed and not otherwise, because nothing else reads it.
+            if (state.usesControlImage) {
+                SourceImageField(
+                    label = "Control image · ControlNet",
+                    uri = state.controlImageUri,
+                    emptyLabel = "Add a pose, depth or edge map to steer composition",
+                    onPick = pickControl,
+                    onClear = { viewModel.setControlImage(null) },
                 )
+                if (state.controlImageUri != null) {
+                    LabeledSlider(
+                        label = "Control strength",
+                        value = state.controlStrength,
+                        display = String.format("%.2f", state.controlStrength),
+                        range = 0f..1f,
+                        onChange = viewModel::setControlStrength,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
             }
 
             // A third picture, and a third thing: the IP-Adapter reads style
@@ -418,11 +421,18 @@ private fun ImageSettingsSheet(
         ) {
             Column(Modifier.weight(1f)) {
                 NHelp("Size", Modifier.padding(bottom = 4.dp))
-                val sizes = listOf(512, 768, 1024)
-                NSeg(
-                    options = sizes.map { it.toString() },
-                    selectedIndex = sizes.indexOf(state.width).coerceAtLeast(0),
-                    onSelect = { viewModel.setSize(sizes[it]) },
+                // Every multiple-of-64 square worth having, in a dropdown
+                // rather than a segmented control: eight choices do not fit
+                // across a phone, and the ends of the range are the ones worth
+                // reaching — 64 to see what a prompt does in seconds, 4096 when
+                // there is time to spend.
+                val sizes = listOf(64, 128, 256, 512, 768, 1024, 2048, 4096)
+                NDropdown(
+                    options = sizes.map { "$it × $it" },
+                    selected = "${state.width} × ${state.width}",
+                    onSelect = { label ->
+                        label.substringBefore(' ').trim().toIntOrNull()?.let(viewModel::setSize)
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }

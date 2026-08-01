@@ -73,6 +73,8 @@ struct od_sd {
     std::atomic<int>   expected_steps{0};
     std::atomic<int>   phase{0};
     std::atomic<bool>  sampling_started{false};
+    /** Set by Cancel, read by the graph callback before every ggml node. */
+    std::atomic<bool>  cancelled{false};
 
     std::mutex           preview_mutex;
     std::vector<uint8_t> preview_rgb;
@@ -92,6 +94,29 @@ std::atomic<od_sd *> g_current{nullptr};
 // The last error sd.cpp logged.
 std::mutex  g_last_error_mutex;
 std::string g_last_error;
+
+// The architecture upstream decided this file is, caught from its own log.
+//
+// sd.cpp works the version out by matching tensor names and announces it —
+// "Version: FLUX.2 Klein" — but keeps it on a private struct with no getter.
+// Reading the line it already prints beats the app guessing from a filename,
+// and it is the loader's own answer rather than a second opinion.
+std::mutex  g_version_mutex;
+std::string g_version;
+
+void note_version(const char * text) {
+    if (text == nullptr) return;
+    const std::string line(text);
+    const auto at = line.find("Version: ");
+    if (at == std::string::npos) return;
+    auto value = line.substr(at + 9);
+    while (!value.empty() && (value.back() == 0x0a || value.back() == 0x0d || value.back() == ' ')) {
+        value.pop_back();
+    }
+    if (value.empty()) return;
+    std::lock_guard<std::mutex> lock(g_version_mutex);
+    g_version = value;
+}
 
 void set_last_error(const char * text) {
     if (text == nullptr) return;
@@ -337,10 +362,35 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
             if (level >= SD_LOG_ERROR) {
                 set_last_error(text);
             }
+            note_version(text);
             if (level >= SD_LOG_WARN) {
                 __android_log_write(level >= SD_LOG_ERROR ? ANDROID_LOG_ERROR : ANDROID_LOG_WARN,
                                     "ondevice.sd", text);
             }
+        }, nullptr);
+
+        // Where Cancel lands, and where it deliberately does not.
+        //
+        // Upstream reads its own cancel flag between denoising steps, between
+        // batches and between latents. On a phone one step of a 4B transformer
+        // is nearer two minutes than a moment, so a press could sit unnoticed
+        // for the length of the thing it was meant to stop. This callback runs
+        // before every ggml node instead.
+        //
+        // Two things it has to get right. The `ask` pass is upstream asking
+        // whether we want to observe a node, not whether to continue — answering
+        // false there makes it skip ahead rather than stop, so it always gets
+        // true. And the stop only applies once sampling has started: a graph
+        // abandoned during the prompt encode returns nullopt to
+        // LLMEmbedder::encode_prompt, which does not expect one and calls
+        // ggml_abort, taking the process with it. Prompt encoding is seconds
+        // and upstream's own check covers the gap; sampling and the VAE decode
+        // are where the minutes are, and that is what this reaches.
+        sd_set_backend_eval_callback([](ggml_tensor *, bool ask, void *) -> bool {
+            if (ask) return true;
+            auto * running = g_current.load();
+            if (running == nullptr) return true;
+            return !(running->cancelled.load() && running->sampling_started.load());
         }, nullptr);
     });
 
@@ -372,6 +422,34 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
 
     auto * engine = new od_sd();
     engine->ctx = new_sd_ctx(&params);
+
+    // A checkpoint and a bare diffusion model go through different doors.
+    //
+    // `model_path` is for a full checkpoint — the denoiser, its text encoders
+    // and a VAE in one file. Most quantised releases are not that: leejet's
+    // FLUX.2 Klein and every SDXL GGUF are the denoiser alone, and upstream
+    // takes those on `diffusion_model_path`, where it prefixes their tensors
+    // with `model.diffusion_model.` before matching. Handed to `model_path`
+    // instead, the names match no layout it knows and it stops at
+    // "get sd version from file failed" — which reads like a corrupt download
+    // and is not one.
+    //
+    // Which kind a file is cannot be read off its name, and the app has no
+    // business guessing from tensor names what upstream's loader is about to
+    // decide for itself. So: ask, and if the answer is no, ask the other way.
+    // The first attempt fails at version detection, before any weights are
+    // allocated, so the retry costs a header read.
+    if (engine->ctx == nullptr) {
+        {
+            std::lock_guard<std::mutex> lock(g_last_error_mutex);
+            g_last_error.clear();
+        }
+        SLOGI("not a full checkpoint; retrying as a bare diffusion model");
+        params.model_path           = nullptr;
+        params.diffusion_model_path = model.c_str();
+        engine->ctx = new_sd_ctx(&params);
+    }
+
     if (engine->ctx == nullptr) {
         const auto reason = take_last_error();
         delete engine;
@@ -480,6 +558,16 @@ JNIEXPORT void JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeCancel(JNIEnv *, jobject, jlong handle) {
     auto * e = as_sd(handle);
     if (e == nullptr || e->ctx == nullptr) return;
+    // Both, and the order matters only in that neither is enough alone.
+    //
+    // sd_cancel_generation is upstream's flag, and upstream reads it between
+    // denoising steps, between batches and between latents. On a phone one
+    // step of a 4B transformer is closer to two minutes than to a moment, and
+    // the VAE decode that follows is a single op with no check inside it — so
+    // a press could sit unnoticed for the length of the thing it was meant to
+    // stop. The atomic below is read by the graph callback, which ggml asks
+    // before every node.
+    e->cancelled.store(true);
     sd_cancel_generation(e->ctx, SD_CANCEL_ALL);
 }
 
@@ -500,6 +588,8 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
     }
 
     std::lock_guard<std::mutex> lock(e->mutex);
+    // Cleared before anything a Cancel is meant to interrupt, not after.
+    e->cancelled.store(false);
     g_current.store(e);
     e->generating.store(true);
     e->step.store(0);
@@ -624,11 +714,18 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
     int          count  = 0;
     const bool   ok     = generate_image(e->ctx, &params, &images, &count);
 
+    const bool cancelled = e->cancelled.load();
     e->generating.store(false);
     g_current.store(nullptr);
 
     if (!ok || images == nullptr || count <= 0) {
         if (images != nullptr) free(images);
+        // A cancelled run has no image either, and telling someone who just
+        // pressed Cancel to lower the resolution is a diagnosis of a problem
+        // they do not have.
+        if (cancelled) {
+            return nullptr;
+        }
         jni_throw(env, "The diffusion run produced no image. This is usually memory — "
                        "lower the size or enable vae_tiling.");
         return nullptr;

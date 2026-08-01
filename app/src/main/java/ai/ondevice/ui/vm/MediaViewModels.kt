@@ -310,6 +310,7 @@ class ImageViewModel @Inject constructor(
                 recording.stop()
                 _state.value = _state.value.copy(
                     generating = false,
+                    cancelling = false,
                     step = 0,
                     loadingModel = false,
                     liveTrace = null,
@@ -319,6 +320,17 @@ class ImageViewModel @Inject constructor(
     }
 
     fun cancel() {
+        // Said out loud, because it is not always instant and pretending it is
+        // makes a working Cancel look broken.
+        //
+        // Sampling and the VAE decode stop inside the current ggml graph —
+        // measured at under four seconds against a step that takes nearly two
+        // minutes. Encoding the prompt does not: FLUX.2 reads it with a 4B
+        // language model, and abandoning *that* graph hands a null back to
+        // sd.cpp's LLMEmbedder, which does not expect one and takes the process
+        // down with it. So during that phase the press is recorded and lands at
+        // the end of it.
+        _state.value = _state.value.copy(cancelling = true)
         diffusion.cancel()
         generationJob?.cancel()
         generationJob = null
@@ -597,6 +609,8 @@ data class ImageState(
     val clipSkip: Int = 2,
     val vaeTiling: Boolean = true,
     val generating: Boolean = false,
+    /** Cancel pressed, and the run has not unwound yet. */
+    val cancelling: Boolean = false,
     val step: Int = 0,
     /** What the engine reports as its total — *not* the user's step setting. */
     val progressSteps: Int = 0,
@@ -621,16 +635,22 @@ data class ImageState(
     val availableModels: List<ModelEntity> = emptyList(),
 ) {
     /**
-     * Whether a style reference has anywhere to go.
+     * Whether a picture slot has anywhere to send a picture.
      *
-     * An IP-Adapter is the only thing that reads one, so the slot appears with
-     * it and not otherwise — an always-visible field for a file nothing will
-     * open is the same mistake as a switch that turns nothing on.
+     * Each of these is read by exactly one component and by nothing else, so
+     * each appears with its component and not otherwise. An always-visible
+     * field for a file nothing will open is the same mistake as a switch that
+     * turns nothing on: the Control image slot invited a pose map for years
+     * with no ControlNet installed to read one.
      */
     val usesStyleReference: Boolean
-        get() = availableAttachments.any {
-            it.enabled && it.role == ai.ondevice.core.AttachmentRole.IP_ADAPTER
-        }
+        get() = armed(ai.ondevice.core.AttachmentRole.IP_ADAPTER)
+
+    val usesControlImage: Boolean
+        get() = armed(ai.ondevice.core.AttachmentRole.CONTROLNET)
+
+    private fun armed(role: ai.ondevice.core.AttachmentRole) =
+        availableAttachments.any { it.enabled && it.role == role }
 
     /** Only the ones actually ticked go to the runtime. */
     val attachments: List<ai.ondevice.core.ModelAttachment>
@@ -664,7 +684,7 @@ data class ImageState(
 
     val actionLabel: String
         get() = when (action) {
-            ImageAction.CANCEL -> "Cancel — frees native memory"
+            ImageAction.CANCEL -> if (cancelling) "Cancelling…" else "Cancel"
             ImageAction.INSTALL_RUNTIME -> "Install stable-diffusion.cpp first"
             ImageAction.ADD_MODEL -> "Add a diffusion model"
             ImageAction.PICK_SOURCE -> "Choose a source image"
