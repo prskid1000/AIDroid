@@ -28,63 +28,34 @@ enum class ModelFormat { GGUF, GGML_BIN, ONNX, SAFETENSORS, PYTORCH_BIN, UNKNOWN
 
 enum class Capability { TEXT, VISION, TOOLS, EMBEDDING, DIFFUSION, TRANSCRIBE, SYNTHESIZE }
 
-/** Detected at boot. SPEC §8.1 — Vulkan is deliberately out of v1. */
-enum class BackendId {
-    OPENCL,
-    CPU,
-    ;
-
-    /** The piece of silicon, which is the question a user is actually asking. */
-    val label: String
-        get() = when (this) {
-            OPENCL -> "GPU"
-            CPU -> "CPU"
-        }
-
-    /** How this build reaches [label] — the detail, for the screen about builds. */
-    val api: String
-        get() = when (this) {
-            OPENCL -> "OpenCL"
-            CPU -> "CPU"
-        }
-
-    val registryNames: List<String>
-        get() = when (this) {
-            OPENCL -> listOf("OpenCL")
-            CPU -> listOf("CPU")
-        }
-
-    /** Whether a name ggml registered means this backend. */
-    fun matches(registered: String): Boolean =
-        registryNames.any { it.equals(registered, ignoreCase = true) } ||
-            registered.equals(name, ignoreCase = true) ||
-            registered.equals(api, ignoreCase = true) ||
-            registered.equals(label, ignoreCase = true)
-}
-
-/** SPEC §3.3. */
+/**
+ * SPEC §3.3.
+ *
+ * There used to be a WORKS_SLOWER between FAST and TIGHT, and it meant one
+ * thing only: a quant with no Adreno OpenCL kernel, which would fall back to
+ * the CPU. Everything falls back to the CPU now — it is the only device — so
+ * the verdict is purely about whether the model fits.
+ */
 enum class Verdict {
     FAST,
-    WORKS_SLOWER,
     TIGHT,
     WONT_FIT,
     UNSUPPORTED_ARCH,
     NOT_RUNNABLE,
     ;
 
-    val runnable: Boolean get() = this == FAST || this == WORKS_SLOWER || this == TIGHT
+    val runnable: Boolean get() = this == FAST || this == TIGHT
 
     val tone: VerdictTone
         get() = when (this) {
             FAST -> VerdictTone.AFFIRMATIVE
-            WORKS_SLOWER, TIGHT -> VerdictTone.CAVEAT
+            TIGHT -> VerdictTone.CAVEAT
             WONT_FIT, UNSUPPORTED_ARCH, NOT_RUNNABLE -> VerdictTone.REFUSAL
         }
 
     val label: String
         get() = when (this) {
-            FAST -> "Fast"
-            WORKS_SLOWER -> "Works, slower"
+            FAST -> "Fits"
             TIGHT -> "Tight"
             WONT_FIT -> "Won't fit"
             UNSUPPORTED_ARCH -> "Unsupported architecture"
@@ -94,15 +65,6 @@ enum class Verdict {
 
 /** Accent means runnable; an accent outline means caveat; neutral means no. */
 enum class VerdictTone { AFFIRMATIVE, CAVEAT, REFUSAL }
-
-/** The speed class shown next to each quant variant. */
-enum class SpeedClass {
-    OPENCL_FAST,
-    CPU_PATH,
-    ;
-
-    val label: String get() = if (this == OPENCL_FAST) "fast · OpenCL" else "CPU path"
-}
 
 /** SPEC §9 — tiering controls default visibility only; nothing is hidden for good. */
 enum class Tier {

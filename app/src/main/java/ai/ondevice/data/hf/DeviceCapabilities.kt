@@ -6,7 +6,6 @@ import android.os.Build
 import android.os.Environment
 import android.os.PowerManager
 import android.os.StatFs
-import ai.ondevice.core.BackendId
 
 /** What this device can actually do — measured, not assumed. */
 class DeviceCapabilities(private val context: Context) {
@@ -85,10 +84,4 @@ class DeviceCapabilities(private val context: Context) {
         } else {
             Build.HARDWARE
         }
-
-    /** Backends the build could plausibly use. */
-    fun candidateBackends(hasOpenCl: Boolean): List<BackendId> = buildList {
-        if (hasOpenCl) add(BackendId.OPENCL)
-        add(BackendId.CPU)
-    }
 }

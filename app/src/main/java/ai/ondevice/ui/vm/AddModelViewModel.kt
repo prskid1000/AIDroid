@@ -159,7 +159,6 @@ class AddModelViewModel @Inject constructor(
                 storageReserveBytes = reserve,
                 archSupported = resolved.architecture?.let { registry.supportsArchitecture(it) } ?: true,
                 hasRuntimeForFormat = registry.supportsFormat(resolved.format),
-                speedClass = quant.speedClass,
             )
             _state.value = _state.value.copy(
                 verdict = VerdictResult(
@@ -172,14 +171,11 @@ class AddModelViewModel @Inject constructor(
         }
     }
 
-    /** Prefer the Adreno fast path when one exists and fits. */
-    /** Smallest that runs, not smallest. */
-    /** What to pre-select. */
+    /** What to pre-select: the smallest that runs and is not a bad idea, not the smallest. */
     private fun pickDefaultQuant(model: ResolvedModel): QuantVariant? {
         val runnable = model.quants.filter { it.runnable }.ifEmpty { model.quants }
         val advisable = runnable.filter { it.cautionReason == null }.ifEmpty { runnable }
-        return advisable.firstOrNull { it.speedClass == ai.ondevice.core.SpeedClass.OPENCL_FAST }
-            ?: advisable.minByOrNull { it.totalBytes }
+        return advisable.minByOrNull { it.totalBytes }
     }
 
     /** Queue the primary file, every shard, and every required companion as one atomic job (SPEC §3.4). */

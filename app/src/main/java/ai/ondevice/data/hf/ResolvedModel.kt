@@ -3,7 +3,6 @@ package ai.ondevice.data.hf
 import ai.ondevice.core.Modality
 import ai.ondevice.core.ModelFormat
 import ai.ondevice.core.RefusalKind
-import ai.ondevice.core.SpeedClass
 import ai.ondevice.core.Verdict
 
 /** What the resolver produces: either something loadable, or a reasoned no. */
@@ -73,7 +72,6 @@ data class ResolvedModel(
 data class QuantVariant(
     val name: String,
     val files: List<RemoteFile>,
-    val speedClass: SpeedClass,
     val note: String,
     /** Why this build cannot run this variant, or null when it can. */
     val blockedReason: String? = null,

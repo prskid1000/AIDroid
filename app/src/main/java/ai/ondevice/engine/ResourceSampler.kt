@@ -1,6 +1,5 @@
 package ai.ondevice.engine
 
-import ai.ondevice.core.BackendId
 import ai.ondevice.core.PredictionKind
 import ai.ondevice.core.SparseParams
 import ai.ondevice.data.db.PredictionRunDao
@@ -115,7 +114,6 @@ suspend fun PredictionRunDao.record(
     kind: PredictionKind,
     artifactId: String,
     modelId: String?,
-    backend: BackendId?,
     startedAt: Long,
     trace: ResourceTrace,
     stats: SparseParams = SparseParams.EMPTY,
@@ -127,7 +125,6 @@ suspend fun PredictionRunDao.record(
             kind = kind,
             artifactId = artifactId,
             modelId = modelId,
-            backend = backend,
             startedAt = startedAt,
             elapsedMillis = trace.elapsedMillis,
             peakCpuPercent = trace.peakCpuPercent,

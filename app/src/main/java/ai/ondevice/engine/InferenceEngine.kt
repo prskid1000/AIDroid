@@ -1,6 +1,5 @@
 package ai.ondevice.engine
 
-import ai.ondevice.core.BackendId
 import ai.ondevice.core.SparseParams
 import kotlinx.coroutines.flow.Flow
 
@@ -34,14 +33,12 @@ data class LoadRequest(
     val modelId: String,
     val modelPath: String,
     val companionPaths: Map<String, String> = emptyMap(),
-    val backend: BackendId,
     val params: SparseParams = SparseParams.EMPTY,
     val chatTemplate: String? = null,
 )
 
 data class LoadedModel(
     val modelId: String,
-    val backend: BackendId,
     val contextLength: Int,
     val layers: Int,
     val embeddingLength: Int,
@@ -49,6 +46,12 @@ data class LoadedModel(
     /** Query heads, as the GGUF declares them. */
     val heads: Int = 0,
     val chatTemplate: String?,
+    /** Where [chatTemplate] came from: the GGUF, or a `chat_template` override. */
+    val templateSource: String = "gguf.chat_template",
+    /** Whether this template has a reasoning mode at all, per the runtime. */
+    val supportsThinking: Boolean = false,
+    /** `--chat-template-kwargs` as the runtime currently holds it. */
+    val templateKwargsJson: String = "{}",
     val stopSequences: List<String>,
     val loadMillis: Long,
 )
@@ -121,7 +124,6 @@ sealed interface GenerationEvent {
         val tokensPerSecond: Float,
         val generatedTokens: Int,
         val contextUsed: Int,
-        val backend: BackendId,
     ) : GenerationEvent
 
     /** The model asked for a tool. */

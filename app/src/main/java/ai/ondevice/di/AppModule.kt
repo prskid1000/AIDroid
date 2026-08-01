@@ -110,22 +110,15 @@ object AppModule {
         @ApplicationScope scope: CoroutineScope,
     ) = Downloader(context, client, db, prefs, tokens, scope)
 
-    // One answer to "which device", shared by all three runtimes.
-    @Provides
-    @Singleton
-    fun provideComputeDevice(prefs: AppPrefs, registry: RuntimeRegistry) =
-        ai.ondevice.engine.ComputeDevice(prefs, registry)
-
     @Provides
     @Singleton
     fun provideEngineManager(
         @ApplicationContext context: Context,
         registry: RuntimeRegistry,
         db: OnDeviceDatabase,
-        computeDevice: ai.ondevice.engine.ComputeDevice,
         capabilities: DeviceCapabilities,
         @ApplicationScope scope: CoroutineScope,
-    ) = EngineManager(context, registry, db, computeDevice, capabilities, scope)
+    ) = EngineManager(context, registry, db, capabilities, scope)
 
     @Provides
     @Singleton
@@ -177,26 +170,13 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideTranscriber(
-        @ApplicationContext context: Context,
-        computeDevice: ai.ondevice.engine.ComputeDevice,
-    ) = ai.ondevice.engine.Transcriber(context, computeDevice)
+    fun provideTranscriber(@ApplicationContext context: Context) =
+        ai.ondevice.engine.Transcriber(context)
 
     @Provides
     @Singleton
     fun provideDiffusionEngine(
         @ApplicationContext context: Context,
         capabilities: DeviceCapabilities,
-        computeDevice: ai.ondevice.engine.ComputeDevice,
-    ) = ai.ondevice.engine.DiffusionEngine(context, capabilities, computeDevice)
-
-    @Provides
-    @Singleton
-    fun provideComputeDeviceSwitch(
-        prefs: AppPrefs,
-        engines: EngineManager,
-        transcriber: ai.ondevice.engine.Transcriber,
-        diffusion: ai.ondevice.engine.DiffusionEngine,
-        synthesizer: ai.ondevice.speech.SpeechSynthesizer,
-    ) = ai.ondevice.engine.ComputeDeviceSwitch(prefs, engines, transcriber, diffusion, synthesizer)
+    ) = ai.ondevice.engine.DiffusionEngine(context, capabilities)
 }

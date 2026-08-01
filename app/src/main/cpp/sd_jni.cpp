@@ -309,7 +309,7 @@ JNIEXPORT jlong JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeLoad(
         JNIEnv * env, jobject, jstring jmodel, jstring jvae, jstring jtaesd, jstring jcontrolNet,
         jstring jclipL, jstring jclipG, jstring jt5xxl, jstring jipAdapter, jstring jembeddings,
-        jstring jclipVision, jint threads, jstring jbackend) {
+        jstring jclipVision, jint threads) {
     const auto model      = jni_to_string(env, jmodel);
     const auto vae        = jni_to_string(env, jvae);
     const auto taesd      = jni_to_string(env, jtaesd);
@@ -354,14 +354,8 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
     // Flash attention stays off.
     params.flash_attn       = false;
 
-    // The Compute device setting, in the one field sd.cpp takes it in.
-    const auto backend = jni_to_string(env, jbackend);
-    const bool cpu_only = jni_iequals(backend, "CPU");
-    if (!backend.empty()) {
-        params.backend        = backend.c_str();
-        params.params_backend = cpu_only ? backend.c_str() : nullptr;
-    }
-    SLOGI("load on backend=%s", backend.empty() ? "(sd.cpp chooses)" : backend.c_str());
+    params.backend        = "CPU";
+    params.params_backend = "CPU";
 
     {
         std::lock_guard<std::mutex> lock(g_last_error_mutex);
@@ -652,16 +646,13 @@ Java_ai_ondevice_engine_SdBridge_nativeUpscale(
         return nullptr;
     }
 
-    sd_ctx_params_t defaults;
-    sd_ctx_params_init(&defaults);
-
     upscaler_ctx_t * upscaler = new_upscaler_ctx(
         esrgan.c_str(),
         /* direct         */ false,
         /* n_threads      */ threads > 0 ? threads : od_default_threads(),
         /* tile_size      */ tileSize,
-        defaults.backend,
-        defaults.params_backend);
+        /* backend        */ "CPU",
+        /* params_backend */ "CPU");
     if (upscaler == nullptr) {
         jni_throw(env, "The upscaler model could not be loaded. ESRGAN weights are expected.");
         return nullptr;

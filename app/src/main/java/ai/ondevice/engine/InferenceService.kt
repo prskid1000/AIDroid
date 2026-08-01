@@ -86,11 +86,10 @@ class InferenceService : LifecycleService() {
             .setSmallIcon(android.R.drawable.ic_menu_manage)
             .setContentTitle(state?.loaded?.modelId ?: "Model loaded")
             .setContentText(
-                buildString {
-                    state?.backend?.let { append(it.label) }
-                    if (state != null && state.tokensPerSecond > 0) {
-                        append(" · ${Fmt.tokensPerSecond(state.tokensPerSecond)}")
-                    }
+                if (state != null && state.tokensPerSecond > 0) {
+                    Fmt.tokensPerSecond(state.tokensPerSecond)
+                } else {
+                    ""
                 },
             )
             .setContentIntent(open)

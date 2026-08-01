@@ -1,6 +1,5 @@
 package ai.ondevice.data
 
-import ai.ondevice.core.BackendId
 import ai.ondevice.core.MessageRole
 import ai.ondevice.data.db.ConversationEntity
 import ai.ondevice.data.db.MessageEntity
@@ -128,8 +127,7 @@ class ConversationArchive(
                         appendLine()
                         val meta = buildList {
                             message.tokensPerSecond?.let { add(String.format("%.1f tok/s", it)) }
-                            message.backend?.let { add(it.name.lowercase()) }
-                            message.tokenCount?.let { add("$it tokens") }
+                                                        message.tokenCount?.let { add("$it tokens") }
                         }
                         if (meta.isNotEmpty()) {
                             appendLine("<sub>${meta.joinToString(" · ")}</sub>")
@@ -253,9 +251,7 @@ class ConversationArchive(
                         // Kept as an opaque string: an archive written under a newer engine carries keys this build has never seen, and §11 says an unknown key survives.
                         generationParamsJson = message.generationParamsJson,
                         tokensPerSecond = message.tokensPerSecond,
-                        backend = message.backend?.let {
-                            runCatching { BackendId.valueOf(it) }.getOrNull()
-                        },
+                        backend = message.backend,
                         createdAt = message.createdAt,
                         parentMessageId = null,
                     ),
@@ -286,7 +282,7 @@ class ConversationArchive(
             imageTokenCount = imageTokenCount,
             generationParamsJson = generationParamsJson,
             tokensPerSecond = tokensPerSecond,
-            backend = backend?.name,
+            backend = backend,
             createdAt = createdAt,
             attachments = paths.map { path ->
                 ArchivedAttachment(

@@ -3,7 +3,6 @@ package ai.ondevice.engine
 import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.res.Configuration
-import ai.ondevice.core.BackendId
 import ai.ondevice.core.SparseParams
 import ai.ondevice.data.db.ModelEntity
 import ai.ondevice.data.db.OnDeviceDatabase
@@ -16,12 +15,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-/** Owns residency: which model is loaded, on which backend, and when it must go. */
+/** Owns residency: which model is loaded, and when it must go. */
 class EngineManager(
     private val context: Context,
     private val registry: RuntimeRegistry,
     private val db: OnDeviceDatabase,
-    private val computeDevice: ComputeDevice,
     private val capabilities: DeviceCapabilities,
     private val scope: CoroutineScope,
 ) : ComponentCallbacks2 {
@@ -52,17 +50,13 @@ class EngineManager(
 
     val llama: InferenceEngine? get() = engineFor(RuntimeRegistry.LLAMA)
 
-    /** Load a model, honouring the per-model backend override and otherwise taking the backend from [resolveBackend]. */
     suspend fun load(model: ModelEntity, paramOverrides: SparseParams = SparseParams.EMPTY): Result<LoadedModel> =
         loadMutex.withLock {
             val engine = llama ?: return Result.failure(
                 IllegalStateException("No llama.cpp runtime is installed."),
             )
 
-            val backend = resolveBackend(model)
-
-            // Already loaded, and on the device the settings now ask for.
-            if (engine.loadedModelId == model.id && _state.value.backend == backend) {
+            if (engine.loadedModelId == model.id) {
                 return _state.value.loaded?.let { Result.success(it) }
                     ?: Result.failure(IllegalStateException("Inconsistent load state"))
             }
@@ -72,24 +66,20 @@ class EngineManager(
             // Warm-swap — never hold both.
             if (engine.isLoaded) engine.unload()
 
-            // The device choice, turned into the one number llama.cpp acts on.
-            val params = SparseParams.of("n_gpu_layers" to if (backend == BackendId.CPU) 0 else 999)
-                .overlaidWith(SparseParams.parse(model.paramOverridesJson))
-                .overlaidWith(paramOverrides)
+            val params = SparseParams.parse(model.paramOverridesJson).overlaidWith(paramOverrides)
 
             val result = engine.load(
                 LoadRequest(
                     modelId = model.id,
                     modelPath = model.localPath,
                     companionPaths = emptyMap(),
-                    backend = backend,
                     params = params,
                     chatTemplate = model.chatTemplate,
                 ),
             )
 
             result.onSuccess { loaded ->
-                _state.value = EngineState(loaded = loaded, backend = backend, loading = false)
+                _state.value = EngineState(loaded = loaded, loading = false)
                 db.models().touch(model.id, System.currentTimeMillis())
             }.onFailure { error ->
                 _state.value = EngineState(loading = false, error = describeFailure(error))
@@ -102,10 +92,6 @@ class EngineManager(
         _state.value = EngineState()
     }
 
-    /** Which device runs this model: a per-model override, else the setting. */
-    private suspend fun resolveBackend(model: ModelEntity): BackendId =
-        computeDevice.chosen(RuntimeRegistry.LLAMA, model.backendOverride)
-
     /** SPEC §8.4 — a native allocation failure surfaces as a real message with numbers and a suggestion, never a bare crash. */
     private fun describeFailure(error: Throwable): EngineError {
         val message = error.message.orEmpty()
@@ -116,10 +102,6 @@ class EngineManager(
                     "${ai.ondevice.core.Fmt.bytes(capabilities.totalRamBytes)}.",
                 suggestion = "Lower the context size, pick a smaller quant, or set cache_type_k " +
                     "and cache_type_v to q8_0.",
-            )
-            message.contains("backend", true) -> EngineError(
-                message = "The selected backend failed to initialise.",
-                suggestion = "Switch to CPU in Settings → Backend.",
             )
             else -> EngineError(message = message.ifBlank { "Model load failed." }, suggestion = null)
         }
@@ -151,7 +133,6 @@ class EngineManager(
 
 data class EngineState(
     val loaded: LoadedModel? = null,
-    val backend: BackendId? = null,
     val loading: Boolean = false,
     val error: EngineError? = null,
     val tokensPerSecond: Float = 0f,

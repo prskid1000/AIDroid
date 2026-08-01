@@ -1,7 +1,6 @@
 package ai.ondevice.data.hf
 
 import ai.ondevice.core.Fmt
-import ai.ondevice.core.SpeedClass
 import ai.ondevice.core.Verdict
 
 /** What `flash_attn` is set to, which is three states and not two. */
@@ -111,7 +110,7 @@ object CompatibilityGate {
         )
     }
 
-    /** Turn an estimate into one of the six verdicts. */
+    /** Turn an estimate into one of the five verdicts. */
     fun verdict(
         estimate: FitEstimate,
         availableRamBytes: Long,
@@ -119,22 +118,13 @@ object CompatibilityGate {
         storageReserveBytes: Long,
         archSupported: Boolean,
         hasRuntimeForFormat: Boolean,
-        speedClass: SpeedClass,
     ): Verdict = when {
         !hasRuntimeForFormat -> Verdict.NOT_RUNNABLE
         !archSupported -> Verdict.UNSUPPORTED_ARCH
         estimate.totalBytes > availableRamBytes -> Verdict.WONT_FIT
         estimate.weightsBytes + storageReserveBytes > freeStorageBytes -> Verdict.WONT_FIT
         availableRamBytes - estimate.totalBytes < TIGHT_HEADROOM_BYTES -> Verdict.TIGHT
-        speedClass == SpeedClass.CPU_PATH -> Verdict.WORKS_SLOWER
         else -> Verdict.FAST
-    }
-
-    /** Q4_0 is the only quant with an Adreno OpenCL kernel, so everything else falls back to CPU — *when there is an OpenCL backend at all*. */
-    fun speedClassFor(quant: String?, openClAvailable: Boolean): SpeedClass = when {
-        !openClAvailable -> SpeedClass.CPU_PATH
-        quant?.uppercase()?.contains("Q4_0") == true -> SpeedClass.OPENCL_FAST
-        else -> SpeedClass.CPU_PATH
     }
 
     /** "fits, but headroom drops under 1 GB" is a warning, not a pass. */

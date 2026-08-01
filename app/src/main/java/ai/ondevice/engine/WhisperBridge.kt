@@ -19,8 +19,7 @@ object WhisperBridge {
 
     external fun nativeSystemInfo(): String
 
-    /** @param backend the ggml registry name of the chosen compute device — "OpenCL", "CPU" — or empty for CPU. */
-    external fun nativeLoad(path: String, backend: String): Long
+    external fun nativeLoad(path: String): Long
 
     external fun nativeFree(handle: Long)
 

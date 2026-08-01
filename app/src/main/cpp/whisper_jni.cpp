@@ -263,9 +263,8 @@ Java_ai_ondevice_engine_WhisperBridge_nativeSystemInfo(JNIEnv * env, jobject) {
 }
 
 JNIEXPORT jlong JNICALL
-Java_ai_ondevice_engine_WhisperBridge_nativeLoad(JNIEnv * env, jobject, jstring jpath, jstring jbackend) {
-    const auto path    = jni_to_string(env, jpath);
-    const auto backend = jni_to_string(env, jbackend);
+Java_ai_ondevice_engine_WhisperBridge_nativeLoad(JNIEnv * env, jobject, jstring jpath) {
+    const auto path = jni_to_string(env, jpath);
 
     // Before the first model, so the load's own placement lines are the first
     // thing it says rather than the first thing it misses.
@@ -273,28 +272,8 @@ Java_ai_ondevice_engine_WhisperBridge_nativeLoad(JNIEnv * env, jobject, jstring 
     std::call_once(logging_once, [] { whisper_log_set(forward_log, nullptr); });
 
     whisper_context_params cparams = whisper_context_default_params();
-    // The Compute device setting, in the two fields whisper offers.
     cparams.use_gpu = false;
-    if (!backend.empty() && !jni_iequals(backend, "CPU")) {
-        int gpu_index = 0;
-        for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
-            ggml_backend_dev_t dev = ggml_backend_dev_get(i);
-            const auto type = ggml_backend_dev_type(dev);
-            if (type != GGML_BACKEND_DEVICE_TYPE_GPU && type != GGML_BACKEND_DEVICE_TYPE_IGPU) {
-                continue;
-            }
-            ggml_backend_reg_t reg = ggml_backend_dev_backend_reg(dev);
-            const char * reg_name = reg != nullptr ? ggml_backend_reg_name(reg) : nullptr;
-            if (reg_name != nullptr && jni_iequals(backend, reg_name)) {
-                cparams.gpu_device = gpu_index;
-                cparams.use_gpu    = true;
-                break;
-            }
-            ++gpu_index;
-        }
-    }
-    WLOGI("load %s on %s", path.c_str(),
-          cparams.use_gpu ? backend.c_str() : "CPU");
+    WLOGI("load %s", path.c_str());
 
     // A failed load is an exception on the Kotlin side, never an abort.
     auto * engine = new od_whisper();

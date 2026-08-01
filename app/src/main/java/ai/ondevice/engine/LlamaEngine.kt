@@ -1,6 +1,5 @@
 package ai.ondevice.engine
 
-import ai.ondevice.core.BackendId
 import ai.ondevice.core.SparseParams
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -66,13 +65,14 @@ class LlamaEngine(
             val info = json.parseToJsonElement(LlamaBridge.nativeInfo(handle)).jsonObject
             val model = LoadedModel(
                 modelId = request.modelId,
-                backend = request.backend,
                 contextLength = info.int("contextLoaded") ?: 0,
                 layers = info.int("layers") ?: 0,
                 embeddingLength = info.int("embeddingLength") ?: 0,
                 embeddingLengthKv = info.int("embeddingLengthKv") ?: 0,
                 heads = info.int("heads") ?: 0,
                 chatTemplate = info.string("chatTemplate")?.takeIf { it.isNotBlank() },
+                templateSource = info.string("templateSource") ?: "gguf.chat_template",
+                supportsThinking = info.bool("supportsThinking") == true,
                 // The end-of-generation tokens the *vocabulary* declares.
                 stopSequences = info["eogTokens"]?.jsonArray
                     ?.mapNotNull { it.jsonPrimitive.contentOrNull }
@@ -84,7 +84,7 @@ class LlamaEngine(
             android.util.Log.i(
                 TAG,
                 "loaded ${request.modelPath.substringAfterLast('/')} in ${model.loadMillis}ms " +
-                    "backend=${request.backend} context=${model.contextLength} " +
+                    "context=${model.contextLength} " +
                     "layers=${model.layers} threads=${info.int("threads") ?: 0} " +
                     "template=${if (model.chatTemplate.isNullOrBlank()) "none" else "gguf"} " +
                     "eog=${model.stopSequences.size}",
@@ -161,7 +161,6 @@ class LlamaEngine(
             ),
         )
 
-        val backend = loaded?.backend ?: BackendId.CPU
         var index = 0
         var thinkingTokens = 0
         var thinkingStarted = 0L
@@ -199,7 +198,6 @@ class LlamaEngine(
                         tokensPerSecond = step.float("tokensPerSecond") ?: 0f,
                         generatedTokens = step.int("generated") ?: index,
                         contextUsed = step.int("contextUsed") ?: 0,
-                        backend = backend,
                     ),
                 )
             }
@@ -218,7 +216,6 @@ class LlamaEngine(
                         tokensPerSecond = step.float("tokensPerSecond") ?: 0f,
                         generatedTokens = step.int("generated") ?: index,
                         contextUsed = step.int("contextUsed") ?: 0,
-                        backend = backend,
                     ),
                 )
                 step["toolCalls"]?.jsonArray?.forEach { call ->

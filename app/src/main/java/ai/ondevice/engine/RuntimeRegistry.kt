@@ -1,7 +1,6 @@
 package ai.ondevice.engine
 
 import android.content.Context
-import ai.ondevice.core.BackendId
 import ai.ondevice.core.Capability
 import ai.ondevice.core.ModelFormat
 import kotlinx.serialization.Serializable
@@ -29,7 +28,7 @@ class RuntimeRegistry(private val context: Context) {
                 formats = r.formats.mapNotNull { f -> runCatching { ModelFormat.valueOf(f) }.getOrNull() }.toSet(),
                 architectures = r.architectures.toSet(),
                 capabilities = r.capabilities.mapNotNull { c -> runCatching { Capability.valueOf(c) }.getOrNull() }.toSet(),
-                backends = r.backends.mapNotNull { b -> runCatching { BackendId.valueOf(b) }.getOrNull() },
+                backends = r.backends,
                 installed = r.installed,
                 sizeBytes = r.sizeBytes,
             )
@@ -52,18 +51,16 @@ class RuntimeRegistry(private val context: Context) {
     fun supportsFormat(format: ModelFormat): Boolean =
         descriptors.any { it.installed && format in it.formats }
 
-    /** Whether the text runtime has a GPU it can actually reach. */
-    val hasOpenClBackend: Boolean
-        get() = BackendId.OPENCL in backendsFor(LLAMA)
-
-    /** The backends [runtimeId] actually registered, which is not the same question as which one the user would like. */
-    fun backendsFor(runtimeId: String): List<BackendId> {
-        val declared = descriptor(runtimeId)?.takeIf { it.installed }?.backends ?: return emptyList()
-        return registered(runtimeId).ifEmpty { declared }
-    }
-
-    /** What ggml registered in this process, per runtime, asked once. */
-    private fun registered(runtimeId: String): List<BackendId> = reported.getOrPut(runtimeId) {
+    /**
+     * What ggml registered in this process, per runtime, asked once.
+     *
+     * Nothing chooses on this any more — the app is CPU-only and there is
+     * nothing to choose between. It is still read, and still shown on the
+     * Runtimes screen, because it is the one answer that comes from the loaded
+     * binary rather than from a file describing it: if a build ever registered
+     * something other than "CPU", that screen would say so.
+     */
+    fun registeredBackends(runtimeId: String): List<String> = reported.getOrPut(runtimeId) {
         val info = runCatching {
             when (runtimeId) {
                 LLAMA -> if (LlamaBridge.available) LlamaBridge.nativeSystemInfo() else null
@@ -76,13 +73,11 @@ class RuntimeRegistry(private val context: Context) {
         runCatching {
             val names = json.decodeFromString(ReportedInfo.serializer(), info).backends
             android.util.Log.i("RuntimeRegistry", "$runtimeId registered ${names.joinToString()}")
-            names
-                .mapNotNull { name -> BackendId.entries.firstOrNull { it.matches(name) } }
-                .distinct()
+            names.distinct()
         }.getOrElse { emptyList() }
     }
 
-    private val reported = mutableMapOf<String, List<BackendId>>()
+    private val reported = mutableMapOf<String, List<String>>()
 
     val llamaBuildTag: String get() = buildTag(LLAMA)
 
@@ -118,7 +113,8 @@ data class RuntimeDescriptor(
     val formats: Set<ModelFormat>,
     val architectures: Set<String>,
     val capabilities: Set<Capability>,
-    val backends: List<BackendId>,
+    /** What runtimes.json declares this runtime is built to run on, verbatim. */
+    val backends: List<String>,
     val installed: Boolean,
     val sizeBytes: Long,
 )

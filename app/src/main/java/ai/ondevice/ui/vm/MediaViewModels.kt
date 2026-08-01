@@ -260,8 +260,6 @@ class ImageViewModel @Inject constructor(
                                 kind = ai.ondevice.core.PredictionKind.IMAGE,
                                 artifactId = image.id,
                                 modelId = model.id,
-                                // sd.cpp has no backend selection of its own; the runtime reports what it was built with, and claiming one here would be a guess.
-                                backend = null,
                                 startedAt = started,
                                 trace = trace,
                                 stats = SparseParams.of(
@@ -911,7 +909,6 @@ class VoiceViewModel @Inject constructor(
                     kind = ai.ondevice.core.PredictionKind.SPEECH,
                     artifactId = synthesisId,
                     modelId = _state.value.ttsModel?.id,
-                    backend = null,
                     startedAt = startedAt,
                     trace = trace,
                     stats = ai.ondevice.core.SparseParams.of(
@@ -1261,7 +1258,6 @@ class VoiceViewModel @Inject constructor(
                         kind = ai.ondevice.core.PredictionKind.TRANSCRIBE,
                         artifactId = transcriptId,
                         modelId = model.id,
-                        backend = null,
                         startedAt = started,
                         trace = trace,
                         stats = SparseParams.of(

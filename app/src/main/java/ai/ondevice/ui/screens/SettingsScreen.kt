@@ -1,7 +1,6 @@
 package ai.ondevice.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -17,9 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import ai.ondevice.core.BackendId
 import ai.ondevice.core.Fmt
-import ai.ondevice.data.prefs.AppPrefs
 import ai.ondevice.ui.BottomDestinations
 import ai.ondevice.ui.components.NBottomBar
 import ai.ondevice.ui.components.NButton
@@ -27,18 +24,13 @@ import ai.ondevice.ui.components.NCard
 import ai.ondevice.ui.components.NHelp
 import ai.ondevice.ui.components.NIconButton
 import ai.ondevice.ui.components.NInput
-import ai.ondevice.ui.components.NSeg
 import ai.ondevice.ui.components.NSwitch
-import ai.ondevice.ui.components.NTag
-import ai.ondevice.ui.components.NTagStyle
 import ai.ondevice.ui.components.PhoneScaffold
 import ai.ondevice.ui.components.RootToolbar
 import ai.ondevice.ui.components.SectionKicker
-import ai.ondevice.ui.components.nClickableFlat
 import ai.ondevice.ui.theme.NIcons
 import ai.ondevice.ui.theme.NocturneColors
 import ai.ondevice.ui.theme.NocturneType
-import ai.ondevice.ui.theme.ruleBelow
 import ai.ondevice.ui.vm.SettingsViewModel
 
 /** Settings root. */
@@ -75,42 +67,10 @@ fun SettingsScreen(
                 InfoRow("SoC", state.soc)
                 InfoRow("RAM", Fmt.bytes(state.totalRamBytes))
                 InfoRow("Cores", "${state.performanceCores} performance of ${state.totalCores}")
+                InfoRow("Compute", "CPU, ${state.totalCores - 1} threads")
                 InfoRow("Free storage", Fmt.bytes(state.freeStorageBytes))
                 InfoRow("Models on disk", Fmt.bytes(state.storageUsedBytes))
             }
-
-            // Two devices, named as devices.
-            SectionKicker("Compute device", Modifier.padding(top = 20.dp, bottom = 8.dp))
-            val devices = listOf(BackendId.OPENCL, BackendId.CPU)
-            val available = state.availableBackends
-            NCard(gap = 7.dp) {
-                NSeg(
-                    options = devices.map { it.label },
-                    selectedIndex = devices.indexOfFirst { it.name == state.backendMode }
-                        .takeIf { it >= 0 } ?: devices.indexOf(BackendId.CPU),
-                    onSelect = { viewModel.setBackendMode(devices[it].name) },
-                    enabled = { devices[it] in available },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            val missing = devices.filterNot { it in available }
-            NHelp(
-                "What ggml registered on this phone, not what the build contains: a backend " +
-                    "compiled in still needs the silicon and the driver behind it. The GPU runs " +
-                    "through OpenCL. Voice models are ONNX rather than ggml and always run on " +
-                    "the CPU — ONNX Runtime ships no GPU provider for Android." +
-                    if (missing.isEmpty()) {
-                        ""
-                    } else {
-                        " " + missing.joinToString(" and ") { it.label } +
-                            " did not register here, so ${if (missing.size > 1) "they are" else "it is"} " +
-                            "shown but cannot be chosen."
-                    },
-                Modifier.padding(top = 8.dp),
-            )
-
-            // No thermal policy card.
-
             SectionKicker("Network", Modifier.padding(top = 20.dp, bottom = 8.dp))
             NCard(gap = 10.dp) {
                 // One toggle, because there is one thing that goes over the network.

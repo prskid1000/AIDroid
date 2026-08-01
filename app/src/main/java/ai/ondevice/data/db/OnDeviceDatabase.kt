@@ -5,7 +5,6 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
 import ai.ondevice.core.AttachmentRole
-import ai.ondevice.core.BackendId
 import ai.ondevice.core.DownloadState
 import ai.ondevice.core.MessageRole
 import ai.ondevice.core.Modality
@@ -20,9 +19,6 @@ class Converters {
 
     @TypeConverter fun formatTo(v: ModelFormat?): String? = v?.name
     @TypeConverter fun formatFrom(v: String?): ModelFormat? = v?.let { runCatching { ModelFormat.valueOf(it) }.getOrNull() }
-
-    @TypeConverter fun backendTo(v: BackendId?): String? = v?.name
-    @TypeConverter fun backendFrom(v: String?): BackendId? = v?.let { runCatching { BackendId.valueOf(it) }.getOrNull() }
 
     @TypeConverter fun roleTo(v: MessageRole?): String? = v?.name
     @TypeConverter fun roleFrom(v: String?): MessageRole? = v?.let { runCatching { MessageRole.valueOf(it) }.getOrNull() }

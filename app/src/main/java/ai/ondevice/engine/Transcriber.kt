@@ -9,7 +9,6 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaRecorder
-import ai.ondevice.core.BackendId
 import ai.ondevice.core.SparseParams
 import ai.ondevice.core.TranscriptSegment
 import kotlinx.coroutines.Dispatchers
@@ -32,10 +31,7 @@ import kotlin.math.abs
 import kotlin.math.min
 
 /** Speech to text, for real (SPEC §6). */
-class Transcriber(
-    private val context: Context,
-    private val computeDevice: ComputeDevice,
-) {
+class Transcriber(private val context: Context) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     /** Held across every native call, so nothing frees the context while a decode is inside it. */
@@ -48,18 +44,10 @@ class Transcriber(
     var loadedModelId: String? = null
         private set
 
-    /** The device the loaded model is actually on, so a changed setting is a reason to reload rather than a badge nobody acts on. */
-    @Volatile
-    var loadedBackend: BackendId? = null
-        private set
-
     val available: Boolean get() = WhisperBridge.available
     val isLoaded: Boolean get() = handle != 0L
 
-    /** Whether the loaded model is the one asked for, *on the device asked for*. */
-    suspend fun isCurrent(modelId: String): Boolean =
-        isLoaded && loadedModelId == modelId &&
-            loadedBackend == computeDevice.chosen(RuntimeRegistry.WHISPER)
+    fun isCurrent(modelId: String): Boolean = isLoaded && loadedModelId == modelId
 
     suspend fun load(
         modelId: String,
@@ -71,22 +59,17 @@ class Transcriber(
                 check(WhisperBridge.available) {
                     WhisperBridge.loadError ?: "The whisper.cpp runtime is not installed in this build."
                 }
-                // Settings → Compute device, asked of whisper's own binary.
-                val device = computeDevice.chosen(RuntimeRegistry.WHISPER)
-                val backend = device.registryNames.first()
-
                 nativeLock.withLock {
                     unload()
-                    android.util.Log.i(TAG, "loading ${File(path).name} on $backend")
-                    val newHandle = WhisperBridge.nativeLoad(path, backend)
+                    android.util.Log.i(TAG, "loading ${File(path).name}")
+                    val newHandle = WhisperBridge.nativeLoad(path)
                     check(newHandle != 0L) { "The runtime returned no handle for $path." }
                     handle = newHandle
                     loadedModelId = modelId
-                    loadedBackend = device
                     if (!params.isEmpty) {
                         WhisperBridge.nativeApplyParams(handle, params.toJsonString())
                     }
-                    android.util.Log.i(TAG, "loaded ${File(path).name} backend=$backend")
+                    android.util.Log.i(TAG, "loaded ${File(path).name}")
                     WhisperBridge.nativeInfo(handle)
                 }
                 // A half-loaded context is worse than none: it reports a model
@@ -100,7 +83,6 @@ class Transcriber(
             handle = 0L
         }
         loadedModelId = null
-        loadedBackend = null
     }
 
     fun applyParams(params: SparseParams): ParamReport = nativeLock.withLock {

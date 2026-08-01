@@ -23,7 +23,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ai.ondevice.core.AttachmentRole
 import ai.ondevice.core.Fmt
 import ai.ondevice.core.Modality
-import ai.ondevice.core.SpeedClass
 import ai.ondevice.core.VerdictTone
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
@@ -278,33 +277,17 @@ fun AddModelScreen(
                                 )
                             }
                         }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(
-                                Fmt.bytes(quant.totalBytes),
-                                style = NocturneType.MonoValue,
-                                color = NocturneColors.Text.copy(alpha = 0.85f),
-                            )
-                            Text(
-                                quant.speedClass.label,
-                                style = NocturneType.Help,
-                                color = if (quant.speedClass == SpeedClass.OPENCL_FAST) {
-                                    NocturneColors.Accent300
-                                } else {
-                                    NocturneColors.TextMuted
-                                },
-                            )
-                        }
+                        Text(
+                            Fmt.bytes(quant.totalBytes),
+                            style = NocturneType.MonoValue,
+                            color = NocturneColors.Text.copy(alpha = 0.85f),
+                        )
                     }
                 }
 
-                // The footnote has to describe the runtime that is actually installed.
                 NHelp(
-                    if (resolved.quants.any { it.speedClass == SpeedClass.OPENCL_FAST }) {
-                        "Q4_0 hits the Adreno OpenCL fast path on this device. Other quants fall back to CPU."
-                    } else {
-                        "This runtime build has no GPU backend, so every quant runs on CPU. Smaller " +
-                            "quants are faster here for that reason alone."
-                    },
+                    "Everything runs on the CPU, so size is the whole story: a smaller quant is " +
+                        "faster and leaves more room, and pays for it in quality.",
                     Modifier.padding(top = 8.dp),
                 )
 

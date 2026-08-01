@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -199,16 +199,10 @@ class SettingsViewModel @Inject constructor(
     private val capabilities: DeviceCapabilities,
     private val storage: ModelStorage,
     private val paramRepository: ParamRepository,
-    private val registry: ai.ondevice.engine.RuntimeRegistry,
 ) : ViewModel() {
 
-    val settings: StateFlow<SettingsState> = combine(
-        prefs.backendMode,
-        prefs.wifiOnly,
-    ) { backend, wifiOnly ->
+    val settings: StateFlow<SettingsState> = prefs.wifiOnly.map { wifiOnly ->
         SettingsState(
-            backendMode = backend,
-            availableBackends = registry.backendsFor(ai.ondevice.engine.RuntimeRegistry.LLAMA),
             wifiOnly = wifiOnly,
             hasToken = tokens.hasToken,
             maskedToken = tokens.maskedToken(),
@@ -236,7 +230,6 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun setBackendMode(mode: String) = viewModelScope.launch { prefs.setBackendMode(mode) }
     fun setWifiOnly(value: Boolean) = viewModelScope.launch { prefs.setWifiOnly(value) }
 
     fun setToken(value: String?) {
@@ -277,9 +270,6 @@ class SettingsViewModel @Inject constructor(
 }
 
 data class SettingsState(
-    val backendMode: String = ai.ondevice.core.BackendId.CPU.name,
-    /** What ggml registered here — the rest are shown, dimmed, and inert. */
-    val availableBackends: List<ai.ondevice.core.BackendId> = emptyList(),
     val wifiOnly: Boolean = true,
     val hasToken: Boolean = false,
     val maskedToken: String? = null,

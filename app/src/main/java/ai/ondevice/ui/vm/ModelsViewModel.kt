@@ -2,7 +2,6 @@ package ai.ondevice.ui.vm
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import ai.ondevice.core.BackendId
 import ai.ondevice.core.Modality
 import ai.ondevice.core.SparseParams
 import ai.ondevice.data.ModelStorage
@@ -286,7 +285,6 @@ class ModelDetailViewModel @Inject constructor(
             storageReserveBytes = 1_000_000_000L,
             archSupported = true,
             hasRuntimeForFormat = true,
-            speedClass = CompatibilityGate.speedClassFor(model.quant, registry.hasOpenClBackend),
         )
         _state.value = _state.value.copy(estimate = estimate, verdict = verdict)
     }

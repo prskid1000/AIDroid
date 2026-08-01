@@ -161,7 +161,7 @@ private fun RuntimeCard(runtime: RuntimeBundleEntity, viewModel: SettingsViewMod
                             if (runtime.architectureCount > 1) {
                                 append(" · ${runtime.architectureCount} architectures")
                             }
-                            append(" · ${runtime.backendsJson.split(',').joinToString(", ") { backendLabel(it) }}")
+                            append(" · ${runtime.backendsJson.split(',').joinToString(", ") { it.trim() }}")
                         } else {
                             append("not installed · ${Fmt.bytes(runtime.sizeBytes)}")
                         }
@@ -227,7 +227,3 @@ private fun RuntimeCard(runtime: RuntimeBundleEntity, viewModel: SettingsViewMod
         }
     }
 }
-
-private fun backendLabel(raw: String): String = runCatching {
-    ai.ondevice.core.BackendId.valueOf(raw.trim()).api
-}.getOrDefault(raw.trim())

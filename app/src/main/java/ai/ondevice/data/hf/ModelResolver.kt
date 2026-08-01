@@ -5,7 +5,6 @@ import ai.ondevice.core.Fmt
 import ai.ondevice.core.Modality
 import ai.ondevice.core.ModelFormat
 import ai.ondevice.core.RefusalKind
-import ai.ondevice.core.SpeedClass
 import ai.ondevice.engine.RuntimeRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -466,15 +465,12 @@ class ModelResolver(
                     securityStatus = pi?.securityFileStatus?.status,
                 )
             }
-            val speed = CompatibilityGate.speedClassFor(quantName, registry.hasOpenClBackend)
             QuantVariant(
                 name = quantName,
                 files = remoteFiles,
-                speedClass = speed,
                 // The character note is about the *quantisation*, so it reads the suffix even when the label had to be widened to stay unambiguous.
                 note = quantNote(
                     proposed.getValue(key),
-                    speed,
                     shards = shardCounts[key] ?: sorted.size,
                     fileCount = sorted.size,
                     onnx = key.endsWith(".onnx", ignoreCase = true),
@@ -591,7 +587,6 @@ class ModelResolver(
     /** The one-line character note under each variant. */
     private fun quantNote(
         rawQuant: String,
-        speed: SpeedClass,
         shards: Int,
         fileCount: Int = shards,
         onnx: Boolean = false,
@@ -630,7 +625,6 @@ class ModelResolver(
         }
         append(
             when {
-                speed == SpeedClass.OPENCL_FAST -> "Adreno fast path"
                 quant.startsWith("F32") -> "unquantised"
                 quant.startsWith("F16") || quant.startsWith("BF16") -> "near-lossless, slow here"
                 quant.startsWith("Q8") -> "near-lossless, slow here"
@@ -742,7 +736,6 @@ class ModelResolver(
                     QuantVariant(
                         name = extractQuantName(name, HfModelInfo()),
                         files = listOf(RemoteFile(name, 0L)),
-                        speedClass = CompatibilityGate.speedClassFor(name, registry.hasOpenClBackend),
                         note = "direct file — metadata read from the header",
                     ),
                 ),

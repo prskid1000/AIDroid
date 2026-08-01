@@ -30,7 +30,6 @@ import java.nio.ByteOrder
 class DiffusionEngine(
     private val context: Context,
     private val capabilities: ai.ondevice.data.hf.DeviceCapabilities,
-    private val computeDevice: ComputeDevice,
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
@@ -41,18 +40,10 @@ class DiffusionEngine(
     var loadedModelId: String? = null
         private set
 
-    /** The device this context was built for — see [Transcriber.loadedBackend]. */
-    @Volatile
-    var loadedBackend: ai.ondevice.core.BackendId? = null
-        private set
-
     val available: Boolean get() = SdBridge.available
     val isLoaded: Boolean get() = handle != 0L
 
-    /** Whether the loaded model is the one asked for, on the device asked for. */
-    suspend fun isCurrent(modelId: String): Boolean =
-        isLoaded && loadedModelId == modelId &&
-            loadedBackend == computeDevice.chosen(RuntimeRegistry.STABLE_DIFFUSION)
+    fun isCurrent(modelId: String): Boolean = isLoaded && loadedModelId == modelId
 
     suspend fun load(
         modelId: String,
@@ -72,10 +63,6 @@ class DiffusionEngine(
                 attachments.firstOrNull { it.enabled && it.role == role }?.path
                     ?: params.string(role.paramKey).orEmpty()
 
-            // Settings → Compute device.
-            val device = computeDevice.chosen(RuntimeRegistry.STABLE_DIFFUSION)
-            val backend = device.registryNames.first()
-
             val newHandle = SdBridge.nativeLoad(
                 modelPath = modelPath,
                 vaePath = pathFor(AttachmentRole.VAE),
@@ -88,20 +75,18 @@ class DiffusionEngine(
                 embeddingsPath = pathFor(AttachmentRole.EMBEDDING),
                 clipVisionPath = pathFor(AttachmentRole.CLIP_VISION),
                 threads = threads,
-                backend = backend,
             )
             check(newHandle != 0L) { "The runtime returned no handle for $modelPath." }
             handle = newHandle
             android.util.Log.i(
                 TAG,
                 "loaded ${File(modelPath).name} (${File(modelPath).length() / 1024 / 1024} MB) " +
-                    "backend=$backend threads=$threads " +
+                    "threads=$threads " +
                     "attached=" + AttachmentRole.entries
                     .mapNotNull { role -> pathFor(role).takeIf { it.isNotBlank() }?.let { role.name } }
                     .ifEmpty { listOf("none") }.joinToString("+"),
             )
             loadedModelId = modelId
-            loadedBackend = device
         }
     }
 
@@ -111,7 +96,6 @@ class DiffusionEngine(
             handle = 0L
         }
         loadedModelId = null
-        loadedBackend = null
     }
 
     fun applyParams(params: SparseParams): ParamReport {

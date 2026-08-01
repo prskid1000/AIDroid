@@ -6,7 +6,6 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import ai.ondevice.core.BackendId
 import ai.ondevice.core.Tier
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -17,7 +16,6 @@ private val Context.dataStore by preferencesDataStore(name = "ondevice_prefs")
 class AppPrefs(private val context: Context) {
 
     private object Keys {
-        val backendMode = stringPreferencesKey("backend_mode")
         val threadCount = intPreferencesKey("thread_count")
         val batteryGuardPercent = intPreferencesKey("battery_guard_percent")
         val wifiOnly = booleanPreferencesKey("wifi_only")
@@ -31,12 +29,6 @@ class AppPrefs(private val context: Context) {
         val exportFolder = stringPreferencesKey("export_folder")
         val toolsEnabled = booleanPreferencesKey("tools_enabled")
         val enabledToolProviders = androidx.datastore.preferences.core.stringSetPreferencesKey("enabled_tool_providers")
-    }
-
-    /** Which piece of silicon to run on: one of [BackendId], by name. */
-    val backendMode: Flow<String> = context.dataStore.data.map { stored ->
-        val raw = stored[Keys.backendMode]
-        BackendId.entries.firstOrNull { it.name == raw }?.name ?: BackendId.CPU.name
     }
 
     /** Default to performance-core count, not total cores (SPEC §8.1). */
@@ -70,7 +62,6 @@ class AppPrefs(private val context: Context) {
         it[Keys.enabledToolProviders] ?: setOf(ai.ondevice.tools.BuiltInToolProvider.ID)
     }
 
-    suspend fun setBackendMode(v: String) = edit { it[Keys.backendMode] = v }
     suspend fun setThreadCount(v: Int) = edit { it[Keys.threadCount] = v }
     suspend fun setBatteryGuardPercent(v: Int) = edit { it[Keys.batteryGuardPercent] = v }
     suspend fun setWifiOnly(v: Boolean) = edit { it[Keys.wifiOnly] = v }
@@ -90,10 +81,5 @@ class AppPrefs(private val context: Context) {
 
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
         context.dataStore.edit(block)
-    }
-
-    companion object {
-        fun backendModeLabel(mode: String): String =
-            runCatching { BackendId.valueOf(mode).label }.getOrDefault(mode)
     }
 }

@@ -27,11 +27,8 @@ class OnDeviceApp : Application() {
 
     @Inject lateinit var downloader: ai.ondevice.data.download.Downloader
 
-    @Inject lateinit var computeDeviceSwitch: ai.ondevice.engine.ComputeDeviceSwitch
-
     override fun onCreate() {
         super.onCreate()
-        computeDeviceSwitch.start(scope)
         scope.launch {
             seed()
             // A download interrupted by a crash, a force-stop or a reinstall leaves a row saying RUNNING with nothing behind it.
@@ -63,7 +60,7 @@ class OnDeviceApp : Application() {
                         availableSizeBytes = null,
                         availableNotes = null,
                         architectureCount = descriptor.architectures.size,
-                        backendsJson = descriptor.backends.joinToString(",") { it.name },
+                        backendsJson = descriptor.backends.joinToString(","),
                         initFailureCount = 0,
                         rolledBackFrom = null,
                     )

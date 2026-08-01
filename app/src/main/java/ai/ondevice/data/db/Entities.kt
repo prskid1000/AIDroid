@@ -4,7 +4,6 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import ai.ondevice.core.AttachmentRole
-import ai.ondevice.core.BackendId
 import ai.ondevice.core.DownloadState
 import ai.ondevice.core.MessageRole
 import ai.ondevice.core.Modality
@@ -13,6 +12,18 @@ import ai.ondevice.core.PredictionKind
 import ai.ondevice.core.RuntimeState
 
 /** The data model of SPEC §11, one entity per line of that block. */
+
+/**
+ * `models.backendOverride`, `messages.backend` and `prediction_runs.backend`
+ * are left over from when there was a GPU to choose. Nothing writes them now.
+ *
+ * They are kept rather than dropped because Room validates the schema against
+ * these classes on open and a column it does not expect is a refusal to open,
+ * so removing the field means recreating three tables — two of which hold the
+ * user's model library and every conversation they have had. That is a real
+ * risk to take for three unused TEXT columns, and one worth taking only
+ * alongside the next migration that has to touch those tables anyway.
+ */
 
 @Entity(tableName = "models", indices = [Index("hfRepo"), Index("modality")])
 data class ModelEntity(
@@ -42,8 +53,7 @@ data class ModelEntity(
     val pinned: Boolean,
     val favourite: Boolean,
     val notes: String?,
-    /** Per-model backend override, persisted (SPEC §8.1). */
-    val backendOverride: BackendId?,
+    val backendOverride: String? = null,
     /** Sparse per-model parameter overrides. Unknown keys preserved inert. */
     val paramOverridesJson: String,
     val defaultPresetId: String?,
@@ -103,7 +113,7 @@ data class MessageEntity(
     /** The full parameter set this message was generated under. */
     val generationParamsJson: String,
     val tokensPerSecond: Float?,
-    val backend: BackendId?,
+    val backend: String? = null,
     val createdAt: Long,
     /** Branching: a regenerate keeps the old message and points the new one here. */
     val parentMessageId: String?,
@@ -159,7 +169,7 @@ data class PredictionRunEntity(
     /** The message, image, synthesis or transcript this run produced. */
     val artifactId: String,
     val modelId: String?,
-    val backend: BackendId?,
+    val backend: String? = null,
     val startedAt: Long,
     val elapsedMillis: Long,
     /** Summary columns, duplicated out of [traceJson] on purpose. */

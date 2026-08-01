@@ -95,10 +95,6 @@ def sd_architectures(repo: pathlib.Path) -> list[str]:
     return sorted({n.lower() for n in names if n not in ("COUNT", "Count")})
 
 
-# The runtimes that share one ggml, and so share its backend set.
-GGML_RUNTIMES = {"llama.cpp", "whisper.cpp", "stable-diffusion.cpp"}
-
-
 def main() -> int:
     existing = json.loads(ASSET.read_text(encoding="utf-8"))
     by_id = {r["id"]: r for r in existing["runtimes"]}
@@ -131,26 +127,18 @@ def main() -> int:
         entry["upstreamCommit"] = commit
         entry["architectures"] = architectures
         entry["installed"] = True
-        # What CMakeLists compiles, which is a property of the APK and not of
-        # any phone. arm64 additionally builds ggml's OpenCL backend; x86_64 is
-        # the emulator, which has no Adreno behind it.
+        # Every runtime runs on the CPU, and there is nothing else to run on.
         #
-        # Compiled is not the same as present: whether a device has a driver
-        # behind libOpenCL.so is unknowable from here, so this list is only the
-        # fallback. RuntimeRegistry.backendsFor asks the loaded binary first and
-        # reports what ggml registered on the phone in front of it — SPEC 8.2,
-        # do not assert what can be measured.
-        #
-        # The ONNX runtimes are CPU and only CPU, and that is not a gap in this
-        # build. ONNX Runtime ships no OpenCL and no Vulkan execution provider
-        # for Android at all, so there is no route from Kokoro or OmniVoice to
-        # the Adreno. Its one accelerator here is Qualcomm's QNN, which needs a
-        # different artifact — 174 MB of it — and then refuses these graphs
-        # anyway: both are variable-length, and QNN's HTP backend rejects a
-        # dynamic shape outright rather than partitioning around it.
-        entry["backends"] = (
-            ["CPU", "OPENCL"] if runtime_id in GGML_RUNTIMES else ["CPU"]
-        )
+        # ggml's OpenCL backend was compiled here for a while. llama.cpp worked
+        # on Adreno; sd.cpp fell back to the CPU for most of the graph and came
+        # out slower than the CPU alone, and whisper.cpp segfaulted at model
+        # load — weight_buft_supported returns true for any GPU device without
+        # probing it, so every weight went to the OpenCL buffer type and the
+        # allocation died. The ONNX pair never had the option: ONNX Runtime
+        # ships no OpenCL and no Vulkan execution provider for Android, and its
+        # one accelerator here, Qualcomm's QNN, refuses both graphs for having
+        # dynamic shapes.
+        entry["backends"] = ["CPU"]
         print(f"  {runtime_id}: {tag} ({commit}) — {len(architectures)} architectures")
 
     ASSET.write_text(json.dumps(existing, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

@@ -17,14 +17,12 @@ native/llama.cpp/
 native/whisper.cpp/
 native/stable-diffusion.cpp/
 native/espeak-ng/
+
+# No longer fetched — the app is CPU-only. Still ignored so an older checkout
+# does not suddenly offer 200 MB of Khronos source and Qualcomm DSP images for
+# staging.
 native/OpenCL-Headers/
 native/OpenCL-ICD-Loader/
-
-# The Hexagon (NPU) halves that only Qualcomm's toolchain can build: the DSP
-# images, the generated fastRPC stub, and the SDK headers the host half
-# includes. Produced by tools/build-hexagon.sh from the pinned llama.cpp
-# checkout — derived, not authored, and covered by the SDK's licence rather
-# than this repo's.
 native/hexagon/
 
 # The staged espeak-ng data tables under app/src/main/assets/ are NOT ignored:

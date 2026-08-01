@@ -1,28 +1,6 @@
 import java.io.FileInputStream
 import java.util.Properties
 
-/**
- * The host python, as python itself reports it.
- *
- * `sys.executable` rather than `where python`: the thing on PATH is often a
- * launcher, and the launcher is not what CMake can run from a build rule.
- * Returns null when there is no python, which is not an error here — only the
- * OpenCL backend needs one, and CMake refuses with its own message.
- */
-fun hostPython(): String? = listOf("python", "python3").firstNotNullOfOrNull { name ->
-    runCatching {
-        val process = ProcessBuilder(
-            if (System.getProperty("os.name").startsWith("Windows")) {
-                listOf("cmd", "/c", name, "-c", "import sys; print(sys.executable)")
-            } else {
-                listOf(name, "-c", "import sys; print(sys.executable)")
-            },
-        ).redirectErrorStream(true).start()
-        val path = process.inputStream.bufferedReader().readText().trim()
-        if (process.waitFor() == 0 && File(path).isFile) path.replace('\\', '/') else null
-    }.getOrNull()
-}
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -61,7 +39,17 @@ android {
         externalNativeBuild {
             cmake {
                 // -DNDEBUG turns off ggml's assertions in the shipped build.
-                cppFlags += listOf("-std=c++17", "-fexceptions", "-frtti", "-O3", "-DNDEBUG")
+                //
+                // -ffunction-sections/-fdata-sections give every function and
+                // every array a section of its own, which is what makes the
+                // `-Wl,--gc-sections` on each target in CMakeLists.txt do
+                // anything at all: without them the linker's unit is the whole
+                // object file, so one referenced symbol pins every other
+                // symbol compiled beside it.
+                cppFlags += listOf(
+                    "-std=c++17", "-fexceptions", "-frtti", "-O3", "-DNDEBUG",
+                    "-ffunction-sections", "-fdata-sections",
+                )
 
                 // cppFlags reaches CMAKE_CXX_FLAGS only, so for a long time
                 // every .c file in this project compiled with no -O at all:
@@ -83,22 +71,9 @@ android {
                 //
                 // Release builds escaped it (RelWithDebInfo supplies -O2 for C),
                 // so this only ever showed up in the debug builds we measure on.
-                cFlags += listOf("-O3", "-DNDEBUG")
+                cFlags += listOf("-O3", "-DNDEBUG", "-ffunction-sections", "-fdata-sections")
 
                 arguments += listOf("-DANDROID_STL=c++_shared")
-
-                // ggml's OpenCL backend embeds its kernels by running a python
-                // script, and CMake has to be told which interpreter — its own
-                // search looks for `python3.exe` and finds nothing behind a
-                // pyenv shim, a Windows Store alias or a venv launcher, all of
-                // which are `python` on PATH and work perfectly well.
-                //
-                // So PATH is asked the question directly, in the shell that
-                // understands those, and the answer is the real executable.
-                // When there is no python at all this passes nothing and CMake
-                // says so itself — with a message naming python, which is the
-                // part that was worth the glue.
-                hostPython()?.let { arguments += "-DPython3_EXECUTABLE=$it" }
             }
         }
     }
@@ -166,8 +141,18 @@ android {
     buildTypes {
         debug {
             isMinifyEnabled = false
-            // The emulator, and only here. No emulator ships to users.
-            ndk { abiFilters += "x86_64" }
+            // The emulator, on request only.
+            //
+            // This used to be unconditional, and it meant that every debug APK
+            // installed on a phone carried a second complete copy of
+            // llama.cpp, sd.cpp, whisper.cpp and ONNX Runtime built for a CPU
+            // that phone cannot execute — 100 MB of a 257 MB APK, none of it
+            // loadable on the device it was sitting on. An ABI split would
+            // also fix that, but Gradle refuses `splits.abi` alongside
+            // `abiFilters`, and the filters are what keep armeabi-v7a out.
+            //
+            //     ./gradlew :app:assembleSideloadDebug -Pemulator
+            if (project.hasProperty("emulator")) ndk { abiFilters += "x86_64" }
             // Signed with the release key when there is one, so debug and
             // release are mutually installable. Android refuses to update a
             // package with a differently-signed APK, so with the default debug
@@ -204,16 +189,6 @@ android {
             "/META-INF/{AL2.0,LGPL2.1}",
             "META-INF/DEPENDENCY",
         )
-        // The Khronos ICD loader is a link target and must not ship.
-        //
-        // The phone's own libOpenCL.so is the one that has to run: it is the
-        // only loader allowed to open the Adreno driver, since an app's linker
-        // namespace permits /data and nothing else. Shipping ours would win the
-        // soname and hand ggml a loader that can find no driver — which is
-        // exactly what it did when tried, one dlopen refusal per candidate
-        // path. What makes the platform's reachable at all is the
-        // <uses-native-library> declaration in AndroidManifest.xml.
-        jniLibs.excludes += "**/libOpenCL.so"
     }
 }
 
