@@ -68,7 +68,7 @@ object ComponentCheck {
         // separate file. Asked of the architecture, because the answer differs
         // per family and not per role: SDXL takes CLIP-L and CLIP-G, FLUX.1
         // CLIP-L and T5-XXL, FLUX.2 a language model, Chroma T5 alone.
-        val family = DiffusionDefaults.forName(architecture)
+        val family = DiffusionFamily.forName(architecture)
         // A full checkpoint supplies its own everything, so nothing is missing.
         val selfContained = bareDenoiser == false
         val needed = if (selfContained) {

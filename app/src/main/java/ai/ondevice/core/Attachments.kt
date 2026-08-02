@@ -161,4 +161,14 @@ data class ModelAttachment(
     val displayName: String,
     val weight: Float = 1.0f,
     val enabled: Boolean = true,
+    /**
+     * The strength stored with the choice, as against [weight], which is what
+     * this run is using.
+     *
+     * The two are separate so that a dial moved on the Image sheet survives a
+     * refresh — it is a per-run thought — while a strength changed on the All
+     * Parameters screen still lands, because the stored value it was compared
+     * against has changed too.
+     */
+    val chosenWeight: Float = weight,
 )

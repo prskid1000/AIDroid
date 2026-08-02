@@ -21,7 +21,7 @@
     "Defaults, ranges and steps below are the description of last resort. Where a runtime",
     "reports its own live default, that value wins — see ParamRepository.specsFor."
   ],
-  "manifestVersion": 8,
+  "manifestVersion": 9,
   "runtimes": {
     "llama.cpp": {
       "params": [
@@ -1793,6 +1793,46 @@
               "sdxl_vega"
             ]
           }
+        },
+        {
+          "key": "ip_adapter_strength",
+          "group": "control",
+          "type": "float",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.05,
+          "tier": "ADVANCED",
+          "label": "IP-Adapter strength",
+          "help": "How much of the reference picture to take. At 1.0 the style comes almost entirely from the picture; lower it to leave room for the prompt.",
+          "dependsOn": {
+            "key": "ip_adapter",
+            "notEquals": ""
+          },
+          "appliesTo": {
+            "arch": [
+              "sd1",
+              "sd1_inpaint",
+              "sd1_pix2pix",
+              "sdxl",
+              "sdxl_inpaint",
+              "sdxl_pix2pix",
+              "sdxl_ssd1b",
+              "sdxl_vega"
+            ]
+          }
+        },
+        {
+          "key": "loras",
+          "group": "control",
+          "type": "weighted_paths",
+          "min": 0.0,
+          "max": 2.0,
+          "step": 0.05,
+          "tier": "ADVANCED",
+          "label": "LoRA adapters",
+          "help": "Small trained files that pull the picture towards a style or a subject. Several stack, each at its own strength: around 1.0 is what most are trained for, and past that they tend to take the picture over.",
+          "cliFlag": "--lora"
         },
         {
           "key": "clip_vision",

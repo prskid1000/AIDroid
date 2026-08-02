@@ -29,6 +29,13 @@ class ParamsViewModel @Inject constructor(
     private val repository: ParamRepository,
     private val registry: RuntimeRegistry,
     private val engines: EngineManager,
+    // The four runtimes that are not llama.cpp, so this screen can drop each
+    // one's loaded context. Each is a @Singleton, so these are the same
+    // instances the tabs generate through.
+    private val diffusion: ai.ondevice.engine.DiffusionEngine,
+    private val transcriber: ai.ondevice.engine.Transcriber,
+    private val kokoro: ai.ondevice.speech.KokoroEngine,
+    private val omniVoice: ai.ondevice.speech.OmniVoiceEngine,
     private val db: OnDeviceDatabase,
     private val prefs: AppPrefs,
 ) : ViewModel() {
@@ -180,12 +187,33 @@ class ParamsViewModel @Inject constructor(
         persist()
     }
 
+    /**
+     * Make the batched edits take effect.
+     *
+     * This used to return at the first line for every runtime but llama.cpp,
+     * so on the sd.cpp screen the card announcing "2 change(s) need a model
+     * reload" offered a button that did nothing at all — and the settings it
+     * named, `vae` and `threads`, are exactly the two that cannot be changed on
+     * a live context.
+     *
+     * llama.cpp is the one runtime the app holds loaded between turns, so it is
+     * rebuilt here and now. The other four load at the start of a run, from the
+     * overrides already written to the model's row, so dropping the context is
+     * the whole of the reload: the next run picks the new values up on its own.
+     */
     fun applyPendingReload() {
-        val modelId = _state.value.modelId ?: return
-        if (_state.value.runtimeId != RuntimeRegistry.LLAMA) return
         viewModelScope.launch {
-            val model = db.models().get(modelId) ?: return@launch
-            engines.load(model, _state.value.values, force = true)
+            when (_state.value.runtimeId) {
+                RuntimeRegistry.LLAMA -> {
+                    val modelId = _state.value.modelId ?: return@launch
+                    val model = db.models().get(modelId) ?: return@launch
+                    engines.load(model, _state.value.values, force = true)
+                }
+                RuntimeRegistry.STABLE_DIFFUSION -> diffusion.unload()
+                RuntimeRegistry.WHISPER -> transcriber.unload()
+                RuntimeRegistry.KOKORO -> kokoro.unload()
+                RuntimeRegistry.OMNIVOICE -> omniVoice.unload()
+            }
             _state.value = _state.value.copy(pendingReloadKeys = emptySet())
         }
     }
@@ -327,4 +355,12 @@ data class ParamsState(
     val advancedCount: Int get() = allSpecs.count { it.tier == Tier.ADVANCED }
     val expertCount: Int get() = allSpecs.count { it.tier == Tier.EXPERT }
     val needsReload: Boolean get() = pendingReloadKeys.isNotEmpty()
+
+    /**
+     * Whether the reload happens on the button or at the start of the next run.
+     *
+     * llama.cpp is the only runtime held loaded between turns; the rest build
+     * their context per run and read the stored overrides when they do.
+     */
+    val reloadsOnNextRun: Boolean get() = runtimeId != RuntimeRegistry.LLAMA
 }

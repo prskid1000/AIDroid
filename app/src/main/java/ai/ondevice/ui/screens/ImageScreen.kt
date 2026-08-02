@@ -175,29 +175,6 @@ fun ImageScreen(
             )
             state.actionHint?.let { NHelp(it, Modifier.padding(top = 6.dp)) }
 
-            // Settings changed *for* the user say so where the user is, not
-            // inside the sheet they would have to open to find out.
-            state.defaultsNote?.let { note ->
-                NCard(Modifier.padding(top = 10.dp)) {
-                    Text(
-                        "Settings updated",
-                        style = NocturneType.CardTitleSm,
-                        color = NocturneColors.Accent200,
-                    )
-                    Text(
-                        note,
-                        style = NocturneType.CardBody,
-                        color = NocturneColors.Text.copy(alpha = 0.8f),
-                    )
-                    Text(
-                        "Anything you set yourself is left alone.",
-                        style = NocturneType.CardBody,
-                        color = NocturneColors.Text.copy(alpha = 0.8f),
-                    )
-                    NButton("Got it", viewModel::dismissDefaultsNote, block = true)
-                }
-            }
-
             NField("Prompt", Modifier.padding(top = 16.dp)) {
                 NTextArea(
                     value = state.prompt,

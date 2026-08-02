@@ -70,6 +70,16 @@ enum class ParamType {
     @SerialName("int[]") INT_ARRAY,
     @SerialName("map") MAP,
     @SerialName("path") PATH,
+
+    /**
+     * Several installed files at once, each with its own strength.
+     *
+     * A LoRA is the case: sd.cpp takes an array of them and applies all of
+     * them, and stacking a style at 0.8 under a character at 0.6 is the
+     * ordinary way they are used. Rendering that as one dropdown would make the
+     * runtime's own capability unreachable from the app.
+     */
+    @SerialName("weighted_paths") WEIGHTED_PATHS,
     @SerialName("ordered_list") ORDERED_LIST,
 }
 

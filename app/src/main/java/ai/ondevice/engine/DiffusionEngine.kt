@@ -45,6 +45,14 @@ class DiffusionEngine(
 
     fun isCurrent(modelId: String): Boolean = isLoaded && loadedModelId == modelId
 
+    /**
+     * @param attachments every component the caller knows about, **armed or
+     *   not**. Passing only the armed ones made switching one off do nothing:
+     *   with no enabled attachment for the role, the lookup below fell through
+     *   to the stored path and loaded it anyway. Off has to mean off, or the
+     *   switch is decoration — and it is the switch the error message tells
+     *   people to use when a component is what broke the load.
+     */
     suspend fun load(
         modelId: String,
         modelPath: String,
@@ -58,10 +66,18 @@ class DiffusionEngine(
             }
             unload()
 
-            // These three are load-time in sd.cpp — they change the context, not the run — so they are resolved here and the rest at generate time.
-            fun pathFor(role: AttachmentRole) =
-                attachments.firstOrNull { it.enabled && it.role == role }?.path
-                    ?: params.string(role.paramKey).orEmpty()
+            // These are load-time in sd.cpp — they change the context, not the
+            // run — so they are resolved here and the rest at generate time.
+            //
+            // The stored parameter is the fallback for a role the caller said
+            // nothing about, which is every run started somewhere with no
+            // component sheet. Where the caller did mention the role, the
+            // caller's arming decides and the stored path does not override it.
+            fun pathFor(role: AttachmentRole): String {
+                val known = attachments.filter { it.role == role }
+                if (known.isNotEmpty()) return known.firstOrNull { it.enabled }?.path.orEmpty()
+                return params.string(role.paramKey).orEmpty()
+            }
 
             val newHandle = SdBridge.nativeLoad(
                 modelPath = modelPath,
@@ -180,19 +196,22 @@ class DiffusionEngine(
                     },
                 )
             }
+            // What is chosen but was never armed on the Image screen — which is
+            // every run started from anywhere else. A LoRA key holds a stack,
+            // so this is one entry per file rather than one per role.
             perRun
                 .filterNot { role -> ticked.any { it.role == role } }
                 .forEach { role ->
-                    val path = request.params.string(role.paramKey)
-                    if (!path.isNullOrBlank()) {
-                        add(
-                            buildJsonObject {
-                                put("role", role.name)
-                                put("path", path)
-                                put("weight", 1.0f)
-                            },
-                        )
-                    }
+                    ai.ondevice.core.WeightedPaths.parse(request.params[role.paramKey])
+                        .forEach { chosen ->
+                            add(
+                                buildJsonObject {
+                                    put("role", role.name)
+                                    put("path", chosen.path)
+                                    put("weight", chosen.weight)
+                                },
+                            )
+                        }
                 }
         }.toString()
 

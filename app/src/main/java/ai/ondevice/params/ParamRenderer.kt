@@ -24,6 +24,7 @@ import ai.ondevice.ui.components.NTextArea
 import ai.ondevice.ui.components.nClickableFlat
 import ai.ondevice.ui.theme.NocturneColors
 import ai.ondevice.ui.theme.NocturneType
+import ai.ondevice.ui.theme.ring
 import ai.ondevice.ui.theme.ruleBelow
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -73,7 +74,7 @@ fun ParamRow(
                 )
             }
             Text(
-                current?.let { renderJson(it) } ?: "—",
+                summarise(spec, current),
                 style = NocturneType.MonoValue,
                 color = NocturneColors.Accent300,
                 modifier = Modifier.weight(1f),
@@ -160,28 +161,12 @@ private fun ParamControl(
 
         ParamType.PATH -> {
             val v = values.string(spec.key) ?: (spec.default as? JsonPrimitive)?.content.orEmpty()
-            val wanted = ai.ondevice.core.AttachmentRole.entries
-                .firstOrNull { it.paramKey == spec.key }
-            // When the role is known and nothing installed matches it, the answer is "nothing" — not "everything".
-            val choices = when (wanted) {
-                null -> pathChoices
-                else -> pathChoices.filter { it.role == wanted }
-            }
+            val choices = choicesFor(spec, pathChoices)
             if (choices.isEmpty()) {
-                NHelp(
-                    "Nothing installed that this could point at. Download one on the Add model " +
-                        "screen and it appears here — a path typed by hand would only fail later, " +
-                        "inside the runtime.",
-                )
+                NothingInstalled()
             } else {
                 // Same shape as the chat model picker: choose from what is installed.
-                val labels = listOf("None") + choices.mapIndexed { index, choice ->
-                    if (choices.count { it.label == choice.label } > 1) {
-                        "${choice.label}  (${index + 1})"
-                    } else {
-                        choice.label
-                    }
-                }
+                val labels = listOf("None") + uniqueLabels(choices)
                 val selected = choices.indexOfFirst { it.path == v }
                     .let { if (it < 0) 0 else it + 1 }
                 ai.ondevice.ui.components.NDropdown(
@@ -195,6 +180,22 @@ private fun ParamControl(
                 choices.getOrNull(selected - 1)?.let { chosen ->
                     NHelp(chosen.detail, Modifier.padding(top = 4.dp))
                 }
+            }
+        }
+
+        ParamType.WEIGHTED_PATHS -> {
+            val choices = choicesFor(spec, pathChoices)
+            if (choices.isEmpty()) {
+                NothingInstalled()
+            } else {
+                WeightedPathStack(
+                    entries = ai.ondevice.core.WeightedPaths.parse(values[spec.key]),
+                    choices = choices,
+                    max = spec.max?.toFloat() ?: 2f,
+                    onChange = { entries ->
+                        onChange(spec.key, ai.ondevice.core.WeightedPaths.toJson(entries))
+                    },
+                )
             }
         }
 
@@ -254,6 +255,124 @@ private fun ParamControl(
             )
         }
     }
+}
+
+/**
+ * The installed files this parameter may name.
+ *
+ * When the key belongs to a role and nothing installed fills that role, the
+ * answer is "nothing" — not "everything". Offering a T5 encoder to the VAE slot
+ * is offering a run that fails inside the runtime.
+ */
+private fun choicesFor(spec: ParamSpec, pathChoices: List<PathChoice>): List<PathChoice> {
+    val wanted = ai.ondevice.core.AttachmentRole.entries.firstOrNull { it.paramKey == spec.key }
+        ?: return pathChoices
+    return pathChoices.filter { it.role == wanted }
+}
+
+/** Two files of the same name are two rows that read as one; number them. */
+private fun uniqueLabels(choices: List<PathChoice>): List<String> =
+    choices.mapIndexed { index, choice ->
+        if (choices.count { it.label == choice.label } > 1) {
+            "${choice.label}  (${index + 1})"
+        } else {
+            choice.label
+        }
+    }
+
+@Composable
+private fun NothingInstalled() {
+    NHelp(
+        "Nothing installed that this could point at. Download one on the Add model screen and " +
+            "it appears here — a path typed by hand would only fail later, inside the runtime.",
+    )
+}
+
+/**
+ * Several files under one key, each with its own strength.
+ *
+ * The stack is ordered and duplicates are allowed to be prevented rather than
+ * policed: the same LoRA twice is the same LoRA at whichever multiplier came
+ * last, so the picker offers only files not already in the stack.
+ */
+@Composable
+private fun WeightedPathStack(
+    entries: List<ai.ondevice.core.WeightedPath>,
+    choices: List<PathChoice>,
+    max: Float,
+    onChange: (List<ai.ondevice.core.WeightedPath>) -> Unit,
+) {
+    val labels = uniqueLabels(choices)
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        entries.forEachIndexed { index, entry ->
+            val at = choices.indexOfFirst { it.path == entry.path }
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .ring(NocturneColors.Divider, ai.ondevice.ui.theme.Radius.Sm)
+                    .padding(horizontal = 10.dp, vertical = 9.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                ai.ondevice.ui.components.NDropdown(
+                    options = labels,
+                    selected = labels.getOrNull(at),
+                    placeholder = entry.path.substringAfterLast('/'),
+                    onSelect = { label ->
+                        val picked = choices.getOrNull(labels.indexOf(label)) ?: return@NDropdown
+                        onChange(entries.replaceAt(index, entry.copy(path = picked.path)))
+                    },
+                )
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Strength", style = NocturneType.Help, color = NocturneColors.TextMuted)
+                    NSlider(
+                        value = entry.weight,
+                        onValueChange = { onChange(entries.replaceAt(index, entry.copy(weight = it))) },
+                        valueRange = 0f..max,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        String.format("%.2f", entry.weight),
+                        style = NocturneType.MonoValue,
+                        color = NocturneColors.Accent300,
+                    )
+                    Text(
+                        "Remove",
+                        style = NocturneType.Help,
+                        color = NocturneColors.Accent,
+                        modifier = Modifier.nClickableFlat {
+                            onChange(entries.filterIndexed { i, _ -> i != index })
+                        },
+                    )
+                }
+            }
+        }
+
+        val unused = choices.filter { choice -> entries.none { it.path == choice.path } }
+        if (unused.isNotEmpty()) {
+            ai.ondevice.ui.components.NButton(
+                if (entries.isEmpty()) "Add one" else "Add another",
+                onClick = { onChange(entries + ai.ondevice.core.WeightedPath(unused.first().path)) },
+                block = true,
+            )
+        }
+    }
+}
+
+private fun <T> List<T>.replaceAt(index: Int, value: T): List<T> =
+    mapIndexed { i, existing -> if (i == index) value else existing }
+
+/** What the value line at the top of a row says. */
+private fun summarise(spec: ParamSpec, current: kotlinx.serialization.json.JsonElement?): String {
+    if (spec.type == ParamType.WEIGHTED_PATHS) {
+        val count = ai.ondevice.core.WeightedPaths.parse(current).size
+        return if (count == 0) "none" else "$count attached"
+    }
+    return current?.let { renderJson(it) } ?: "—"
 }
 
 @Composable

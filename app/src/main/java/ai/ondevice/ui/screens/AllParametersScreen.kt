@@ -144,6 +144,9 @@ fun AllParametersScreen(
                         style = NocturneType.MonoXs,
                         color = NocturneColors.Accent300,
                     )
+                    if (state.reloadsOnNextRun) {
+                        NHelp("This runtime loads at the start of a run, so the next one picks them up.")
+                    }
                     NButton(
                         "Apply and reload",
                         onClick = viewModel::applyPendingReload,

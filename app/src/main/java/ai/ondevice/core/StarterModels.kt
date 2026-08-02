@@ -85,15 +85,18 @@ object StarterModels {
             sizeHint = "~2.5 GB at Q4",
         ),
 
-        // Stable Diffusion's current generation. Like Klein it keeps its text
-        // encoders outside the checkpoint, so it also costs more than its own
-        // size — three of them, listed below as required.
+        // Stable Diffusion's current generation, in the distillation that makes
+        // it usable here. Like Klein it keeps its text encoders outside the
+        // checkpoint, so it costs more than its own size — the two CLIPs below.
+        //
+        // Its own repo also carries the VAE, which is why the decoder listed
+        // below is no longer the gated one.
         StarterModel(
-            repoId = "city96/stable-diffusion-3.5-medium-gguf",
+            repoId = SD35_TURBO,
             modality = Modality.DIFFUSION,
-            summary = "SD 3.5 medium. Reads a prompt closely and writes legible text. " +
-                "Needs all three encoders below — about 5 GB together.",
-            sizeHint = "~1.8 GB at Q4",
+            summary = "SD 3.5 medium, distilled to four steps. Reads a prompt closely and " +
+                "writes legible text. Needs CLIP-L, CLIP-G and its VAE below.",
+            sizeHint = "1.79 GB at Q4_K_M",
         ),
 
         // The only model here a ControlNet or an IP-Adapter fits.
@@ -106,15 +109,18 @@ object StarterModels {
         // reason it is here: nothing newer can be steered by a pose or a depth
         // map at all.
         //
-        // It is slow. A 1024-pixel picture is minutes on a phone CPU, against
-        // seconds for Klein at four steps. That is the trade, stated up front.
+        // It is also the one card that needs nothing beside it. The file
+        // carries the denoiser, both CLIPs and the decoder — 2641 tensors under
+        // `model.`, `cond_stage_model.` and `first_stage_model.` — which is why
+        // it is four gigabytes where a bare SDXL denoiser is one and a half.
+        // Every other quantised release here is the denoiser alone.
         StarterModel(
-            repoId = "HyperX-Sentience/SDXL-GGUF",
+            repoId = "gpustack/stable-diffusion-xl-1.0-turbo-GGUF",
             modality = Modality.DIFFUSION,
-            summary = "The last model a ControlNet or IP-Adapter fits — steer it with a pose, " +
-                "depth or edge map. UNet only, so it needs CLIP-L, CLIP-G and the SDXL VAE " +
-                "below. Minutes per picture here.",
-            sizeHint = "1.42 GB at Q4_K_S",
+            summary = "The one model a ControlNet or IP-Adapter fits — steer it with a pose, " +
+                "depth or edge map. Complete on its own: no encoders, no VAE. Turbo, so a " +
+                "few steps rather than twenty.",
+            sizeHint = "3.94 GB at Q4_0",
         ),
     )
 
@@ -123,6 +129,9 @@ object StarterModels {
 
     /** SD 3.5's three, which live together in one repo. */
     const val SD35_ENCODERS = "Comfy-Org/stable-diffusion-3.5-fp8"
+
+    /** The four-step SD 3.5, which also carries the decoder the base repo gates. */
+    const val SD35_TURBO = "tensorart/stable-diffusion-3.5-medium-turbo"
 
     /** The things that attach to a diffusion model. */
     val ADDONS: List<StarterModel> = listOf(
@@ -159,25 +168,21 @@ object StarterModels {
             summary = "SD 3.5's second — split_files/text_encoders/clip_g.",
             sizeHint = "~1.4 GB",
         ),
-        // SD 3.5's decoder, which is the one component with no ungated source.
-        //
-        // Comfy-Org's repo carries the three encoders and no VAE; city96's
-        // GGUFs are the denoiser alone. The only all-in-one is
-        // sd3.5_medium_incl_clips_t5xxlfp8scaled at 11.64 GB, which is more
-        // than this class of device has to spare. That leaves Stability's own
-        // repo, which is gated: accept the licence on the model page and paste
-        // a read token under Settings, and it resolves like anything else.
+        // SD 3.5's decoder, which used to be the one component with no ungated
+        // source: Comfy-Org's repo carries the three encoders and no VAE, and
+        // Stability's own repo wants a licence accepted and a token pasted
+        // before it will serve a 168 MB file. The turbo repo carries the same
+        // decoder in the diffusers layout and gates nothing.
         //
         // A 16-channel decoder, and the reason SDXL's cannot stand in: sd.cpp
         // checks the shape and refuses, "expected [3,3,16,512]".
         StarterModel(
-            repoId = "stabilityai/stable-diffusion-3.5-medium",
+            repoId = SD35_TURBO,
             modality = Modality.DIFFUSION,
             role = AttachmentRole.VAE,
             summary = "SD 3.5's decoder — 16-channel, so neither the SDXL nor the FLUX VAE can " +
-                "stand in. Gated: accept the licence on Hugging Face and add a token under " +
-                "Settings.",
-            sizeHint = "~170 MB",
+                "stand in. At vae/, in the same repo as the model itself.",
+            sizeHint = "168 MB",
         ),
 
         StarterModel(
@@ -189,16 +194,19 @@ object StarterModels {
             sizeHint = "~4.9 GB fp8",
         ),
 
-        // — the two SDXL needs, and the two only SDXL can use —
+        // — the two only SDXL can use, and one optional fix —
         //
-        // SDXL reads its prompt through the same CLIP-L and CLIP-G that SD 3.5
-        // does, so the two encoders above serve both and are not listed twice.
+        // The SDXL card above is a complete checkpoint, so nothing here is
+        // required with it. This one is a repair, not a missing part: SDXL's
+        // original decoder overflows in fp16 and returns a black image, and
+        // this is the same decoder rescaled so it does not.
         StarterModel(
             repoId = "madebyollin/sdxl-vae-fp16-fix",
             modality = Modality.DIFFUSION,
             role = AttachmentRole.VAE,
             summary = "SDXL's decoder, rebuilt so it does not produce a black image in fp16. " +
-                "Required with the SDXL card above.",
+                "Optional — the SDXL card carries its own — and worth having if yours comes " +
+                "out black.",
             sizeHint = "319 MB",
         ),
         StarterModel(

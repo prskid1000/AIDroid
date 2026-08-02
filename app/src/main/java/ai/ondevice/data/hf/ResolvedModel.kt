@@ -165,7 +165,7 @@ enum class CompanionRole(val cardinality: Cardinality) {
      * whether skipping earns a warning.
      */
     fun requiredBy(architecture: String?): Boolean {
-        val family = ai.ondevice.core.DiffusionDefaults.forName(architecture)
+        val family = ai.ondevice.core.DiffusionFamily.forName(architecture)
         // Nothing to do with diffusion — these stand on their own.
         if (this == VISION_PROJECTOR || this == VOICES) return true
         if (family == null) return legacyRequired
