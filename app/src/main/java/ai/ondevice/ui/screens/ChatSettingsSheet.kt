@@ -48,6 +48,7 @@ fun ChatSettingsSheet(
     onTemplateKwargsChange: (String) -> Unit,
     onLiveParam: (String, Any?) -> Unit,
     onOpenParameters: () -> Unit,
+    onUnloadModel: () -> Unit,
 ) {
     // The same chrome Image and Voice use.
     NBottomSheet("This conversation", onDismiss, note = "reload not required") {
@@ -297,12 +298,29 @@ fun ChatSettingsSheet(
                     // One button, because there was only ever one screen: the
                     // other opened it at a different tier, which is the first
                     // control on it.
+                    // Above All Parameters because it is about this model
+                    // rather than about the conversation, and because it is
+                    // the only control here that gives something back.
+                    NButton(
+                        "Unload model",
+                        onClick = onUnloadModel,
+                        style = NButtonStyle.Ghost,
+                        block = true,
+                        enabled = state.loadedModelId != null,
+                        modifier = Modifier.padding(top = 14.dp),
+                    )
+                    NHelp(
+                        "Frees the weights now. The next message reloads them, and the prompt " +
+                            "cache goes with them — so that turn pays for the whole context again.",
+                        Modifier.padding(top = 4.dp),
+                    )
+
                     NButton(
                         "All Parameters",
                         onClick = { onOpenParameters() },
                         style = NButtonStyle.Primary,
                         block = true,
-                        modifier = Modifier.padding(top = 14.dp),
+                        modifier = Modifier.padding(top = 12.dp),
                     )
     }
 }

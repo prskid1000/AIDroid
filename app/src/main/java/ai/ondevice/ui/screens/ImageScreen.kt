@@ -542,12 +542,28 @@ private fun ImageSettingsSheet(
 
         AttachmentsSection(state, viewModel)
 
+        // Above All Parameters because it is about this model rather than
+        // about the run, and because it is the only control here that gives
+        // something back instead of asking for something.
+        NButton(
+            "Unload model",
+            onClick = viewModel::unloadModel,
+            style = NButtonStyle.Ghost,
+            block = true,
+            enabled = state.residentComponents.isNotEmpty(),
+            modifier = Modifier.padding(top = 14.dp),
+        )
+        NHelp(
+            "Frees the weights now. Generating again reloads them.",
+            Modifier.padding(top = 4.dp),
+        )
+
         NButton(
             "All Parameters",
             onClick = onOpenAdvanced,
             style = NButtonStyle.Secondary,
             block = true,
-            modifier = Modifier.padding(top = 14.dp),
+            modifier = Modifier.padding(top = 12.dp),
         )
     }
 }

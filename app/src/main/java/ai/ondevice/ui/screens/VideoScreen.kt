@@ -560,6 +560,19 @@ private fun VideoSettingsSheet(
                     "weights and never be read.",
             )
 
+            NButton(
+                "Unload model",
+                onClick = viewModel::unloadModel,
+                style = NButtonStyle.Ghost,
+                block = true,
+                enabled = state.residentComponents.isNotEmpty(),
+                modifier = Modifier.padding(top = 18.dp),
+            )
+            NHelp(
+                "Frees the weights now. Generating again reloads them.",
+                Modifier.padding(top = 4.dp),
+            )
+
             // Where the Image screen keeps it too: the sheet is for what this
             // run is made of, and the full set is one step further in.
             NButton(
@@ -567,7 +580,7 @@ private fun VideoSettingsSheet(
                 onClick = onOpenAdvanced,
                 style = NButtonStyle.Ghost,
                 block = true,
-                modifier = Modifier.padding(top = 18.dp),
+                modifier = Modifier.padding(top = 12.dp),
             )
             NHelp(
                 "Every setting the runtime reports, including the hi-res stage and Wan 2.2's " +

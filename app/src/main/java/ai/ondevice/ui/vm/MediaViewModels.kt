@@ -157,6 +157,24 @@ class ImageViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Give the weights back now.
+     *
+     * The context is held after a run so the next one does not pay for the load
+     * again; nothing drops it until another model is chosen. That is several
+     * gigabytes resident while you go and do something else, and force-stopping
+     * the app was the only way to reclaim it.
+     */
+    fun unloadModel() {
+        diffusion.unload("you asked for the memory back")
+        _state.value = _state.value.copy(
+            residentComponents = emptyList(),
+            residentSize = null,
+            unloadReason = diffusion.lastUnloadReason,
+            recognisedAs = null,
+        )
+    }
+
     fun setUse(use: ImageUse) {
         _state.value = _state.value.copy(use = use)
     }
@@ -1313,6 +1331,24 @@ class VoiceViewModel @Inject constructor(
             return
         }
         _state.value = _state.value.copy(voice = first.id, speakError = null)
+    }
+
+    /**
+     * Give back whichever voice engine's weights are resident.
+     *
+     * Per engine rather than all of them: this sits beside the engine picker,
+     * and a button there that also dropped the other one would be doing
+     * something the screen never said.
+     */
+    fun unloadVoiceModel() {
+        val provider = _state.value.selectedVoice?.provider
+            ?: ai.ondevice.speech.SynthProvider.SYSTEM
+        viewModelScope.launch { synthesizer.unload(provider) }
+    }
+
+    /** The transcriber holds whisper between recordings for the same reason. */
+    fun unloadTranscriber() {
+        transcriber.unload()
     }
 
     fun setScript(value: String) {

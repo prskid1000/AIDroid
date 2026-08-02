@@ -133,6 +133,18 @@ class ChatViewModel @Inject constructor(
     }
 
     /** Start a fresh conversation. */
+    /**
+     * Give the weights back now, rather than when something else needs the room.
+     *
+     * A loaded model is held between turns — that is what makes a follow-up
+     * fast — so nothing drops it until another model is chosen or the process
+     * dies. On a phone that is several gigabytes resident while you go and do
+     * something else, and the only way to reclaim it was to force-stop the app.
+     */
+    fun unloadModel() {
+        viewModelScope.launch { engines.unload() }
+    }
+
     fun startNewConversation() {
         if (_state.value.generating) stop()
         // Already on an empty one.

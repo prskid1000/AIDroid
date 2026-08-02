@@ -238,6 +238,7 @@ fun ChatScreen(
                 onTemplateKwargsChange = viewModel::setTemplateKwargs,
                 onLiveParam = viewModel::setLiveParam,
                 onOpenParameters = onOpenParameters,
+                onUnloadModel = { viewModel.unloadModel(); sheetOpen = false },
             )
         }
     }
@@ -259,11 +260,27 @@ private fun ChatToolbar(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.alpha(0.6f),
             ) {
-                NDot(color = if (state.generating) NocturneColors.Accent else NocturneColors.Neutral500)
+                NDot(
+                    color = if (state.generating || state.loadingModel) {
+                        NocturneColors.Accent
+                    } else {
+                        NocturneColors.Neutral500
+                    },
+                )
                 Text(
-                    buildString {
-                        if (state.loadedModelId == null) append("not loaded · ")
-                        append("${Fmt.grouped(state.contextUsed)} / ${Fmt.grouped(state.contextLimit)} ctx")
+                    // A context readout of a context that does not exist yet.
+                    //
+                    // Loading a few gigabytes is the longest wait in the app,
+                    // and for all of it this said "0 / 8192 ctx" — a live
+                    // figure about a model that is not there, next to a dot
+                    // that says nothing is happening. Both were true and
+                    // neither was the answer to "what is it doing".
+                    when {
+                        state.loadingModel -> "loading…"
+                        state.loadedModelId == null ->
+                            "not loaded · ${Fmt.grouped(state.contextLimit)} ctx"
+                        else ->
+                            "${Fmt.grouped(state.contextUsed)} / ${Fmt.grouped(state.contextLimit)} ctx"
                     },
                     style = NocturneType.NavLabel,
                 )

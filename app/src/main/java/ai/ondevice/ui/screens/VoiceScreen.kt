@@ -941,6 +941,19 @@ private fun VoiceSettingsSheet(
             }
         }
 
+        NButton(
+            "Unload ${provider.label}",
+            onClick = viewModel::unloadVoiceModel,
+            style = NButtonStyle.Ghost,
+            block = true,
+            enabled = provider != ai.ondevice.speech.SynthProvider.SYSTEM,
+            modifier = Modifier.padding(top = 16.dp),
+        )
+        NHelp(
+            "Frees this engine's weights now. Speaking again reloads them.",
+            Modifier.padding(top = 4.dp),
+        )
+
         // Each engine's own parameter set.
         NButton(
             "All Parameters",
@@ -955,7 +968,7 @@ private fun VoiceSettingsSheet(
             },
             style = NButtonStyle.Secondary,
             block = true,
-            modifier = Modifier.padding(top = 16.dp),
+            modifier = Modifier.padding(top = 12.dp),
         )
     }
 }
@@ -990,6 +1003,18 @@ private fun TranscribeSettings(
     NHelp(
         "Recording decodes nothing — the take is transcribed once, when you stop.",
         Modifier.padding(top = 8.dp),
+    )
+
+    NButton(
+        "Unload whisper",
+        onClick = viewModel::unloadTranscriber,
+        style = NButtonStyle.Ghost,
+        block = true,
+        modifier = Modifier.padding(top = 16.dp),
+    )
+    NHelp(
+        "Frees the weights now. Transcribing again reloads them.",
+        Modifier.padding(top = 4.dp),
     )
 }
 

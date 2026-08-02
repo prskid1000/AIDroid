@@ -107,6 +107,16 @@ class VideoViewModel @Inject constructor(
         viewModelScope.launch { db.models().touch(model.id, System.currentTimeMillis()) }
     }
 
+    /** Give the weights back now — see the note on the image screen's copy. */
+    fun unloadModel() {
+        diffusion.unload("you asked for the memory back")
+        _state.value = _state.value.copy(
+            residentComponents = emptyList(),
+            recognisedAs = null,
+            supportsVideo = false,
+        )
+    }
+
     fun setPrompt(value: String) = update { copy(prompt = value) }
     fun setNegativePrompt(value: String) = update { copy(negativePrompt = value) }
     fun setFrames(value: Int) = update { copy(frames = value.coerceIn(1, 129)) }

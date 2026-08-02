@@ -279,6 +279,22 @@ class SpeechSynthesizer(
         stopPlayback()
     }
 
+    /**
+     * Drop whichever engine's weights are resident, keeping the system voice.
+     *
+     * Asked for by name rather than "unload everything": the two engines are
+     * chosen between on the same screen, and dropping the one you are not using
+     * is not what a button beside the one you are gets to mean.
+     */
+    suspend fun unload(provider: SynthProvider) {
+        when (provider) {
+            SynthProvider.KOKORO -> kokoro.unload()
+            SynthProvider.OMNIVOICE -> omniVoice.unload()
+            // The platform's own engine is not ours to unload.
+            SynthProvider.SYSTEM -> Unit
+        }
+    }
+
     fun release() {
         runCatching { tts?.shutdown() }
         tts = null
