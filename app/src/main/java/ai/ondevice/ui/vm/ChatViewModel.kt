@@ -380,10 +380,14 @@ class ChatViewModel @Inject constructor(
                 val loadResult = engines.load(model)
                 _state.value = _state.value.copy(loadingModel = false)
                 if (loadResult.isFailure) {
-                    _state.value = _state.value.copy(
-                        error = engines.state.value.error?.message ?: "Model load failed.",
-                        errorSuggestion = engines.state.value.error?.suggestion,
-                    )
+                    // A load the user stopped is not a load that failed, so it
+                    // gets no banner — the same distinction the image path makes.
+                    if (loadResult.exceptionOrNull() !is ai.ondevice.engine.LoadCancelled) {
+                        _state.value = _state.value.copy(
+                            error = engines.state.value.error?.message ?: "Model load failed.",
+                            errorSuggestion = engines.state.value.error?.suggestion,
+                        )
+                    }
                     return@launch
                 }
             }

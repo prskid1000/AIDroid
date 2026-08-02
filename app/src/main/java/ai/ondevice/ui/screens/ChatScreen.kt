@@ -959,10 +959,15 @@ private fun ChatComposer(
                     textStyle = NocturneType.Message,
                 )
             }
+            // A load is not "generating", and for the minute or two a 9B model
+            // takes to come off storage this was the one control on the screen
+            // with nothing to do — it showed Send, and a press queued a second
+            // message behind the load rather than abandoning it.
+            val busy = state.generating || state.loadingModel
             NCircleButton(
-                icon = if (state.generating) NIcons.Stop else NIcons.Send,
-                contentDescription = if (state.generating) "Stop" else "Send",
-                onClick = if (state.generating) onStop else onSend,
+                icon = if (busy) NIcons.Stop else NIcons.Send,
+                contentDescription = if (busy) "Stop" else "Send",
+                onClick = if (busy) onStop else onSend,
             )
         }
     }

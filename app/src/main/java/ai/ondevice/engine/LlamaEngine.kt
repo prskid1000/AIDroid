@@ -43,7 +43,25 @@ class LlamaEngine(
     override val isLoaded: Boolean get() = handle != 0L
     override val loadedModelId: String? get() = loaded?.modelId
 
+    /**
+     * Whether a load is in flight, so Stop knows there is something to stop.
+     *
+     * The send button read `generating` alone, and a load is not generating —
+     * so for the minute or two a 9B model takes to come off storage the button
+     * offered Send, the only control on the screen did nothing, and the press
+     * that was meant to abandon the load queued another one behind it.
+     */
+    @Volatile
+    var loading: Boolean = false
+        private set
+
+    @Volatile
+    private var loadCancelled: Boolean = false
+
     override suspend fun load(request: LoadRequest): Result<LoadedModel> = mutex.withLock {
+        loadCancelled = false
+        loading = true
+        try {
         runCatching {
             check(LlamaBridge.available) {
                 LlamaBridge.loadError ?: "The llama.cpp runtime is not installed in this build."
@@ -70,6 +88,14 @@ class LlamaEngine(
                 LlamaBridge.nativeLoad(request.modelPath, loadParams.toJsonString())
             }
             check(newHandle != 0L) { "The runtime returned no handle for ${request.modelPath}." }
+            // `nativeLoad` cannot be interrupted, so a Stop pressed during it
+            // is honoured here instead: the weights are freed rather than left
+            // resident under a handle nobody asked for.
+            if (loadCancelled) {
+                LlamaBridge.nativeFree(newHandle)
+                loadCancelled = false
+                throw LoadCancelled()
+            }
             handle = newHandle
             appliedParams = request.params
 
@@ -102,7 +128,12 @@ class LlamaEngine(
                     "eog=${model.stopSequences.size} vision=${model.vision}",
             )
             model
-        }.onFailure { android.util.Log.e(TAG, "load failed", it) }
+        }.onFailure {
+            if (it !is LoadCancelled) android.util.Log.e(TAG, "load failed", it)
+        }
+        } finally {
+            loading = false
+        }
     }
 
     override suspend fun unload() = mutex.withLock { freeHandle() }
@@ -341,6 +372,7 @@ class LlamaEngine(
      * takes no lock, so it cannot wait behind the work it is stopping.
      */
     fun cancel() {
+        if (loading) loadCancelled = true
         if (handle != 0L) LlamaBridge.nativeCancel(handle)
     }
 
