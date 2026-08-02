@@ -142,6 +142,17 @@ struct od_sd {
      */
     float pm_style_strength = 20.0f;
     float pulid_id_weight   = 1.0f;
+    /**
+     * PuLID's identity, which is a file rather than a photograph.
+     *
+     * The two adapters do not take the same input and it is easy to assume
+     * they do. PhotoMaker reads `pm_params.id_images` — actual pictures,
+     * encoded at generate time. PuLID reads a *precomputed* embedding off
+     * disk, and `before_diffusion` returns early while `id_embedding` is
+     * empty, so a PuLID with its weights loaded and no embedding path is
+     * exactly as inert as one with no weights at all.
+     */
+    std::string pulid_id_embedding;
 
     // The hi-res stage, which both stills and clips have.
     //
@@ -574,6 +585,7 @@ const std::map<std::string, row> & table() {
         { "cache_option",     { [](od_sd & e, const json & v) { e.cache_option = as_string(v); } } },
         { "style_strength",   { [](od_sd & e, const json & v) { e.pm_style_strength = as_float(v, e.pm_style_strength); } } },
         { "id_weight",        { [](od_sd & e, const json & v) { e.pulid_id_weight = as_float(v, e.pulid_id_weight); } } },
+        { "pulid_id_embedding", { [](od_sd & e, const json & v) { e.pulid_id_embedding = as_string(v); } } },
         { "slg_scale",        { [](od_sd & e, const json & v) { e.slg_scale = as_float(v, e.slg_scale); } } },
         { "skip_layer_start", { [](od_sd & e, const json & v) { e.skip_layer_start = as_float(v, e.skip_layer_start); } } },
         { "skip_layer_end",   { [](od_sd & e, const json & v) { e.skip_layer_end = as_float(v, e.skip_layer_end); } } },
@@ -628,6 +640,7 @@ const std::map<std::string, json (*)(const od_sd &)> & default_table() {
         { "cache_option",     [](const od_sd & e) { return json(e.cache_option); } },
         { "style_strength",   [](const od_sd & e) { return json(e.pm_style_strength); } },
         { "id_weight",        [](const od_sd & e) { return json(e.pulid_id_weight); } },
+        { "pulid_id_embedding", [](const od_sd & e) { return json(e.pulid_id_embedding); } },
         { "slg_scale",        [](const od_sd & e) { return json(e.slg_scale); } },
         { "skip_layer_start", [](const od_sd & e) { return json(e.skip_layer_start); } },
         { "skip_layer_end",   [](const od_sd & e) { return json(e.skip_layer_end); } },
@@ -1922,9 +1935,14 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
     // already resident; without these they were resident and idle.
     params.pm_params.style_strength = e->pm_style_strength;
     params.pulid_params.id_weight   = e->pulid_id_weight;
+    // PhotoMaker is shown the picture; PuLID is handed a file. Not the same
+    // input, and the picker only feeds the first of them.
     if (identity.image.data != nullptr) {
         params.pm_params.id_images       = &identity.image;
         params.pm_params.id_images_count = 1;
+    }
+    if (!e->pulid_id_embedding.empty()) {
+        params.pulid_params.id_embedding_path = e->pulid_id_embedding.c_str();
     }
 
     if (reference.image.data != nullptr) {

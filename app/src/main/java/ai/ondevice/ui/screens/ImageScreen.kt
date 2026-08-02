@@ -320,13 +320,14 @@ fun ImageScreen(
                 )
             }
 
-            // A fourth picture and a fourth thing: the face the identity
-            // adapters keep. Without it PhotoMaker and PuLID load their weights
-            // and change nothing — `pm_params.id_images` was never filled, so
-            // there was nobody to keep.
+            // A fourth picture and a fourth thing: the face PhotoMaker keeps.
+            // Without it the adapter loads its weights and changes nothing,
+            // because `pm_params.id_images` was never filled. PuLID is not
+            // listed here — it reads a precomputed embedding file rather than
+            // a photograph, and lives in the parameters as a path.
             if (state.usesIdentityImage) {
                 SourceImageField(
-                    label = "Identity · PhotoMaker / PuLID",
+                    label = "Identity · PhotoMaker",
                     uri = state.identityImageUri,
                     emptyLabel = "Add a face for the adapter to keep",
                     onPick = pickIdentity,

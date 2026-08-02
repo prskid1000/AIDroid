@@ -251,7 +251,12 @@ class LoadContractTest {
      */
     @Test
     fun `the identity adapters get an identity`() {
-        listOf("style_strength" to "photo_maker", "id_weight" to "pulid").forEach { (dial, file) ->
+        // The two adapters take different inputs, and assuming otherwise is how
+        // PuLID came to be "fixed" while still doing nothing: PhotoMaker reads
+        // `pm_params.id_images`, actual photographs; PuLID reads a precomputed
+        // embedding off disk and returns early from `before_diffusion` while it
+        // is empty. So the weight is gated on the embedding, not on the model.
+        listOf("style_strength" to "photo_maker", "id_weight" to "pulid_id_embedding").forEach { (dial, file) ->
             val spec = described(dial)
             assertTrue("$dial is undescribed", spec != null)
             assertEquals("$dial scales $file", file, spec!!.dependsOn?.key)
@@ -261,6 +266,15 @@ class LoadContractTest {
         assertTrue(
             "pm_params.id_images is never filled, so PhotoMaker loads and does nothing",
             cpp.contains("pm_params.id_images"),
+        )
+        assertTrue(
+            "pulid_params.id_embedding_path is never filled, so PuLID loads and does nothing",
+            cpp.contains("pulid_params.id_embedding_path"),
+        )
+        assertEquals(
+            "the embedding names a file, not a picture",
+            ParamType.PATH,
+            described("pulid_id_embedding")?.type,
         )
     }
 

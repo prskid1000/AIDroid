@@ -1135,16 +1135,16 @@ data class ImageState(
         get() = armed(ai.ondevice.core.AttachmentRole.CONTROLNET)
 
     /**
-     * The face the two identity adapters keep, which neither ever had.
+     * The face PhotoMaker keeps, which it never had.
      *
-     * `pm_params.id_images` and `pulid_params` were left as
-     * `sd_img_gen_params_init` wrote them, so PhotoMaker and PuLID could be
-     * attached, could load several hundred megabytes each, and could not
-     * change the picture — there was nobody to keep.
+     * PhotoMaker only, and the distinction is easy to get wrong: the two
+     * identity adapters do not take the same input. PhotoMaker reads
+     * `pm_params.id_images` — photographs, encoded at generate time. PuLID
+     * reads a *precomputed* embedding off disk, so a picture would do nothing
+     * for it; its file is a path parameter instead.
      */
     val usesIdentityImage: Boolean
-        get() = armed(ai.ondevice.core.AttachmentRole.PHOTO_MAKER) ||
-            armed(ai.ondevice.core.AttachmentRole.PULID)
+        get() = armed(ai.ondevice.core.AttachmentRole.PHOTO_MAKER)
 
     private fun armed(role: ai.ondevice.core.AttachmentRole) =
         availableAttachments.any { it.enabled && it.role == role }

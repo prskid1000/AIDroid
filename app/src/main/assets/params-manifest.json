@@ -21,7 +21,7 @@
     "Defaults, ranges and steps below are the description of last resort. Where a runtime",
     "reports its own live default, that value wins — see ParamRepository.specsFor."
   ],
-  "manifestVersion": 16,
+  "manifestVersion": 17,
   "runtimes": {
     "llama.cpp": {
       "params": [
@@ -2483,6 +2483,26 @@
           "help": "How strongly PuLID holds the face you supplied.",
           "requiresReload": false,
           "cliFlag": "--pulid-id-weight",
+          "dependsOn": {
+            "key": "pulid_id_embedding",
+            "notEquals": ""
+          },
+          "appliesTo": {
+            "output": [
+              "image"
+            ]
+          }
+        },
+        {
+          "key": "pulid_id_embedding",
+          "group": "identity",
+          "type": "path",
+          "default": "",
+          "tier": "ADVANCED",
+          "label": "PuLID identity embedding",
+          "help": "The face PuLID keeps, as a precomputed embedding file. Not a photograph — PuLID reads an embedding off disk where PhotoMaker reads pictures, and without one its weights are loaded and idle.",
+          "requiresReload": false,
+          "cliFlag": "--pulid-id-embed-path",
           "dependsOn": {
             "key": "pulid",
             "notEquals": ""
