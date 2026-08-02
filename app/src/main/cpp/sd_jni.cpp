@@ -50,12 +50,36 @@ struct od_sd {
     // Strings the params struct points at; they must outlive the call.
     std::string prompt;
     std::string negative_prompt;
-    std::string sampling_method = "euler_a";
-    std::string schedule        = "discrete";
+    /**
+     * The sampler and the noise schedule, empty meaning "whatever this model
+     * uses" — the same sentinel `flow_shift` has, in the two settings that
+     * decide the shape of the whole run.
+     *
+     * These were "euler_a" and "discrete", and they were sent on every run, so
+     * `resolve_sample_method` and `resolve_scheduler` never saw the
+     * SAMPLE_METHOD_COUNT / SCHEDULER_COUNT that means "ask the model". Flux.2
+     * wants FLUX2_SCHEDULER, Flux wants FLUX_SCHEDULER, LTX-AV wants LTX2 and
+     * Ideogram 4 wants logit-normal; every one of them got Karras instead —
+     * an EDM schedule built for the variance-preserving UNets, whose sigmas
+     * run to about 14.6 where a flow model's run to 1. Handed to a flow
+     * denoiser the latent leaves its range entirely and the VAE clips the
+     * whole frame, which is why a run finished clean, warned about nothing,
+     * and produced 128×128 pixels of pure white.
+     *
+     * Verified on device: Flux.2 klein 4B Q8_0, 128², seed 812934177, logged
+     * as "get_sigmas with Karras scheduler / sampling using DPM++ (2M)".
+     *
+     * An empty string already resolves to the sentinel — `str_to_scheduler`
+     * and `str_to_sample_method` both return their COUNT when nothing matches
+     * — but the emptiness is checked explicitly below rather than relying on
+     * a lookup failing.
+     */
+    std::string sampling_method;
+    std::string schedule;
 
-    int   steps       = 20;
-    float cfg_scale   = 7.0f;
-    float guidance    = 3.5f;
+    int   steps;
+    float cfg_scale;
+    float guidance;
 
     /**
      * Three settings whose real default is "whatever this architecture uses",
@@ -76,14 +100,14 @@ struct od_sd {
      * `eta` and `img_cfg` are the same sentinel and were simply never sent;
      * they are sent now, and a negative value still means "let it resolve".
      */
-    float flow_shift  = -1.0f;
-    float img_cfg     = -1.0f;
-    float eta         = -1.0f;
+    float flow_shift;
+    float img_cfg;
+    float eta;
     /** Timestep shifting, upstream's own default of 0 meaning "off". */
-    int   shifted_timestep = 0;
-    float slg_scale   = 0.0f;
-    float skip_layer_start = 0.01f;
-    float skip_layer_end   = 0.2f;
+    int   shifted_timestep;
+    float slg_scale;
+    float skip_layer_start;
+    float skip_layer_end;
     /**
      * Which blocks skip-layer guidance skips — and without which it is off.
      *
@@ -96,26 +120,26 @@ struct od_sd {
      * `{7, 8, 9}` is upstream's own default, from examples/common/common.h.
      */
     std::vector<int> skip_layers = { 7, 8, 9 };
-    int   width       = 512;
-    int   height      = 512;
-    int   clip_skip   = -1;
-    int   batch_count = 1;
-    float strength    = 0.75f;
-    float control_strength = 0.9f;
-    float ip_adapter_strength = 1.0f;
-    int64_t seed      = -1;
-    bool  vae_tiling  = false;
+    int   width;
+    int   height;
+    int   clip_skip;
+    int   batch_count;
+    float strength;
+    float control_strength;
+    float ip_adapter_strength;
+    int64_t seed;
+    bool  vae_tiling;
 
     // Video. Upstream's own defaults: a second of 16 fps, which is the shortest
     // clip worth looking at and the longest most phones will finish.
-    int   video_frames = 16;
-    int   fps          = 16;
+    int   video_frames;
+    int   fps;
     /** VACE's hold on the control frames, and inert without them. */
-    float vace_strength = 1.0f;
+    float vace_strength;
     /** Where Wan 2.2 hands over from its high-noise expert to its low-noise one. */
-    float moe_boundary  = 0.875f;
+    float moe_boundary;
     /** Steps for that high-noise expert; 0 means "the same as the other". */
-    int   high_noise_steps = 0;
+    int   high_noise_steps;
 
     /**
      * Step caching, which is the one setting here that buys minutes.
@@ -140,8 +164,8 @@ struct od_sd {
      * therefore no identity. Several hundred megabytes resident, and a picture
      * of nobody in particular.
      */
-    float pm_style_strength = 20.0f;
-    float pulid_id_weight   = 1.0f;
+    float pm_style_strength;
+    float pulid_id_weight;
     /**
      * PuLID's identity, which is a file rather than a photograph.
      *
@@ -161,12 +185,85 @@ struct od_sd {
     // clip it is the only *coherent* way to enlarge: the whole sequence's
     // latent is scaled and re-sampled together, so frames stay consistent with
     // one another. Running ESRGAN over each frame separately does not.
-    bool  hires_enabled  = false;
-    std::string hires_upscaler = "latent";
-    float hires_scale    = 1.5f;
-    int   hires_steps    = 0;      // 0 follows the main step count
-    float hires_denoise  = 0.5f;
-    int   hires_tile     = 0;
+    bool  hires_enabled;
+    std::string hires_upscaler;
+    float hires_scale;
+    int   hires_steps;      // 0 follows the main step count
+    float hires_denoise;
+    int   hires_tile;
+
+    /**
+     * Every number above, taken from the runtime rather than written here.
+     *
+     * This struct used to carry its own copy of each default — `steps = 20`,
+     * `cfg_scale = 7.0f`, `strength = 0.75f`, and thirty more. Two of those
+     * copies were wrong in a way nothing could see: `sd_sample_params_init`
+     * sets `scheduler` and `sample_method` to their COUNT, which is how a
+     * caller says "resolve this from the model", and the app's "discrete" and
+     * "euler_a" overwrote both on every single run. A Flux.2 checkpoint asking
+     * for the flux2 schedule got Karras, an EDM schedule whose sigmas run to
+     * about 14.6 where a flow model's run to 1, and the picture came back as
+     * 16384 identically white pixels with no warning anywhere.
+     *
+     * A copied constant is wrong the moment upstream changes it and there is
+     * nothing to notice — so none are copied. `sd_img_gen_params_init` and
+     * `sd_vid_gen_params_init` are the only definition of what a default is,
+     * and this reads them. It also corrected two numbers that had drifted
+     * already: the clip was 16 frames where upstream says 6, and the
+     * high-noise expert's step count was 0 where upstream's "follow the other
+     * one" is -1.
+     *
+     * The three INFINITY sentinels come back as -1 because these values are
+     * reported to Kotlin as JSON, and JSON has no infinity. `or_model_default`
+     * turns them back on the way out.
+     */
+    od_sd() {
+        sd_img_gen_params_t img;
+        sd_img_gen_params_init(&img);
+        sd_vid_gen_params_t vid;
+        sd_vid_gen_params_init(&vid);
+        const sd_sample_params_t & sample = img.sample_params;
+
+        const auto finite_or_sentinel = [](float value) {
+            return std::isfinite(value) ? value : -1.0f;
+        };
+
+        steps               = sample.sample_steps;
+        cfg_scale           = sample.guidance.txt_cfg;
+        guidance            = sample.guidance.distilled_guidance;
+        img_cfg             = finite_or_sentinel(sample.guidance.img_cfg);
+        eta                 = finite_or_sentinel(sample.eta);
+        flow_shift          = finite_or_sentinel(sample.flow_shift);
+        shifted_timestep    = sample.shifted_timestep;
+        slg_scale           = sample.guidance.slg.scale;
+        skip_layer_start    = sample.guidance.slg.layer_start;
+        skip_layer_end      = sample.guidance.slg.layer_end;
+
+        width               = img.width;
+        height              = img.height;
+        clip_skip           = img.clip_skip;
+        batch_count         = img.batch_count;
+        strength            = img.strength;
+        control_strength    = img.control_strength;
+        ip_adapter_strength = img.ip_adapter_strength;
+        seed                = img.seed;
+        vae_tiling          = img.vae_tiling_params.enabled;
+        pm_style_strength   = img.pm_params.style_strength;
+        pulid_id_weight     = img.pulid_params.id_weight;
+
+        video_frames        = vid.video_frames;
+        fps                 = vid.fps;
+        vace_strength       = vid.vace_strength;
+        moe_boundary        = vid.moe_boundary;
+        high_noise_steps    = vid.high_noise_sample_params.sample_steps;
+
+        hires_enabled       = img.hires.enabled;
+        hires_upscaler      = sd_hires_upscaler_name(img.hires.upscaler);
+        hires_scale         = img.hires.scale;
+        hires_steps         = img.hires.steps;
+        hires_denoise       = img.hires.denoising_strength;
+        hires_tile          = img.hires.upscale_tile_size;
+    }
 
     // Published by the callbacks, read by a polling Kotlin coroutine.
     std::atomic<int>   step{0};
@@ -609,7 +706,7 @@ const std::map<std::string, row> & table() {
         { "fps",              { [](od_sd & e, const json & v) { e.fps = std::max(1, as_int(v, e.fps)); } } },
         { "vace_strength",    { [](od_sd & e, const json & v) { e.vace_strength = as_float(v, e.vace_strength); } } },
         { "moe_boundary",     { [](od_sd & e, const json & v) { e.moe_boundary = as_float(v, e.moe_boundary); } } },
-        { "high_noise_steps", { [](od_sd & e, const json & v) { e.high_noise_steps = std::max(0, as_int(v, e.high_noise_steps)); } } },
+        { "high_noise_steps", { [](od_sd & e, const json & v) { e.high_noise_steps = std::max(-1, as_int(v, e.high_noise_steps)); } } },
         // The hi-res stage. Both stills and clips have one, and on a clip it is
         // the only coherent way to enlarge — the whole sequence's latent is
         // scaled and re-denoised together.
@@ -867,6 +964,11 @@ bool write_wav(const std::string & path, const sd_audio_t & audio) {
  * struct's own initialiser leaves empty. The vector lives on `od_sd`, which
  * outlives the call the params struct is passed to.
  */
+/** The spellings of "let the model decide" a name parameter accepts. */
+bool is_model_default(const std::string & name) {
+    return name.empty() || name == "auto" || name == "default";
+}
+
 /** A negative dial means "leave upstream's INFINITY, which resolves per model". */
 float or_model_default(float value) {
     return value < 0.0f ? INFINITY : value;
@@ -951,8 +1053,12 @@ void apply_sample_params(const od_sd & e, sd_sample_params_t & sample) {
     sample.flow_shift                  = or_model_default(e.flow_shift);
     sample.eta                         = or_model_default(e.eta);
     sample.shifted_timestep            = e.shifted_timestep;
-    sample.sample_method               = str_to_sample_method(e.sampling_method.c_str());
-    sample.scheduler                   = str_to_scheduler(e.schedule.c_str());
+    sample.sample_method               = is_model_default(e.sampling_method)
+                                             ? SAMPLE_METHOD_COUNT
+                                             : str_to_sample_method(e.sampling_method.c_str());
+    sample.scheduler                   = is_model_default(e.schedule)
+                                             ? SCHEDULER_COUNT
+                                             : str_to_scheduler(e.schedule.c_str());
 }
 
 void apply_slg(const od_sd & e, sd_slg_params_t & slg) {
@@ -1205,9 +1311,22 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
             }
             note_version(text);
             note_stage(text);
-            if (level >= SD_LOG_WARN) {
-                __android_log_write(level >= SD_LOG_ERROR ? ANDROID_LOG_ERROR : ANDROID_LOG_WARN,
-                                    "ondevice.sd", text);
+            // Everything from INFO up, not WARN up.
+            //
+            // The line upstream prints once per run — the resolved sampler, the
+            // schedule, flow_shift, eta, the guidance scales, the size — is an
+            // INFO, and it was the one thing that would have said in a sentence
+            // why a run came back a flat white square. Dropping it left the app
+            // reporting a clean run with no warnings and an image of nothing,
+            // and the only way to see the numbers the runtime actually used was
+            // to rebuild the .so. Two dozen lines a run is not a budget worth
+            // defending against that.
+            const int priority = level >= SD_LOG_ERROR   ? ANDROID_LOG_ERROR
+                                 : level >= SD_LOG_WARN  ? ANDROID_LOG_WARN
+                                 : level >= SD_LOG_INFO  ? ANDROID_LOG_INFO
+                                                         : ANDROID_LOG_DEBUG;
+            if (level >= SD_LOG_INFO) {
+                __android_log_write(priority, "ondevice.sd", text);
             }
         }, nullptr);
 

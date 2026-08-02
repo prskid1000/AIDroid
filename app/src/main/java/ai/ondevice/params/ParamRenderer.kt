@@ -24,6 +24,7 @@ import ai.ondevice.ui.components.NDot
 import ai.ondevice.ui.components.NEnumRow
 import ai.ondevice.ui.components.NHelp
 import ai.ondevice.ui.components.NInput
+import ai.ondevice.ui.components.NNudgeSlider
 import ai.ondevice.ui.components.NSlider
 import ai.ondevice.ui.components.NSwitch
 import ai.ondevice.ui.components.NTag
@@ -167,11 +168,11 @@ private fun ParamControl(
     when (spec.type) {
         ParamType.FLOAT -> if (spec.isRange) {
             val v = values.float(spec.key) ?: (spec.default as? JsonPrimitive)?.content?.toFloatOrNull() ?: 0f
-            NSlider(
+            NNudgeSlider(
                 value = v,
                 onValueChange = { onChange(spec.key, it) },
                 valueRange = spec.min!!.toFloat()..spec.max!!.toFloat(),
-                steps = discreteSteps(spec),
+                step = nudgeStep(spec),
             )
         } else {
             NumericField(spec, values, onChange, decimal = true)
@@ -180,11 +181,11 @@ private fun ParamControl(
         ParamType.INT -> if (spec.isRange) {
             val v = values.int(spec.key)?.toFloat()
                 ?: (spec.default as? JsonPrimitive)?.content?.toFloatOrNull() ?: 0f
-            NSlider(
+            NNudgeSlider(
                 value = v,
-                onValueChange = { onChange(spec.key, it.toInt()) },
+                onValueChange = { onChange(spec.key, Math.round(it)) },
                 valueRange = spec.min!!.toFloat()..spec.max!!.toFloat(),
-                steps = discreteSteps(spec),
+                step = nudgeStep(spec),
             )
         } else {
             NumericField(spec, values, onChange, decimal = false)
@@ -550,12 +551,25 @@ private fun NumericField(
     )
 }
 
-/** Sliders are step-snapped when the manifest gives a step, so a value the user drags to is one the runtime will actually accept. */
-private fun discreteSteps(spec: ParamSpec): Int {
-    val min = spec.min ?: return 0
-    val max = spec.max ?: return 0
-    val step = spec.step ?: return 0
-    if (step <= 0.0) return 0
-    val count = ((max - min) / step).toInt() - 1
-    return count.coerceIn(0, 200)
+/**
+ * How far one press of the nudge moves this parameter.
+ *
+ * The manifest's own `step` when it declares one, so a value the user reaches
+ * is one the runtime will actually accept — 64 for a width, 1 for a step count.
+ * When it declares none the range is divided into a hundred, which is fine for
+ * a 0…1 strength and is only ever used to make the control reachable, never to
+ * constrain what may be typed: the same parameter without `isRange` is a text
+ * field with no grid at all.
+ */
+private fun nudgeStep(spec: ParamSpec): Float {
+    spec.step?.takeIf { it > 0.0 }?.let { return it.toFloat() }
+    val min = spec.min ?: return 0f
+    val max = spec.max ?: return 0f
+    val span = max - min
+    if (span <= 0.0) return 0f
+    return if (spec.type == ParamType.INT) {
+        kotlin.math.max(1.0, kotlin.math.round(span / 100.0)).toFloat()
+    } else {
+        (span / 100.0).toFloat()
+    }
 }

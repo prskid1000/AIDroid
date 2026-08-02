@@ -38,31 +38,73 @@ struct od_whisper {
     std::string language      = "auto";
     std::string initial_prompt;
 
-    bool    translate       = false;
+    bool    translate;
+    bool    token_timestamps;
+    bool    single_segment;
+    bool    suppress_blank;
+    bool    suppress_nst;
+    bool    detect_language;
+    bool    split_on_word;
+    bool    diarize;
+    int32_t beam_size;
+    int32_t best_of;
+    int32_t audio_ctx;
+    int32_t max_len;
+    int32_t max_context;
+    int32_t offset_ms;
+    int32_t duration_ms;
+    float   temperature;
+    float   temperature_inc;
+    float   entropy_thold;
+    float   logprob_thold;
+    float   no_speech_thold;
+    float   word_thold;
+
+    /**
+     * Two switches whisper has no field for; they are how this app spells a
+     * thing it does to whisper's parameters rather than a thing whisper holds.
+     * `no_fallback` becomes a negative `temperature_inc`, and `no_timestamps`
+     * is applied after the fact to the segments.
+     */
     bool    no_timestamps   = false;
-    bool    token_timestamps = true;
-    bool    single_segment  = false;
-    bool    suppress_blank  = true;
-    bool    suppress_nst    = false;
-    bool    detect_language = false;
     bool    no_fallback     = false;
-    bool    split_on_word   = false;
-    bool    diarize         = false;
-    int32_t beam_size       = -1;
-    int32_t best_of         = 2;
-    int32_t audio_ctx       = 0;
-    int32_t max_len         = 0;
-    int32_t max_context     = -1;
-    int32_t offset_ms       = 0;
-    int32_t duration_ms     = 0;
-    // Every core but one.
-    int32_t threads         = std::max(1, (int) std::thread::hardware_concurrency() - 1);
-    float   temperature     = 0.0f;
-    float   temperature_inc = 0.2f;
-    float   entropy_thold   = 2.4f;
-    float   logprob_thold   = -1.0f;
-    float   no_speech_thold = 0.6f;
-    float   word_thold      = 0.01f;
+
+    /** Every core but one — about the phone, not about whisper. */
+    int32_t threads = std::max(1, (int) std::thread::hardware_concurrency() - 1);
+
+    /**
+     * Everything else, taken from whisper rather than written here.
+     *
+     * Copies drift. `best_of` was 2 where whisper's greedy default is 5, and
+     * `token_timestamps` was on where whisper leaves it off — two settings the
+     * app had quietly changed for every transcription, with nothing saying so
+     * and no way to notice. `whisper_full_default_params` is the only
+     * definition of a default, so it is the one read.
+     */
+    od_whisper() {
+        const whisper_full_params p = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+        translate        = p.translate;
+        token_timestamps = p.token_timestamps;
+        single_segment   = p.single_segment;
+        suppress_blank   = p.suppress_blank;
+        suppress_nst     = p.suppress_nst;
+        detect_language  = p.detect_language;
+        split_on_word    = p.split_on_word;
+        diarize          = p.tdrz_enable;
+        beam_size        = p.beam_search.beam_size;
+        best_of          = p.greedy.best_of;
+        audio_ctx        = p.audio_ctx;
+        max_len          = p.max_len;
+        max_context      = p.n_max_text_ctx;
+        offset_ms        = p.offset_ms;
+        duration_ms      = p.duration_ms;
+        temperature      = p.temperature;
+        temperature_inc  = p.temperature_inc;
+        entropy_thold    = p.entropy_thold;
+        logprob_thold    = p.logprob_thold;
+        no_speech_thold  = p.no_speech_thold;
+        word_thold       = p.thold_pt;
+    }
 
     ~od_whisper() {
         if (ctx) {
@@ -183,7 +225,7 @@ whisper_full_params build_params(od_whisper & e) {
     p.n_threads        = e.threads;
     p.audio_ctx        = e.audio_ctx;
     p.max_len          = e.max_len;
-    p.n_max_text_ctx   = e.max_context >= 0 ? e.max_context : 16384;
+    p.n_max_text_ctx   = e.max_context >= 0 ? e.max_context : p.n_max_text_ctx;
     p.offset_ms        = e.offset_ms;
     p.duration_ms      = e.duration_ms;
     p.split_on_word    = e.split_on_word;

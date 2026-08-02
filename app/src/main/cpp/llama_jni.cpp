@@ -451,16 +451,34 @@ json apply_params(od_engine & engine, const json & values, bool * needs_reload) 
  * One function, read by the loader and by the reporter, so the number shown is
  * the number used.
  */
+/**
+ * llama's own defaults, plus only what is true of this device.
+ *
+ * `common_params` carries its defaults in the struct, so `= {}` is already
+ * llama's answer to every question and nothing here needs to restate one. What
+ * this used to restate mattered: `n_ctx` was set to 4096, and llama spells
+ * "the context this model was trained with" as 0 — so every model, whatever it
+ * was trained for, was loaded at 4096 by an app that never said it had chosen.
+ * `n_batch` and `n_ubatch` were halved from llama's 2048/512 for the same
+ * unstated reason. All three are manifest rows under Context & KV cache, which
+ * is where a number that overrides the model's belongs: typed by someone, on a
+ * screen, next to the reason.
+ *
+ * The four that stay are about the phone rather than about llama.
+ */
 common_params app_defaults() {
     common_params p = {};
-    // The app has already run §3.3's fit arithmetic and shown the user the numbers.
+    // The app runs SPEC 3.3's fit arithmetic itself and shows the user the
+    // numbers, so llama re-deriving them on load would be a second opinion
+    // nobody asked for.
     p.fit_params   = false;
-    p.n_ctx        = 4096;
-    p.n_batch      = 512;
-    p.n_ubatch     = 256;
+    // No GPU offload: these are CPU builds, and llama's -1 means "auto", which
+    // on a backend with no device is a question with no answer.
     p.n_gpu_layers = 0;
     p.cpuparams.n_threads       = auto_thread_count();
     p.cpuparams_batch.n_threads = p.cpuparams.n_threads;
+    // A warmup pass on a 4B model on a phone is seconds of the user's time
+    // spent making the first token slightly faster.
     p.warmup       = false;
     return p;
 }

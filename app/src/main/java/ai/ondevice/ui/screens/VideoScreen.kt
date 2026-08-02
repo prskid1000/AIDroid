@@ -280,6 +280,7 @@ fun VideoScreen(
                     value = String.format("%.2f", state.controlStrength),
                     position = state.controlStrength,
                     range = 0f..2f,
+                    step = 0.05f,
                     onChange = viewModel::setControlStrength,
                 )
             }
@@ -297,14 +298,14 @@ fun VideoScreen(
                 value = "${state.frames}",
                 position = state.frames.toFloat(),
                 range = 1f..129f,
-                onChange = { viewModel.setFrames(it.toInt()) },
+                onChange = { viewModel.setFrames(Math.round(it)) },
             )
             LabelledSlider(
                 label = "Frames per second",
                 value = "${state.fps}",
                 position = state.fps.toFloat(),
                 range = 1f..60f,
-                onChange = { viewModel.setFps(it.toInt()) },
+                onChange = { viewModel.setFps(Math.round(it)) },
             )
             // The number that decides whether the run is possible. It grows with
             // three things at once, which is why it is stated rather than left
@@ -497,18 +498,18 @@ private fun LabelledSlider(
     position: Float,
     range: ClosedFloatingPointRange<Float>,
     onChange: (Float) -> Unit,
-    steps: Int = 0,
+    step: Float = 1f,
 ) {
     Column(Modifier.padding(top = 8.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(label, style = NocturneType.Row)
             Text(value, style = NocturneType.MonoValue, color = NocturneColors.Accent300)
         }
-        NSlider(
+        ai.ondevice.ui.components.NNudgeSlider(
             value = position,
             onValueChange = onChange,
             valueRange = range,
-            steps = steps,
+            step = step,
             modifier = Modifier.padding(top = 2.dp),
         )
     }
@@ -537,22 +538,23 @@ private fun VideoSettingsSheet(
                 label = "Size",
                 value = "${state.width}²",
                 position = state.width.toFloat(),
-                range = 256f..768f,
-                steps = 7,
-                onChange = { viewModel.setSize((it / 64).toInt() * 64) },
+                range = 64f..768f,
+                step = 64f,
+                onChange = { viewModel.setSize(Math.round(it)) },
             )
             LabelledSlider(
                 label = "Steps",
                 value = "${state.steps}",
                 position = state.steps.toFloat(),
                 range = 1f..60f,
-                onChange = { viewModel.setSteps(it.toInt()) },
+                onChange = { viewModel.setSteps(Math.round(it)) },
             )
             LabelledSlider(
                 label = "CFG scale",
                 value = String.format("%.1f", state.cfgScale),
                 position = state.cfgScale,
                 range = 1f..15f,
+                step = 0.1f,
                 onChange = viewModel::setCfg,
             )
             Row(

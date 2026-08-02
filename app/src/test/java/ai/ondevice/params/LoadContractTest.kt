@@ -241,6 +241,83 @@ class LoadContractTest {
     }
 
     /**
+     * That the sampler and the schedule are the model's, not the app's.
+     *
+     * The same defect as `flow_shift`, in the two settings that decide the
+     * shape of the entire run, and far more expensive. `sd_sample_params_init`
+     * sets `sample_method` and `scheduler` to their COUNT — the way a caller
+     * says "resolve this from the checkpoint" — and the app sent "euler_a" and
+     * "discrete" on every run, so `resolve_sample_method` and
+     * `resolve_scheduler` never got the chance. A Flux.2 checkpoint that asks
+     * for the flux2 schedule was handed Karras, an EDM schedule whose sigmas
+     * run to about 14.6 where a flow model's run to 1: the latent leaves its
+     * range and the VAE clips every channel, so a run that logged no warning
+     * at all decoded to 16384 identically white pixels.
+     *
+     * Measured on device — Flux.2 klein 4B Q8_0, 128², 4 steps, seed
+     * 812934177. Before: "get_sigmas with Karras scheduler / sampling using
+     * DPM++ (2M)", one distinct byte value in the PNG. After: "get_sigmas with
+     * Flux2 scheduler / sampling using Euler method", 256 of them.
+     */
+    @Test
+    fun `the sampler and the schedule are left to the model`() {
+        listOf("sampling_method", "schedule").forEach { key ->
+            val spec = described(key)
+            assertTrue("$key is undescribed", spec != null)
+            assertEquals(
+                "$key must default to the model's own, not to one architecture's name",
+                "auto",
+                (spec!!.default as? kotlinx.serialization.json.JsonPrimitive)?.content,
+            )
+            assertTrue(
+                "$key offers no way back to the model's own",
+                "auto" in spec.values,
+            )
+        }
+
+        val cpp = File("src/main/cpp/sd_jni.cpp").readText()
+        assertTrue(
+            "the sentinel spellings are not recognised, so \"auto\" would be looked up as a " +
+                "sampler name and silently fall through",
+            cpp.contains("is_model_default"),
+        )
+        assertTrue(
+            "the struct still carries its own sampler default; upstream's init is the only " +
+                "place a default belongs",
+            !cpp.contains("sampling_method = \"euler_a\"") && !cpp.contains("schedule        = \"discrete\""),
+        )
+    }
+
+    /**
+     * That no default in the diffusion struct is written twice.
+     *
+     * Every number this app used to keep beside the runtime's own was a copy
+     * that could drift, and two of them had: the clip was 16 frames where
+     * upstream says 6, and the high-noise expert's step count was 0 where
+     * upstream's "follow the other one" is -1. Neither was reachable from the
+     * app as a deliberate choice — they were simply different, silently.
+     *
+     * `sd_img_gen_params_init` and `sd_vid_gen_params_init` are the definition
+     * of a default, so the struct reads them rather than restating them.
+     */
+    @Test
+    fun `the diffusion defaults come from the runtime`() {
+        val cpp = File("src/main/cpp/sd_jni.cpp").readText()
+        assertTrue(
+            "od_sd does not read upstream's own initialisers",
+            cpp.contains("sd_img_gen_params_init(&img)") && cpp.contains("sd_vid_gen_params_init(&vid)"),
+        )
+        listOf(
+            "int   steps       = 20;",
+            "float cfg_scale   = 7.0f;",
+            "float strength    = 0.75f;",
+            "int   video_frames = 16;",
+        ).forEach {
+            assertTrue("a hand-written default survives: $it", !cpp.contains(it))
+        }
+    }
+
+    /**
      * That the identity adapters are given someone to keep.
      *
      * Both are load-time paths and both were being passed, so the weights went

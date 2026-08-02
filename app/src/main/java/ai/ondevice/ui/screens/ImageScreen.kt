@@ -549,7 +549,7 @@ private fun ImageSettingsSheet(
                 value = state.steps.toFloat(),
                 display = state.steps.toString(),
                 range = 1f..60f,
-                onChange = { viewModel.setSteps(it.toInt()) },
+                onChange = { viewModel.setSteps(Math.round(it)) },
                 modifier = Modifier.weight(1f),
             )
             LabeledSlider(
@@ -559,6 +559,7 @@ private fun ImageSettingsSheet(
                 range = 1f..20f,
                 onChange = viewModel::setCfg,
                 modifier = Modifier.weight(1f),
+                step = 0.1f,
             )
         }
 
@@ -944,6 +945,7 @@ internal fun LabeledSlider(
     range: ClosedFloatingPointRange<Float>,
     onChange: (Float) -> Unit,
     modifier: Modifier = Modifier,
+    step: Float = 1f,
 ) {
     Column(modifier) {
         Row(
@@ -954,6 +956,11 @@ internal fun LabeledSlider(
             Text(label, style = NocturneType.Row, modifier = Modifier.weight(1f))
             Text(display, style = NocturneType.MonoValue, color = NocturneColors.Accent300)
         }
-        NSlider(value = value, onValueChange = onChange, valueRange = range)
+        ai.ondevice.ui.components.NNudgeSlider(
+            value = value,
+            onValueChange = onChange,
+            valueRange = range,
+            step = step,
+        )
     }
 }

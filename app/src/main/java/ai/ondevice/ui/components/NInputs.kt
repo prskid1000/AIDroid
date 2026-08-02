@@ -283,6 +283,92 @@ fun NSlider(
     )
 }
 
+/**
+ * The range control with a nudge on either side.
+ *
+ * A slider on a phone is about 500 px of track. Spread sixty whole numbers
+ * across it and each one is eight pixels wide, which is narrower than the part
+ * of a fingertip the touchscreen resolves — so "steps = 4" is a target that
+ * cannot be hit, and the neighbour hit instead is the value that runs. Every
+ * integer setting in this app had that problem, and the ones worth reaching are
+ * at the low end of the track where the pixels are scarcest.
+ *
+ * The two buttons move exactly one [step], so every value is reachable by
+ * tapping even when none of them is reachable by dragging. The drag itself is
+ * snapped to the same grid, so a width of 320 is 320 and not the 319 that
+ * float arithmetic and a truncating `toInt()` used to produce — a size that is
+ * not a multiple of 64 is one the VAE cannot decode.
+ */
+@Composable
+fun NNudgeSlider(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    step: Float,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val snap = { raw: Float -> snapToStep(raw, valueRange, step) }
+    val current = snap(value)
+    Row(
+        modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        NNudge("−", enabled && current > valueRange.start) {
+            onValueChange(snap(current - step))
+        }
+        NSlider(
+            value = current,
+            onValueChange = { onValueChange(snap(it)) },
+            valueRange = valueRange,
+            steps = tickCount(valueRange, step),
+            enabled = enabled,
+            modifier = Modifier.weight(1f),
+        )
+        NNudge("+", enabled && current < valueRange.endInclusive) {
+            onValueChange(snap(current + step))
+        }
+    }
+}
+
+/** The nearest value on the grid, clamped to the range. */
+fun snapToStep(raw: Float, valueRange: ClosedFloatingPointRange<Float>, step: Float): Float {
+    val clamped = raw.coerceIn(valueRange.start, valueRange.endInclusive)
+    if (step <= 0f) return clamped
+    val ticks = Math.round((clamped - valueRange.start) / step)
+    return (valueRange.start + ticks * step).coerceIn(valueRange.start, valueRange.endInclusive)
+}
+
+/**
+ * Material's `steps` — ticks strictly between the ends, so a grid of N values
+ * is N-2. Capped because a tick per pixel is a tick per nothing, and Compose
+ * allocates the list.
+ */
+fun tickCount(valueRange: ClosedFloatingPointRange<Float>, step: Float): Int {
+    if (step <= 0f) return 0
+    val span = valueRange.endInclusive - valueRange.start
+    if (span <= 0f) return 0
+    return (Math.round(span / step) - 1).coerceIn(0, 200)
+}
+
+@Composable
+private fun NNudge(glyph: String, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(30.dp)
+            .ring(if (enabled) NocturneColors.Divider else NocturneColors.Neutral800, Radius.Sm)
+            .then(if (enabled) Modifier.nClickableFlat(onClick = onClick) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            glyph,
+            style = NocturneType.Row,
+            color = if (enabled) NocturneColors.Accent else NocturneColors.Neutral600,
+        )
+    }
+}
+
 /** The pill toggle from S8 and S11 — 40×23 track, 17px knob, divider hairline. */
 @Composable
 fun NSwitch(

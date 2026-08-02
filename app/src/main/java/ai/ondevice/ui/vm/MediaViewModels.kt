@@ -904,8 +904,11 @@ class ImageViewModel @Inject constructor(
             "width" to s.width,
             "height" to s.height,
             "seed" to seed,
-            "sampling_method" to s.samplingMethod,
-            "schedule" to s.schedule,
+            // Omitted rather than sent empty when nothing has been chosen: a
+            // key the runtime never sees is a key that keeps its own default,
+            // which for these two is the one the checkpoint asks for.
+            "sampling_method" to s.samplingMethod.takeIf { it.isNotBlank() },
+            "schedule" to s.schedule.takeIf { it.isNotBlank() },
             "clip_skip" to s.clipSkip,
             "vae_tiling" to s.vaeTiling,
             // Recorded so a picture in the library says what was done to it,
@@ -1054,8 +1057,13 @@ data class ImageState(
     val extendTop: Int = 0,
     val extendRight: Int = 0,
     val extendBottom: Int = 0,
-    val samplingMethod: String = "dpm++2m",
-    val schedule: String = "karras",
+    // Empty is "whatever this model uses", which is what the runtime resolves
+    // when it is sent nothing. These held "dpm++2m" and "karras" and sent them
+    // on every run, so a Flux.2 checkpoint that wants the flux2 schedule got an
+    // EDM one built for SD 1.5 — a flow latent driven through Karras sigmas
+    // leaves its range and the VAE clips the frame to white.
+    val samplingMethod: String = "",
+    val schedule: String = "",
     val clipSkip: Int = 2,
     val vaeTiling: Boolean = true,
     val generating: Boolean = false,
