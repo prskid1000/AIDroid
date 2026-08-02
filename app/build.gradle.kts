@@ -22,8 +22,8 @@ android {
         // versionCode is not higher than the installed one, and the only way
         // past that refusal is an uninstall — which takes the model files and
         // the database with it.
-        versionCode = 9
-        versionName = "1.0.1"
+        versionCode = 10
+        versionName = "1.0.2"
 
         // SPEC 2.2 — arm64 is the only shipping ABI; armeabi-v7a would double
         // the APK for devices that could never load these models anyway.
