@@ -1,4 +1,7 @@
 package ai.ondevice.ui.components
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.graphics.graphicsLayer
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -65,18 +68,31 @@ fun NButton(
     }
     // Pressed states come from the accent ramp, per the readme's interaction
     // rules — a colour-mix tint for outlined and ghost variants.
-    val fill = when {
+    val fillTarget = when {
         !pressed -> Color.Transparent
         style == NButtonStyle.Primary -> NocturneColors.AccentPressed
         style == NButtonStyle.Ghost -> NocturneColors.AccentGhostPressed
         else -> NocturneColors.NeutralPressed
     }
+    // Crossed rather than switched: at 140 ms the fill arrives with the press
+    // instead of after it, and a double tap picks up from wherever it was.
+    val fill by animateColorAsState(fillTarget, Motion.colour, label = "fill")
+    val scale by animateFloatAsState(
+        if (pressed) Motion.PRESSED_SCALE else 1f,
+        Motion.press,
+        label = "press",
+    )
+    val fade by animateFloatAsState(
+        if (enabled) 1f else NocturneColors.DisabledAlpha,
+        Motion.press,
+        label = "enabled",
+    )
     val hPad = if (style == NButtonStyle.Ghost) Space.s1 else 10.08.dp
 
     Row(
         modifier = modifier
             .then(if (block) Modifier.fillMaxWidth() else Modifier)
-            .alpha(if (enabled) 1f else NocturneColors.DisabledAlpha)
+            .graphicsLayer { scaleX = scale; scaleY = scale; alpha = fade }
             .defaultMinSize(minHeight = minHeight)
             .background(fill, Radius.Md)
             .ring(borderColor, Radius.Md)
@@ -124,12 +140,25 @@ fun NIconButton(
         NButtonStyle.Secondary -> NocturneColors.Divider
         NButtonStyle.Ghost -> Color.Transparent
     }
-    val fill = when {
+    val fillTarget = when {
         !pressed -> Color.Transparent
         style == NButtonStyle.Primary -> NocturneColors.AccentPressed
         style == NButtonStyle.Ghost -> NocturneColors.AccentGhostPressed
         else -> NocturneColors.NeutralPressed
     }
+    // Crossed rather than switched: at 140 ms the fill arrives with the press
+    // instead of after it, and a double tap picks up from wherever it was.
+    val fill by animateColorAsState(fillTarget, Motion.colour, label = "fill")
+    val scale by animateFloatAsState(
+        if (pressed) Motion.PRESSED_SCALE else 1f,
+        Motion.press,
+        label = "press",
+    )
+    val fade by animateFloatAsState(
+        if (enabled) 1f else NocturneColors.DisabledAlpha,
+        Motion.press,
+        label = "enabled",
+    )
 
     Box(
         modifier = modifier

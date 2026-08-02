@@ -1,4 +1,7 @@
 package ai.ondevice.ui.components
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.runtime.getValue
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -51,6 +54,10 @@ fun NCard(
 ) {
     Column(
         modifier = modifier
+            // A card that gains a line — a refusal, a reason, a stage — should
+            // grow into it rather than snap, because the snap reads as the
+            // layout breaking rather than as new information arriving.
+            .animateContentSize(Motion.resize)
             .background(fill, shape)
             .then(
                 when {
@@ -284,9 +291,18 @@ fun NProgressBar(
             .height(height)
             .background(track, Radius.Sm),
     ) {
+        // The number behind this arrives in jumps — a download's bytes, a
+        // sampler's steps, polled a few times a second. Animating the bar
+        // rather than the number keeps the reading honest and the movement
+        // continuous.
+        val width by animateFloatAsState(
+            fraction.coerceIn(0f, 1f),
+            Motion.value,
+            label = "progress",
+        )
         Box(
             Modifier
-                .fillMaxWidth(fraction.coerceIn(0f, 1f))
+                .fillMaxWidth(width)
                 .height(height)
                 .background(fill, Radius.Sm),
         )

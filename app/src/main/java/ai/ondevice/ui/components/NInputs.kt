@@ -1,4 +1,5 @@
 package ai.ondevice.ui.components
+import androidx.compose.animation.animateColorAsState
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -290,15 +291,26 @@ fun NSwitch(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    val offset by animateFloatAsState(if (checked) 1f else 0f, label = "switch")
+    val offset by animateFloatAsState(
+        if (checked) 1f else 0f,
+        ai.ondevice.ui.components.Motion.press,
+        label = "switch",
+    )
+    val trackColour by animateColorAsState(
+        if (checked) NocturneColors.Accent700 else NocturneColors.Neutral900,
+        ai.ondevice.ui.components.Motion.colour,
+        label = "track",
+    )
+    val thumbColour by animateColorAsState(
+        if (checked) NocturneColors.Accent200 else NocturneColors.Neutral600,
+        ai.ondevice.ui.components.Motion.colour,
+        label = "thumb",
+    )
     Box(
         modifier = modifier
             .width(40.dp)
             .height(23.dp)
-            .background(
-                if (checked) NocturneColors.Accent700 else NocturneColors.Neutral900,
-                CircleShape,
-            )
+            .background(trackColour, CircleShape)
             .ring(NocturneColors.Divider, CircleShape)
             .nClickableFlat(enabled) { onCheckedChange(!checked) }
             .padding(2.dp),
@@ -309,7 +321,7 @@ fun NSwitch(
                 .offset(x = (offset * 17).dp)
                 .size(17.dp)
                 .background(
-                    if (checked) NocturneColors.Accent200 else NocturneColors.Neutral600,
+                    thumbColour,
                     CircleShape,
                 ),
         )
