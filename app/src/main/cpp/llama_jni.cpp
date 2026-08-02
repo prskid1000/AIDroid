@@ -434,6 +434,37 @@ json apply_params(od_engine & engine, const json & values, bool * needs_reload) 
     return json{ { "applied", applied }, { "rejected", rejected } };
 }
 
+/**
+ * The parameters an untouched load actually runs with.
+ *
+ * Not `common_params{}` — this build overrides seven of its fields before it
+ * applies anything, and for three of them the difference matters. Upstream's
+ * `n_ctx` is 0, which llama.cpp reads as "the context the model was trained
+ * with"; on a phone facing a 32k-trained model that is a KV cache measured in
+ * gigabytes, so this build asks for 4096 and lets the screen raise it. But the
+ * parameter screen read its defaults from `common_params{}` and so displayed 0
+ * — meaning Reset asked for the largest context the model could be given,
+ * which is the one number most likely to end the run. `n_batch` and `n_ubatch`
+ * were the same disagreement without the danger: the screen said 2048 and 512,
+ * every untouched load used 512 and 256.
+ *
+ * One function, read by the loader and by the reporter, so the number shown is
+ * the number used.
+ */
+common_params app_defaults() {
+    common_params p = {};
+    // The app has already run §3.3's fit arithmetic and shown the user the numbers.
+    p.fit_params   = false;
+    p.n_ctx        = 4096;
+    p.n_batch      = 512;
+    p.n_ubatch     = 256;
+    p.n_gpu_layers = 0;
+    p.cpuparams.n_threads       = auto_thread_count();
+    p.cpuparams_batch.n_threads = p.cpuparams.n_threads;
+    p.warmup       = false;
+    return p;
+}
+
 void rebuild_sampler(od_engine & engine) {
     if (engine.smpl != nullptr) {
         common_sampler_free(engine.smpl);
@@ -571,8 +602,8 @@ Java_ai_ondevice_engine_LlamaBridge_nativeSystemInfo(JNIEnv * env, jobject) {
 /** Every parameter key this binary will actually act on, with the reload flag that only the table knows. */
 JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_LlamaBridge_nativeSupportedParams(JNIEnv * env, jobject) {
-    // Aggregate-initialised: common_params has no user-provided default constructor, so `const common_params defaults;` will not compile.
-    const common_params defaults = {};
+    // What this build loads with, not what upstream's struct starts as.
+    const common_params defaults = app_defaults();
     const auto & readers = default_table();
 
     json out = json::object();
@@ -595,15 +626,7 @@ Java_ai_ondevice_engine_LlamaBridge_nativeLoad(JNIEnv * env, jobject, jstring jp
 
     auto * engine = new od_engine();
 
-    // The app has already run §3.3's fit arithmetic and shown the user the numbers.
-    engine->params.fit_params = false;
-    engine->params.n_ctx      = 4096;
-    engine->params.n_batch    = 512;
-    engine->params.n_ubatch   = 256;
-    engine->params.n_gpu_layers = 0;
-    engine->params.cpuparams.n_threads       = auto_thread_count();
-    engine->params.cpuparams_batch.n_threads = engine->params.cpuparams.n_threads;
-    engine->params.warmup     = false;
+    engine->params = app_defaults();
 
     try {
         if (!params_str.empty()) {
