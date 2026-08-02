@@ -27,6 +27,7 @@ import ai.ondevice.core.AttachmentRole
 import ai.ondevice.core.Fmt
 import ai.ondevice.core.Modality
 import ai.ondevice.data.hf.RemedyAction
+import ai.ondevice.data.hf.requiredBy
 import ai.ondevice.core.VerdictTone
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle

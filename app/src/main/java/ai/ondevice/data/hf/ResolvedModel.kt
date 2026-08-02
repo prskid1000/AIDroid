@@ -126,100 +126,64 @@ data class RemoteFile(
     val securityStatus: String? = null,
 )
 
-/** How many files of one role the thing that consumes them can actually take. */
-enum class Cardinality {
-    /** One path, and only one. */
-    ONE,
+/**
+ * The resolver's word for a role, which is now the app's word for a role.
+ *
+ * There were two enums for one idea, bridged by comparing their entries'
+ * *names* as strings. That bridge silently dropped every role only one of them
+ * had — a LoRA, an IP-Adapter, a CLIP-Vision encoder or an embedding found by
+ * the resolver had nowhere to go, and the roles it did carry were classified by
+ * a second rule set that disagreed with the first. One name, one vocabulary,
+ * one classifier.
+ */
+typealias CompanionRole = ai.ondevice.core.AttachmentRole
 
-    /** Every file is part of one thing. */
-    ALL,
-}
+typealias Cardinality = ai.ondevice.core.Cardinality
 
-enum class CompanionRole(val cardinality: Cardinality) {
-    VISION_PROJECTOR(Cardinality.ONE),
-    VAE(Cardinality.ONE),
-    CLIP_L(Cardinality.ONE),
-    CLIP_G(Cardinality.ONE),
-    T5XXL(Cardinality.ONE),
-    /** FLUX.2's prompt encoder: a whole language model, not a CLIP. */
-    LLM_ENCODER(Cardinality.ONE),
-    CONTROLNET(Cardinality.ONE),
-    UPSCALER(Cardinality.ONE),
-    VOICES(Cardinality.ALL),
-    VAD(Cardinality.ONE),
-    ;
-
-    val label: String
-        get() = when (this) {
-            VISION_PROJECTOR -> "Vision projector"
-            VAE -> "VAE"
-            CLIP_L -> "CLIP-L text encoder"
-            CLIP_G -> "CLIP-G text encoder"
-            T5XXL -> "T5-XXL text encoder"
-            LLM_ENCODER -> "Text encoder (language model)"
-            CONTROLNET -> "ControlNet"
-            UPSCALER -> "Upscaler"
-            VOICES -> "Voice style vectors"
-            VAD -> "Silero VAD"
-        }
-
-    /** The manifest key this role's file is passed under, where it has one. */
-    private val paramKey: String?
-        get() = when (this) {
-            CLIP_L -> "clip_l"
-            CLIP_G -> "clip_g"
-            T5XXL -> "t5xxl"
-            LLM_ENCODER -> "llm"
-            else -> null
-        }
-
-    /**
-     * Whether the model is unusable without this, for the architecture it is.
-     *
-     * Which text encoders a diffusion model needs is a property of its family,
-     * not of the role, and the two answers are very different:
-     *
-     * | family    | reads its prompt through        | decoder      |
-     * |-----------|---------------------------------|--------------|
-     * | SD 1.x/2.x| CLIP-L                          | in the file  |
-     * | SDXL      | CLIP-L **and** CLIP-G           | in the file  |
-     * | SD 3.x    | CLIP-L, CLIP-G (T5-XXL if kept) | separate     |
-     * | FLUX.1    | CLIP-L and T5-XXL               | separate     |
-     * | FLUX.2    | a language model — Qwen3, Mistral| separate     |
-     * | Chroma    | T5-XXL alone, CLIP-L dropped    | separate     |
-     * | Qwen-Image| a Qwen2.5-VL                    | separate     |
-     *
-     * Asked per role alone this could only ever be wrong for somebody: a T5-XXL
-     * is indispensable to FLUX.1 and dead weight on SDXL, and SDXL was being
-     * told CLIP-L was enough when it conditions on two encoders.
-     *
-     * It is advice, not a gate. Every companion can be skipped, because the
-     * file filling a role may already be in the library; what this decides is
-     * whether skipping earns a warning.
-     */
-    fun requiredBy(architecture: String?): Boolean {
-        val family = ai.ondevice.core.DiffusionFamily.forName(architecture)
-        // Nothing to do with diffusion — these stand on their own.
-        if (this == VISION_PROJECTOR || this == VOICES) return true
-        if (family == null) return legacyRequired
-        return when (this) {
-            VAE -> family.vaeSeparate
-            else -> paramKey?.let { it in family.encoders } ?: false
-        }
+/**
+ * Whether the model is unusable without this, for the architecture it is.
+ *
+ * Which text encoders a diffusion model needs is a property of its family, not
+ * of the role, and the two answers are very different:
+ *
+ * | family    | reads its prompt through        | decoder      |
+ * |-----------|---------------------------------|--------------|
+ * | SD 1.x/2.x| CLIP-L                          | in the file  |
+ * | SDXL      | CLIP-L **and** CLIP-G           | in the file  |
+ * | SD 3.x    | CLIP-L, CLIP-G (T5-XXL if kept) | separate     |
+ * | FLUX.1    | CLIP-L and T5-XXL               | separate     |
+ * | FLUX.2    | a language model — Qwen3, Mistral| separate     |
+ * | Chroma    | T5-XXL alone, CLIP-L dropped    | separate     |
+ * | Qwen-Image| a Qwen2.5-VL                    | separate     |
+ *
+ * Asked per role alone this could only ever be wrong for somebody: a T5-XXL is
+ * indispensable to FLUX.1 and dead weight on SDXL, and SDXL was being told
+ * CLIP-L was enough when it conditions on two encoders.
+ *
+ * It is advice, not a gate. Every companion can be skipped, because the file
+ * filling a role may already be in the library; what this decides is whether
+ * skipping earns a warning.
+ */
+fun CompanionRole.requiredBy(architecture: String?): Boolean {
+    // Nothing to do with diffusion — these stand on their own.
+    if (this == CompanionRole.VISION_PROJECTOR || this == CompanionRole.VOICES) return true
+    val family = ai.ondevice.core.DiffusionFamily.forName(architecture) ?: return legacyRequired
+    return when (this) {
+        CompanionRole.VAE -> family.vaeSeparate
+        else -> paramKey in family.encoders
     }
-
-    /**
-     * What to say when the architecture is not known yet — a GGUF with no
-     * `general.architecture` and no tag to infer from, which is most bare
-     * diffusion releases until stable-diffusion.cpp has opened the file.
-     */
-    private val legacyRequired: Boolean
-        get() = this == VISION_PROJECTOR || this == VAE || this == CLIP_L || this == CLIP_G ||
-            this == T5XXL || this == LLM_ENCODER || this == VOICES
-
-    @Deprecated("Ask requiredBy(architecture) — what a model needs depends on which model it is.")
-    val required: Boolean get() = legacyRequired
 }
+
+/**
+ * What to say when the architecture is not known yet — a GGUF with no
+ * `general.architecture` and no tag to infer from, which is most bare diffusion
+ * releases until stable-diffusion.cpp has opened the file.
+ */
+private val CompanionRole.legacyRequired: Boolean
+    get() = this == CompanionRole.VISION_PROJECTOR || this == CompanionRole.VAE ||
+        this == CompanionRole.CLIP_L || this == CompanionRole.CLIP_G ||
+        this == CompanionRole.T5XXL || this == CompanionRole.LLM_ENCODER ||
+        this == CompanionRole.VOICES
 
 /** SPEC §3.2 step 5: companions are detected and auto-paired. */
 data class CompanionFile(

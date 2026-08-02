@@ -289,6 +289,10 @@ class ModelResolver(
             sizes = sizeLookup,
             variantFiles = quants.flatMap { variant -> variant.files.map { it.filename } }.toSet(),
             architecture = arch,
+            // The repo's own tags, which settle the files whose names are
+            // ambiguous on their own — `refcontrol_depth.safetensors` in a
+            // repo tagged `lora` is a LoRA, not a ControlNet.
+            tags = info.tags,
         )
         val modality = classifyModality(info, format, files, companions)
         if (format == ModelFormat.GGUF && arch != null && !registry.supportsArchitecture(arch)) {
@@ -396,10 +400,11 @@ class ModelResolver(
         sizes: Map<String, HfPathInfo>,
         variantFiles: Set<String> = emptySet(),
         architecture: String? = null,
+        tags: List<String> = emptyList(),
     ): List<CompanionGroup> = CompanionGrouping.group(
         files.mapNotNull { name ->
             if (name in variantFiles) return@mapNotNull null
-            val role = companionRole(name) ?: return@mapNotNull null
+            val role = companionRole(name, tags) ?: return@mapNotNull null
             val info = sizes[name]
             CompanionFile(
                 file = RemoteFile(
@@ -415,35 +420,19 @@ class ModelResolver(
         architecture = architecture,
     )
 
-    /** The containers weights come in, as opposed to the notes shipped beside them. */
-    private val WEIGHT_CONTAINERS = setOf(
-        "safetensors", "gguf", "ckpt", "pth", "pt", "bin", "onnx", "npz", "npy",
-    )
-
-    private fun companionRole(name: String): CompanionRole? {
-        // A role is a file the runtime loads, so the extension decides before
-        // the name does. Without this "upscal" matched an example workflow
-        // diagram and offered a 21 KB JSON as an upscaler, and "vae" matched
-        // the config.json sitting beside the VAE.
-        //
-        // Its own list rather than AttachmentRole's: this enum also covers
-        // mmproj projectors, Silero VAD and Kokoro's voice packs, which that
-        // one has never heard of.
-        if (name.substringAfterLast('.', "").lowercase() !in WEIGHT_CONTAINERS) return null
-        val n = name.lowercase()
-        return when {
-            n.contains("mmproj") -> CompanionRole.VISION_PROJECTOR
-            n.contains("vae") -> CompanionRole.VAE
-            n.contains("clip_g") || n.contains("clip-g") -> CompanionRole.CLIP_G
-            n.contains("clip_l") || n.contains("clip-l") -> CompanionRole.CLIP_L
-            n.contains("t5xxl") || n.contains("t5-xxl") -> CompanionRole.T5XXL
-            n.contains("control") && n.endsWith(".safetensors") -> CompanionRole.CONTROLNET
-            n.contains("esrgan") || n.contains("upscal") -> CompanionRole.UPSCALER
-            n.contains("voices") && n.endsWith(".bin") -> CompanionRole.VOICES
-            n.contains("silero") || n.contains("vad") -> CompanionRole.VAD
-            else -> null
-        }
-    }
+    /**
+     * What this file is.
+     *
+     * One rule set, in [ai.ondevice.core.FileRoles]. This used to be a second
+     * one, kept here because the resolver's enum knew about mmproj projectors,
+     * Silero VAD and Kokoro's voice packs and the other enum did not — and it
+     * paid for that by reading the whole path with `contains`, so a repo named
+     * `sd-vae-ft-mse` made a VAE of everything inside it, including its UNet.
+     * The two enums are now one, so there is nothing left for a second rule set
+     * to know.
+     */
+    private fun companionRole(name: String, tags: List<String> = emptyList()): CompanionRole? =
+        ai.ondevice.core.FileRoles.of(name, tags)
 
     private fun isCompanionFilename(name: String) = companionRole(name) != null
 

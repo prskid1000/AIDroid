@@ -68,6 +68,20 @@ enum class AttachmentRole(
     EMBEDDING("Embedding", "embd_dir", RoleFamily.STYLE_AND_CONTROL, multiple = true),
 
     UPSCALER("Upscaler", "upscale_model", RoleFamily.POST),
+
+    // The three the resolver used to know about and this enum did not. They
+    // belong to the text and voice runtimes rather than to diffusion, which is
+    // why they were in the other enum — and being in the other enum is exactly
+    // what made a file mean two things at once.
+
+    /** The projector that lets a text model be shown a picture. */
+    VISION_PROJECTOR("Vision projector", "mmproj", RoleFamily.PROMPT_ENCODER),
+
+    /** Kokoro's speaker vectors, all of which are one component. */
+    VOICES("Voice style vectors", "voices", RoleFamily.STYLE_AND_CONTROL, multiple = true),
+
+    /** Silero's voice-activity detector, which whisper takes as a file. */
+    VAD("Silero VAD", "vad_model", RoleFamily.STYLE_AND_CONTROL),
     ;
 
     val isDiffusionAuxiliary: Boolean get() = true
@@ -78,75 +92,36 @@ enum class AttachmentRole(
     /** The role this one cannot work without, or null. */
     val required: AttachmentRole? get() = requires?.let { valueOf(it.roleName) }
 
+    /**
+     * How many files of this role the thing consuming them can take.
+     *
+     * Kokoro's voice packs are the odd one: every file is part of one
+     * component, so "all of them" is the answer rather than "pick one".
+     */
+    val cardinality: Cardinality
+        get() = if (this == VOICES) Cardinality.ALL else Cardinality.ONE
+
     companion object {
-        /** Classify a repo or file from its *metadata*, never from a curated list of known model names. */
         /**
-         * The containers weights actually come in.
+         * What this file is, from how it is labelled — never from a curated
+         * list of known model names.
          *
-         * A role describes a file the runtime will load, and the repos that
-         * ship one also ship notes about it — `config.json`, a README, a
-         * ComfyUI workflow. Matching on the name alone read
-         * `SD3.5L_plus_SD3.5M_upscaling_example_workflow.json` as an upscaler,
-         * because it does contain "upscal", and offered a 21 KB diagram as a
-         * model.
+         * The rules live in [FileRoles], which is the only place that answers
+         * this question. It used to be answered here *and* in the resolver, by
+         * two rule sets that disagreed.
          */
-        private val WEIGHT_CONTAINERS = setOf(
-            "safetensors", "gguf", "ckpt", "pth", "pt", "bin", "onnx", "npz", "npy",
-        )
-
-        private fun isWeightFile(filename: String) =
-            filename.substringAfterLast('.', "").lowercase() in WEIGHT_CONTAINERS
-
-        fun classify(filename: String, tags: List<String> = emptyList()): AttachmentRole? {
-            if (!isWeightFile(filename)) return null
-            val name = filename.substringAfterLast('/').lowercase()
-            val path = filename.lowercase()
-            val tagSet = tags.map { it.lowercase() }.toSet()
-
-            /**
-             * Whether a *folder* on the way to this file declares the role.
-             *
-             * The diffusers layout names the component in the directory and
-             * calls the weights `diffusion_pytorch_model.safetensors` in every
-             * one of them — `vae/`, `unet/`, `text_encoder/`, `transformer/` —
-             * so the folder is the only thing that says what the file is.
-             *
-             * Whole segments, not a substring of the path: `contains("vae")`
-             * would read `sd-vae-ft-mse/unet/model.safetensors` as a VAE when
-             * the folder plainly says UNet, and a repo's own name is not a
-             * claim about the file inside it.
-             */
-            fun inFolder(vararg names: String): Boolean =
-                path.split('/').dropLast(1).any { segment ->
-                    // `vae` exactly, or `vae_decoder` and `vae_encoder`, which
-                    // are the same component split in two — but never
-                    // `vaeless`, where the word merely starts the same way.
-                    names.any { segment == it || segment.startsWith(it + "_") }
-                }
-
-            return when {
-                // Read from the *directory*, because the file is called `model.safetensors` and says nothing about itself.
-                inFolder("image_encoder") -> CLIP_VISION
-                // ControlNet is tested *before* LoRA on purpose.
-                "controlnet" in tagSet || name.contains("control") && !name.contains("uncond") -> CONTROLNET
-                "lora" in tagSet || name.contains("lora") -> LORA
-                name.contains("ip-adapter") || name.contains("ip_adapter") -> IP_ADAPTER
-                // Read the whole path, not just the filename. The diffusers
-                // layout names the role in the *directory* and calls every file
-                // `diffusion_pytorch_model.safetensors`, so a VAE fetched that
-                // way came back unclassified while the resolver, which reads the
-                // path, had already filed it correctly. Two classifiers, two
-                // answers, for the same file.
-                name.contains("vae") || inFolder("vae") -> VAE
-                name.contains("clip_l") || name.contains("clip-l") -> CLIP_L
-                name.contains("clip_g") || name.contains("clip-g") -> CLIP_G
-                name.contains("t5xxl") || name.contains("t5-xxl") -> T5XXL
-                name.contains("esrgan") || name.contains("upscal") -> UPSCALER
-                "textual_inversion" in tagSet -> EMBEDDING
-                else -> null
-            }
-        }
+        fun classify(filename: String, tags: List<String> = emptyList()): AttachmentRole? =
+            FileRoles.of(filename, tags)
     }
+}
+
+/** How many files of one role the thing that consumes them can actually take. */
+enum class Cardinality {
+    /** One path, and only one. */
+    ONE,
+
+    /** Every file is part of one thing. */
+    ALL,
 }
 
 /** One attachment as selected for a run. */
