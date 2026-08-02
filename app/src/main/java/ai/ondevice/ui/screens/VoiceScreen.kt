@@ -129,7 +129,16 @@ fun VoiceScreen(
     PhoneScaffold(
         toolbar = {
             // No engine tag up here.
-            RootToolbar("Voice") {
+            // The heading names the mode, not the tab. "Sounds" covers both
+            // directions and says neither; which one you are in is the thing
+            // worth reading, and it was only legible from which icon looked
+            // pressed.
+            RootToolbar(
+                when (state.mode) {
+                    VoiceMode.TRANSCRIBE -> "STT"
+                    VoiceMode.SPEAK -> "TTS"
+                },
+            ) {
                 // Iterated, not listed — see the note on Image's toolbar. A mode
                 // added to the enum has to be given an icon before this builds.
                 VoiceMode.entries.forEach { mode ->

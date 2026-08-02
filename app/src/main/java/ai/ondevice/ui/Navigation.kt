@@ -84,14 +84,16 @@ object Routes {
  *
  * Video is deliberately not its own entry. It shares the diffusion runtime, the
  * checkpoints and the loaded context with stills, so the two are modes of one
- * tab — switched in the toolbar the way Voice switches Transcribe and Speak —
- * and "Visuals" is the tab because "Image" named only half of what is behind
- * it. The sixth slot is being held for Workflow.
+ * tab, switched in the toolbar. "Visuals" and "Sounds" name the domain rather
+ * than one direction through it — each holds two modes, and each screen's
+ * heading says which one you are in.
+ *
+ * The sixth slot is being held for Workflow.
  */
 val BottomDestinations = listOf(
     NavDestination("Chat", NIcons.Chat, Routes.CHAT),
     NavDestination("Visuals", NIcons.Image, Routes.IMAGE),
-    NavDestination("Voice", NIcons.Voice, Routes.VOICE),
+    NavDestination("Sounds", NIcons.Voice, Routes.VOICE),
     NavDestination("Library", NIcons.Library, Routes.LIBRARY),
     NavDestination("Settings", NIcons.Settings, Routes.SETTINGS),
 )
