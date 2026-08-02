@@ -87,6 +87,9 @@ fun VideoScreen(
     val pickLast = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
     ) { uri -> uri?.let { viewModel.setLastFrame(it.toString()) } }
+    val pickControl = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri -> uri?.let { viewModel.setControlImage(it.toString()) } }
 
     PhoneScaffold(
         toolbar = {
@@ -252,6 +255,39 @@ fun VideoScreen(
                     onClear = { viewModel.setLastFrame(null) },
                 )
             }
+
+            // The pose or depth map the motion follows.
+            //
+            // The engine has taken one since video generation was added and
+            // nothing on this screen offered it, so `vace_strength` — the dial
+            // that weights it — sat behind a ControlNet row that a clip never
+            // reads. VACE is what a clip uses instead, and it reads this.
+            SectionKicker("Control frame", Modifier.padding(top = 18.dp, bottom = 6.dp))
+            FrameSlot(
+                label = "Control",
+                uri = state.controlImageUri,
+                modifier = Modifier.fillMaxWidth(0.5f),
+                onPick = {
+                    pickControl.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                    )
+                },
+                onClear = { viewModel.setControlImage(null) },
+            )
+            if (state.controlImageUri != null) {
+                LabelledSlider(
+                    label = "VACE strength",
+                    value = String.format("%.2f", state.controlStrength),
+                    position = state.controlStrength,
+                    range = 0f..2f,
+                    onChange = viewModel::setControlStrength,
+                )
+            }
+            NHelp(
+                "Applied to every frame — the app has one map to give, not one per frame. " +
+                    "Only a VACE-capable checkpoint reads it, and LTX-AV does not read it at all.",
+                Modifier.padding(top = 4.dp),
+            )
 
             // — length —
 
@@ -550,21 +586,16 @@ private fun VideoSettingsSheet(
                 architectureLabel = state.recognisedAs ?: state.model?.architecture,
                 onToggle = viewModel::toggleAttachment,
                 onWeight = viewModel::setAttachmentWeight,
-                // A ControlNet on a clip is weighted by VACE rather than by
-                // `control_strength` — the same slot, a different dial.
-                strengthFor = { role ->
-                    if (role == ai.ondevice.core.AttachmentRole.CONTROLNET) {
-                        state.controlStrength
-                    } else {
-                        null
-                    }
-                },
-                onStrength = { _, value -> viewModel.setControlStrength(value) },
+                // The control frame has its own section above, with VACE's dial
+                // beside it. Nothing in this list carries a strength.
+                strengthFor = { null },
+                onStrength = { _, _ -> },
                 emptyHelp = "A motion module is what turns an SD 1.5 checkpoint into one that " +
                     "animates. Wan, Hunyuan and LTX-AV need their encoder and decoder instead. " +
-                    "IP-Adapters and the identity adapters are not listed at all: the runtime's " +
-                    "video path has no field for them, so one attached here would cost its " +
-                    "weights and never be read.",
+                    "IP-Adapters, the identity adapters and ControlNets are not listed at all: " +
+                    "the runtime's video path has no field for them, so one attached here would " +
+                    "cost its weights and never be read. An upscaler is listed because LTX-AV's " +
+                    "hi-res stage is a separate latent upsampler, and that is where it goes.",
             )
 
             NButton(

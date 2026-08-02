@@ -445,13 +445,22 @@ class VideoViewModel @Inject constructor(
          * no `ip_adapter_strength` in the video struct at all, so an attached
          * one would cost its weights and a 2.5 GB vision encoder and never be
          * read. Same for the two identity adapters.
+         *
+         * A ControlNet joins them because `generate_video` hands the sampler an
+         * empty control image and a strength of zero — a clip's control map
+         * goes to VACE, whose blocks are part of the checkpoint. The slot was
+         * offered, the file was loaded, and nothing ever asked it anything.
+         *
+         * The upscaler is the one that left: LTX-AV's hi-res stage is a latent
+         * spatial upsampler in its own file, and refusing the role was refusing
+         * the only way to supply it.
          */
         val ROLES_VIDEO_IGNORES = setOf(
             AttachmentRole.IP_ADAPTER,
             AttachmentRole.CLIP_VISION,
             AttachmentRole.PHOTO_MAKER,
             AttachmentRole.PULID,
-            AttachmentRole.UPSCALER,
+            AttachmentRole.CONTROLNET,
         )
 
         /** The parts a model cannot run without, armed unless switched off. */

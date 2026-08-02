@@ -21,7 +21,7 @@
     "Defaults, ranges and steps below are the description of last resort. Where a runtime",
     "reports its own live default, that value wins — see ParamRepository.specsFor."
   ],
-  "manifestVersion": 14,
+  "manifestVersion": 15,
   "runtimes": {
     "llama.cpp": {
       "params": [
@@ -1591,9 +1591,28 @@
           "step": 0.1,
           "tier": "EXPERT",
           "label": "Skip-layer guidance",
-          "help": "0 disables SLG.",
+          "help": "0 disables SLG. DiT models only — the runtime says so and skips it on the rest.",
           "requiresReload": false,
           "cliFlag": "--slg-scale"
+        },
+        {
+          "key": "skip_layers",
+          "group": "guidance",
+          "type": "int[]",
+          "default": [
+            7,
+            8,
+            9
+          ],
+          "tier": "EXPERT",
+          "label": "Layers to skip",
+          "help": "Which blocks SLG skips. Emptying this turns SLG off however high the scale is — the runtime gates on the list, not the scale alone.",
+          "requiresReload": false,
+          "dependsOn": {
+            "key": "slg_scale",
+            "notEquals": 0.0
+          },
+          "cliFlag": "--skip-layers"
         },
         {
           "key": "skip_layer_start",
@@ -1832,13 +1851,9 @@
           "step": 0.05,
           "tier": "ADVANCED",
           "label": "VACE strength",
-          "help": "How strongly the control frames hold the clip. Inert without them.",
+          "help": "How strongly the control frame holds the clip, set beside the frame itself. Inert without one, and read only by a VACE-capable checkpoint.",
           "requiresReload": false,
           "cliFlag": "--vace-strength",
-          "dependsOn": {
-            "key": "control_net",
-            "notEquals": ""
-          },
           "appliesTo": {
             "output": [
               "video"
@@ -2300,10 +2315,13 @@
           "default": "",
           "tier": "ADVANCED",
           "label": "ControlNet model",
-          "help": "Path to the ControlNet weights.",
+          "help": "Path to the ControlNet weights. Stills only — a clip's control map goes to VACE instead.",
           "requiresReload": true,
           "cliFlag": "--control-net",
           "appliesTo": {
+            "output": [
+              "image"
+            ],
             "arch": [
               "sd1",
               "sd1_inpaint",
@@ -2331,7 +2349,7 @@
           "step": 0.05,
           "tier": "EXPERT",
           "label": "ControlNet strength",
-          "help": "How strongly the control image constrains the result.",
+          "help": "How strongly the control image constrains the result. Stills only — VACE strength is the equivalent on a clip.",
           "requiresReload": false,
           "cliFlag": "--control-strength",
           "dependsOn": {
@@ -2339,6 +2357,9 @@
             "notEquals": ""
           },
           "appliesTo": {
+            "output": [
+              "image"
+            ],
             "arch": [
               "sd1",
               "sd1_inpaint",

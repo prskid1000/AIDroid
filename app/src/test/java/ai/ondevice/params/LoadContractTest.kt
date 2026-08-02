@@ -132,20 +132,92 @@ class LoadContractTest {
         fun outputOf(key: String) = specs.firstOrNull { it.key == key }?.appliesTo?.output
 
         // No field in the video struct at all.
-        listOf("ip_adapter", "ip_adapter_strength", "clip_vision", "batch_count", "photo_maker", "pulid")
-            .forEach {
-                assertEquals("$it has no field in sd_vid_gen_params_t", listOf("image"), outputOf(it))
-            }
+        //
+        // The two ControlNet rows joined them late: `sd_vid_gen_params_t` has
+        // no `control_strength`, and `generate_video` hands the sampler an
+        // empty control image and a strength of zero — a clip's control map
+        // goes to VACE, whose blocks are part of the checkpoint. Both rows were
+        // ungated, so a Wan model offered a file picker for weights nothing
+        // would read and a slider with no field to reach.
+        listOf(
+            "ip_adapter", "ip_adapter_strength", "clip_vision", "batch_count", "photo_maker",
+            "pulid", "control_net", "control_strength",
+        ).forEach {
+            assertEquals("$it has no field in sd_vid_gen_params_t", listOf("image"), outputOf(it))
+        }
         // No field in the image struct.
         listOf("video_frames", "fps", "moe_boundary", "high_noise_diffusion_model", "audio_vae")
             .forEach {
                 assertEquals("$it has no field in sd_img_gen_params_t", listOf("video"), outputOf(it))
             }
         // Shared by both, and gated by neither.
-        listOf("steps", "cfg_scale", "seed", "width", "sampling_method", "loras", "vae", "hires_fix")
-            .forEach {
-                assertEquals("$it reaches both structs and must not be gated", null, outputOf(it))
-            }
+        listOf(
+            "steps", "cfg_scale", "seed", "width", "sampling_method", "loras", "vae", "hires_fix",
+            "slg_scale", "skip_layers",
+        ).forEach {
+            assertEquals("$it reaches both structs and must not be gated", null, outputOf(it))
+        }
+    }
+
+    /**
+     * That skip-layer guidance has the one setting that turns it on.
+     *
+     * Upstream gates the whole feature on `(slg_scale != 0) && !layers.empty()`
+     * and `sd_sample_params_init` leaves `layer_count` at 0. The app set the
+     * scale, the start and the end and never the list, so three dials were
+     * live, draggable, marked as modified, and read by a sampler that had
+     * already decided SLG was off. Nothing said so, because nothing could —
+     * the picture it produced was simply the picture without SLG.
+     *
+     * The video path did not even set the other three, which is why the pair
+     * of assertions differ in what they are guarding against.
+     */
+    @Test
+    fun `skip-layer guidance has a layer list`() {
+        val spec = described("skip_layers")
+        assertTrue("skip_layers is undescribed, so SLG cannot be switched on at all", spec != null)
+        assertEquals("it names block indices", ParamType.INT_ARRAY, spec!!.type)
+        assertEquals(
+            "the scale is what SLG is gated on, so the list follows it",
+            "slg_scale",
+            spec.dependsOn?.key,
+        )
+        assertEquals("sd.cpp reads it per run, not per context", false, spec.requiresReload)
+
+        val cpp = File("src/main/cpp/sd_jni.cpp").readText()
+        assertTrue(
+            "the layer list is never handed to sd_slg_params_t, so SLG stays off",
+            cpp.contains("slg.layers"),
+        )
+        assertEquals(
+            "both generate paths have to set SLG; the video one used to set none of it",
+            2,
+            Regex("""apply_slg\(\*e,""").findAll(cpp).count(),
+        )
+    }
+
+    /**
+     * That a clip's hi-res stage is not offered as if it were a still's.
+     *
+     * They share the manifest rows and are different features. On an image,
+     * hi-res is generate-small-then-denoise-larger and every upscaler mode
+     * works. On a clip it is LTX-AV's latent spatial upsampler, a separate
+     * file, and `generate_video` returns false for any other architecture, for
+     * any upscaler but MODEL, and for a missing path. All three came back as
+     * "The run produced no frames. This is usually memory" — after minutes of
+     * sampling, about a setting the person had turned on deliberately.
+     */
+    @Test
+    fun `the video hi-res stage answers for itself`() {
+        val cpp = File("src/main/cpp/sd_jni.cpp").readText()
+        assertTrue(
+            "the video path still shares apply_hires, so a Wan run with hi-res on fails as OOM",
+            cpp.contains("apply_video_hires"),
+        )
+        assertTrue(
+            "nothing checks the architecture, and only LTX-AV has a latent upsampler",
+            cpp.contains("LTX"),
+        )
     }
 
     @Test

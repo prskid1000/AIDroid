@@ -60,6 +60,18 @@ struct od_sd {
     float slg_scale   = 0.0f;
     float skip_layer_start = 0.01f;
     float skip_layer_end   = 0.2f;
+    /**
+     * Which blocks skip-layer guidance skips — and without which it is off.
+     *
+     * `sd_sample_params_init` leaves `slg.layer_count` at 0, and upstream gates
+     * the whole feature on `(slg_scale != 0) && !skip_layers.empty()`. So a
+     * scale set to anything, a start, an end — three dials, all live, all
+     * marked as modified, none of them reaching a sampler that had already
+     * decided SLG was off. The list is the switch, and nothing here set it.
+     *
+     * `{7, 8, 9}` is upstream's own default, from examples/common/common.h.
+     */
+    std::vector<int> skip_layers = { 7, 8, 9 };
     int   width       = 512;
     int   height      = 512;
     int   clip_skip   = -1;
@@ -457,6 +469,44 @@ std::string as_string(const json & v) {
     return v.is_string() ? v.get<std::string>() : dump_json(v);
 }
 
+/** A list of block indices, however it was written: `[7,8,9]`, `"7, 8, 9"`, `7`. */
+std::vector<int> as_int_list(const json & v, const std::vector<int> & fallback) {
+    std::vector<int> out;
+    if (v.is_array()) {
+        for (const auto & item : v) {
+            if (item.is_number()) {
+                out.push_back((int) std::lround(item.get<double>()));
+            } else if (item.is_string()) {
+                try { out.push_back(std::stoi(item.get<std::string>())); } catch (...) {}
+            }
+        }
+        // An emptied chip row is a person turning the feature off, not a parse
+        // failure, so it is kept rather than replaced with the fallback.
+        return out;
+    }
+    if (v.is_number()) {
+        out.push_back((int) std::lround(v.get<double>()));
+        return out;
+    }
+    if (v.is_string()) {
+        const std::string text = v.get<std::string>();
+        std::string       token;
+        for (size_t i = 0; i <= text.size(); ++i) {
+            const char c = i < text.size() ? text[i] : ',';
+            if (c == ',' || c == ' ' || c == '\t') {
+                if (!token.empty()) {
+                    try { out.push_back(std::stoi(token)); } catch (...) {}
+                    token.clear();
+                }
+            } else {
+                token.push_back(c);
+            }
+        }
+        return out;
+    }
+    return fallback;
+}
+
 struct row { void (*apply)(od_sd &, const json &); };
 
 const std::map<std::string, row> & table() {
@@ -470,6 +520,10 @@ const std::map<std::string, row> & table() {
         { "slg_scale",        { [](od_sd & e, const json & v) { e.slg_scale = as_float(v, e.slg_scale); } } },
         { "skip_layer_start", { [](od_sd & e, const json & v) { e.skip_layer_start = as_float(v, e.skip_layer_start); } } },
         { "skip_layer_end",   { [](od_sd & e, const json & v) { e.skip_layer_end = as_float(v, e.skip_layer_end); } } },
+        // A chip row hands over strings, the raw-parameter box hands over an
+        // array, and a person typing into either may write "7, 8, 9". All three
+        // mean the same list.
+        { "skip_layers",      { [](od_sd & e, const json & v) { e.skip_layers = as_int_list(v, e.skip_layers); } } },
         { "width",            { [](od_sd & e, const json & v) { e.width = as_int(v, e.width); } } },
         { "height",           { [](od_sd & e, const json & v) { e.height = as_int(v, e.height); } } },
         { "seed",             { [](od_sd & e, const json & v) { e.seed = as_long(v, e.seed); } } },
@@ -513,6 +567,7 @@ const std::map<std::string, json (*)(const od_sd &)> & default_table() {
         { "slg_scale",        [](const od_sd & e) { return json(e.slg_scale); } },
         { "skip_layer_start", [](const od_sd & e) { return json(e.skip_layer_start); } },
         { "skip_layer_end",   [](const od_sd & e) { return json(e.skip_layer_end); } },
+        { "skip_layers",      [](const od_sd & e) { return json(e.skip_layers); } },
         { "width",            [](const od_sd & e) { return json(e.width); } },
         { "height",           [](const od_sd & e) { return json(e.height); } },
         { "seed",             [](const od_sd & e) { return json(e.seed); } },
@@ -727,6 +782,28 @@ bool write_wav(const std::string & path, const sd_audio_t & audio) {
  *
  * @param upscaler_model the ESRGAN to use when the mode is `model`, or empty.
  */
+/**
+ * The skip-layer guidance settings, all four of them.
+ *
+ * Shared because the video path had only the first three and upstream needs
+ * all four — `layers` is what turns the feature on, and it is the one the
+ * struct's own initialiser leaves empty. The vector lives on `od_sd`, which
+ * outlives the call the params struct is passed to.
+ */
+void apply_slg(const od_sd & e, sd_slg_params_t & slg) {
+    slg.scale       = e.slg_scale;
+    slg.layer_start = e.skip_layer_start;
+    slg.layer_end   = e.skip_layer_end;
+    slg.layers      = e.skip_layers.empty() ? nullptr : const_cast<int *>(e.skip_layers.data());
+    slg.layer_count = e.skip_layers.size();
+}
+
+/** The architecture the loader announced for the resident checkpoint. */
+std::string detected_version() {
+    std::lock_guard<std::mutex> lock(g_version_mutex);
+    return g_version;
+}
+
 void apply_hires(const od_sd & e, sd_hires_params_t & hires, const std::string & upscaler_model) {
     hires.enabled = e.hires_enabled;
     if (!hires.enabled) return;
@@ -744,6 +821,42 @@ void apply_hires(const od_sd & e, sd_hires_params_t & hires, const std::string &
             hires.model_path = upscaler_model.c_str();
         }
     }
+}
+
+/**
+ * The hi-res stage on a clip, which is not the one on a still.
+ *
+ * On an image, "hi-res" is generate-small-then-denoise-larger and every
+ * upscaler mode works. On a clip it is LTX-AV's own latent spatial upsampler,
+ * which is a separate model file, and `generate_video` refuses outright —
+ * `return false` — for any other architecture, for any upscaler but MODEL, and
+ * for a missing model path. The app turned all three of those into "The run
+ * produced no frames. This is usually memory", which is a diagnosis of a
+ * problem nobody had, delivered after several minutes of sampling.
+ *
+ * So the three cases are answered here, where the answer is knowable, and the
+ * stage is dropped rather than the run. @return why it was dropped, or empty.
+ */
+std::string apply_video_hires(const od_sd & e, sd_hires_params_t & hires,
+                              const std::string & upscaler_model) {
+    apply_hires(e, hires, upscaler_model);
+    if (!hires.enabled) return {};
+
+    const std::string version = detected_version();
+    if (version.find("LTX") == std::string::npos && version.find("ltx") == std::string::npos) {
+        hires.enabled = false;
+        return "the hi-res stage on a clip is LTX-AV's latent upsampler, and " +
+               (version.empty() ? std::string("this checkpoint") : version) + " has none";
+    }
+    if (upscaler_model.empty()) {
+        hires.enabled = false;
+        return "LTX-AV's hi-res stage needs its latent upsampler attached, and none was";
+    }
+    // apply_hires downgrades an upscaler it cannot serve to the latent one,
+    // which is right for a still and fatal here.
+    hires.upscaler   = SD_HIRES_UPSCALER_MODEL;
+    hires.model_path = upscaler_model.c_str();
+    return {};
 }
 
 owned_image take_image(JNIEnv * env, jbyteArray bytes, jint width, jint height) {
@@ -1397,11 +1510,16 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerateVideo(
         loras[i].path = lora_paths[i].c_str();
     }
 
+    // Not loaded, and dropped if a still left one resident.
+    //
+    // `generate_video` passes an empty control image and a strength of zero to
+    // the sampler; a clip's control map goes to VACE instead, whose blocks live
+    // inside the checkpoint and whose hold is `vace_strength`. So a ControlNet
+    // here is several hundred megabytes that nothing will read.
     if (!control_net_path.empty()) {
-        if (!sd_ctx_load_control_net(e->ctx, control_net_path.c_str())) {
-            SLOGE("control net refused: %s", control_net_path.c_str());
-        }
-    } else if (sd_ctx_has_control_net(e->ctx)) {
+        SLOGI("control net ignored on a clip: video control runs through VACE");
+    }
+    if (sd_ctx_has_control_net(e->ctx)) {
         sd_ctx_unload_control_net(e->ctx);
     }
 
@@ -1427,6 +1545,7 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerateVideo(
     params.sample_params.guidance.txt_cfg            = e->cfg_scale;
     params.sample_params.guidance.distilled_guidance = e->guidance;
     params.sample_params.flow_shift                  = e->flow_shift;
+    apply_slg(*e, params.sample_params.guidance.slg);
     params.sample_params.sample_method = str_to_sample_method(e->sampling_method.c_str());
     params.sample_params.scheduler     = str_to_scheduler(e->schedule.c_str());
     // Wan 2.2 is two experts either side of a noise boundary, and each takes
@@ -1438,7 +1557,10 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerateVideo(
                                                        : e->steps;
 
     params.vae_tiling_params.enabled = e->vae_tiling;
-    apply_hires(*e, params.hires, upscaler_model);
+    const std::string hires_dropped = apply_video_hires(*e, params.hires, upscaler_model);
+    if (!hires_dropped.empty()) {
+        SLOGI("hi-res stage skipped: %s", hires_dropped.c_str());
+    }
 
     if (init.image.data != nullptr) {
         params.init_image = init.image;
@@ -1638,9 +1760,7 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
     params.sample_params.sample_steps         = e->steps;
     params.sample_params.guidance.txt_cfg     = e->cfg_scale;
     params.sample_params.guidance.distilled_guidance = e->guidance;
-    params.sample_params.guidance.slg.scale   = e->slg_scale;
-    params.sample_params.guidance.slg.layer_start = e->skip_layer_start;
-    params.sample_params.guidance.slg.layer_end   = e->skip_layer_end;
+    apply_slg(*e, params.sample_params.guidance.slg);
     params.sample_params.flow_shift           = e->flow_shift;
     params.sample_params.sample_method        = str_to_sample_method(e->sampling_method.c_str());
     params.sample_params.scheduler            = str_to_scheduler(e->schedule.c_str());
