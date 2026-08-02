@@ -69,6 +69,22 @@ data class ModelEntity(
     val customLabel: String? = null,
     /** Which add-on slot this model fills, or null for a base model. */
     val attachmentRole: AttachmentRole? = null,
+    /**
+     * Whether this checkpoint carries its own text encoders and decoder.
+     *
+     * Null until a load has answered it. Nothing outside the loader can: the
+     * question is about which tensors are in the file, not about the family or
+     * the extension. SDXL ships both ways, and so does the GGUF format —
+     * gpustack's SDXL turbo is a quantised GGUF *and* a full checkpoint, which
+     * is exactly the combination every guess here got wrong.
+     *
+     * Kept on the row rather than in screen state because the consequences
+     * outlive the screen. Re-deciding it from the file extension on each start
+     * meant a self-contained checkpoint was re-diagnosed as bare every launch,
+     * had a stranger's CLIP adopted into it, and produced a visibly worse
+     * picture until something happened to load it again.
+     */
+    val selfContained: Boolean? = null,
 ) {
     /** What to call this model wherever it is shown or picked. */
     val label: String get() = customLabel?.takeIf { it.isNotBlank() } ?: displayName

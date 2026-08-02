@@ -42,7 +42,7 @@ data class DiffusionFamily(
     val vaeSeparate: Boolean = true,
 ) {
     companion object {
-        /** SD 1.x, and what everything used to inherit. */
+        /** SD 1.x and SD 2.x: one CLIP, and the decoder in the file. */
         val UNET = DiffusionFamily(
             encoders = setOf(CLIP_L),
             vaeSeparate = false,
@@ -50,6 +50,9 @@ data class DiffusionFamily(
 
         /** Two text encoders, not one: SDXL conditions on ViT-L *and* ViT-bigG. */
         private val SDXL = UNET.copy(encoders = setOf(CLIP_L, CLIP_G))
+
+        /** SVD conditions on a picture, not on words — there is no text encoder to supply. */
+        private val PICTURE_CONDITIONED = UNET.copy(encoders = emptySet())
 
         private val SD3 = DiffusionFamily(
             // SD 3.x runs on the two CLIPs alone; T5 is what it reads long,
@@ -62,42 +65,99 @@ data class DiffusionFamily(
         private val FLUX = DiffusionFamily(encoders = setOf(CLIP_L, T5XXL))
 
         /**
-         * FLUX.2 reads its prompt with a language model instead of CLIP and T5
-         * — Qwen3 for Klein, Mistral Small for dev. That is why a 4B image
-         * model costs more than 4B to run.
+         * Everything that reads its prompt with a language model rather than
+         * with CLIP or T5 — FLUX.2 (Qwen3 for Klein, Mistral Small for dev),
+         * Qwen-Image (Qwen2.5-VL), Z-Image (Qwen3), Anima, LTX-AV (Gemma 3) and
+         * the rest of the recent transformers. It is why a 4B image model costs
+         * far more than 4B to run.
          */
-        private val FLUX2 = FLUX.copy(encoders = setOf(LLM))
+        private val LLM_CONDITIONED = DiffusionFamily(encoders = setOf(LLM))
 
-        /** Qwen-Image reads its prompt with a Qwen2.5-VL, so it is an LLM encoder too. */
-        private val QWEN_IMAGE = FLUX.copy(encoders = setOf(LLM))
-
-        /** Chroma is a de-distilled Flux with CLIP-L dropped: T5 alone. */
-        private val CHROMA = FLUX.copy(encoders = setOf(T5XXL))
+        /** T5 alone: Chroma (a de-distilled Flux with CLIP-L dropped), MiniT2I, and Wan's UMT5. */
+        private val T5_ONLY = DiffusionFamily(encoders = setOf(T5XXL))
 
         /**
-         * Matched against the version string stable-diffusion.cpp prints, or a
-         * GGUF `general.architecture`, whichever the caller has. Longest match
-         * first, so "Flux.2 klein" is not caught by "flux".
+         * Chroma Radiance decodes straight to pixels, so it has no VAE to
+         * supply and asking for one is asking for a part that does not exist.
+         */
+        private val CHROMA_RADIANCE = T5_ONLY.copy(vaeSeparate = false)
+
+        /**
+         * Wan reads a picture through a CLIP-vision encoder as well as the
+         * prompt through UMT5, and runs without one.
+         */
+        private val WAN = T5_ONLY.copy(optionalEncoders = setOf(CLIP_VISION))
+
+        /** Conditioners that live entirely inside the checkpoint. */
+        private val SELF_CONDITIONED = DiffusionFamily(encoders = emptySet())
+
+        /**
+         * Every version stable-diffusion.cpp can name, matched against the
+         * string it prints or against a GGUF `general.architecture`.
+         *
+         * The list is the one in `model_version_to_str`, and each entry's
+         * encoders are the ones the matching branch of `sd_ctx_t`'s conditioner
+         * dispatch actually constructs — not a reading of what the family is
+         * known for elsewhere. Two of those disagreed: Z-Image was filed under
+         * SD 3.x and builds an `LLMEmbedder`, and Chroma Radiance was asked for
+         * a VAE it has no use for.
+         *
+         * Order is longest-match-first within each family, so "Flux.2 klein" is
+         * not caught by "flux" and "SDXL Instruct-Pix2Pix" is not caught by the
+         * SD 1.x "instruct-pix2pix".
          */
         private val BY_NAME: List<Pair<String, DiffusionFamily>> = listOf(
-            "flux.2 klein" to FLUX2,
-            "flux2_klein" to FLUX2,
-            "flux2klein" to FLUX2,
-            "flux.2" to FLUX2,
-            "flux2" to FLUX2,
-            "chroma" to CHROMA,
+            // Language-model conditioners, most specific first.
+            "flux.2 klein" to LLM_CONDITIONED,
+            "flux2_klein" to LLM_CONDITIONED,
+            "flux2klein" to LLM_CONDITIONED,
+            "flux.2" to LLM_CONDITIONED,
+            "flux2" to LLM_CONDITIONED,
+            "qwen image" to LLM_CONDITIONED,
+            "qwen_image" to LLM_CONDITIONED,
+            "z-image" to LLM_CONDITIONED,
+            "z_image" to LLM_CONDITIONED,
+            "ovis image" to LLM_CONDITIONED,
+            "sefi-image" to LLM_CONDITIONED,
+            "boogu image" to LLM_CONDITIONED,
+            "ernie image" to LLM_CONDITIONED,
+            "longcat" to LLM_CONDITIONED,
+            "ideogram" to LLM_CONDITIONED,
+            "hunyuan video" to LLM_CONDITIONED,
+            "lingbot video" to LLM_CONDITIONED,
+            "ltxav" to LLM_CONDITIONED,
+            "mage flow" to LLM_CONDITIONED,
+            "krea2" to LLM_CONDITIONED,
+            "anima" to LLM_CONDITIONED,
+            "lens" to LLM_CONDITIONED,
+            "pid" to LLM_CONDITIONED,
+
+            // T5, with or without a CLIP beside it.
+            "chroma radiance" to CHROMA_RADIANCE,
+            "chroma" to T5_ONLY,
+            "minit2i" to T5_ONLY,
+            "wan 2" to WAN,
+            "wan2" to WAN,
+
+            // Its conditioner reads the checkpoint's own visual tower.
+            "hidream" to SELF_CONDITIONED,
+            // An upscaler, which conditions on nothing at all.
+            "esrgan" to SELF_CONDITIONED,
+
+            // CLIP-L and T5.
             "flex" to FLUX,
             "flux" to FLUX,
-            "qwen image" to QWEN_IMAGE,
-            "qwen_image" to QWEN_IMAGE,
+
+            // The UNet families. SDXL before the SD 1.x pix2pix spelling.
             "sd3" to SD3,
-            "z-image" to SD3,
             "sdxl" to SDXL,
             "sdxs" to UNET,
+            "svd" to PICTURE_CONDITIONED,
             "sd 2" to UNET,
             "sd2" to UNET,
             "sd 1" to UNET,
             "sd1" to UNET,
+            "instruct-pix2pix" to UNET,
         )
 
         // The role param keys this table speaks in. AttachmentRole owns them;
@@ -107,6 +167,7 @@ data class DiffusionFamily(
         private const val CLIP_G = "clip_g"
         private const val T5XXL = "t5xxl"
         private const val LLM = "llm"
+        private const val CLIP_VISION = "clip_vision"
 
         /**
          * What this model needs beside itself, or null when the name means

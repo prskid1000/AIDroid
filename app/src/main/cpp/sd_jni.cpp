@@ -69,8 +69,6 @@ struct od_sd {
     std::atomic<int>   total_steps{0};
     std::atomic<float> seconds_per_step{0.0f};
     std::atomic<bool>  generating{false};
-    /** The step count we asked for — used to tell sampling from other phases. */
-    std::atomic<int>   expected_steps{0};
     std::atomic<int>   phase{0};
     std::atomic<bool>  sampling_started{false};
     /** Set by Cancel, read by the graph callback before every ggml node. */
@@ -128,6 +126,53 @@ std::atomic<bool> g_bare_diffusion{false};
 std::mutex  g_stage_mutex;
 std::string g_stage;
 
+constexpr int PHASE_PREPARING = 0;
+constexpr int PHASE_SAMPLING  = 1;
+constexpr int PHASE_DECODING  = 2;
+
+/**
+ * Which part of a run is happening, taken from what the runtime says it is
+ * doing rather than inferred from the shape of a callback.
+ *
+ * The inference this replaces compared the callback's step total against the
+ * step count we asked for, and called anything that did not match "decoding"
+ * once sampling had been seen at least once. Two things went wrong with that.
+ * A sampler whose real step count differs from the requested one — every
+ * ancestral sampler with a scheduler that adds a final step, and img2img, whose
+ * steps are scaled by denoising strength — never matched, so sampling was never
+ * recognised. And the VAE tiling callback and the sampler callback are the same
+ * callback, so the readout announced the last phase it had guessed at rather
+ * than the one in progress. The screen said "decoding" and then counted steps,
+ * which is the order those two happen in reversed.
+ *
+ * sd.cpp narrates all of it — `get_learned_condition completed`, `sampling
+ * using euler_a method`, `decoding 1 latents` — so the phase is read off the
+ * narration and the callback is left to do the one thing it is good for, which
+ * is counting steps.
+ */
+void note_phase(const std::string & line) {
+    od_sd * e = g_current.load();
+    if (e == nullptr) return;
+    const auto says = [&line](const char * needle) {
+        return line.find(needle) != std::string::npos;
+    };
+
+    // Order matters: "sampling completed" has to be read as the end of
+    // sampling, not as the start of it, so the completions are tested first.
+    if (says("sampling completed") || says("decoding") || says("decode_first_stage") ||
+        says("decoded, taking") || says("upscal")) {
+        e->phase.store(PHASE_DECODING);
+    } else if (says("sampling using") || says("generating image:") ||
+               says("generating latent")) {
+        e->phase.store(PHASE_SAMPLING);
+        e->sampling_started.store(true);
+    } else if (says("get_learned_condition") || says("apply lora") ||
+               says("apply_loras") || says("encode_first_stage") ||
+               says("computing condition")) {
+        e->phase.store(PHASE_PREPARING);
+    }
+}
+
 void note_stage(const char * text) {
     if (text == nullptr) return;
     std::string line(text);
@@ -142,8 +187,11 @@ void note_stage(const char * text) {
         line = line.substr(dash + 3);
     }
     if (line.empty()) return;
-    std::lock_guard<std::mutex> lock(g_stage_mutex);
-    g_stage = line;
+    {
+        std::lock_guard<std::mutex> lock(g_stage_mutex);
+        g_stage = line;
+    }
+    note_phase(line);
 }
 
 void note_version(const char * text) {
@@ -184,10 +232,6 @@ std::string take_last_error() {
     std::lock_guard<std::mutex> lock(g_last_error_mutex);
     return g_last_error;
 }
-
-constexpr int PHASE_PREPARING = 0;
-constexpr int PHASE_SAMPLING  = 1;
-constexpr int PHASE_DECODING  = 2;
 
 od_sd * as_sd(jlong handle) {
     return reinterpret_cast<od_sd *>(handle);
@@ -286,23 +330,17 @@ void progress_cb(int step, int steps, float time, void *) {
     od_sd * e = g_current.load();
     if (e == nullptr) return;
 
-    if (steps == e->expected_steps.load() && steps > 0) {
-        e->step.store(step);
-        e->total_steps.store(steps);
-        e->phase.store(PHASE_SAMPLING);
-        if (time > 0.0f) {
-            e->seconds_per_step.store(time);
-        }
-    } else if (!e->sampling_started.load()) {
-        // Before sampling begins this is the loader; afterwards it is the VAE
-        // decoding tiles. Both are honest to name and neither is a step.
-        e->phase.store(PHASE_PREPARING);
-    } else {
-        e->phase.store(PHASE_DECODING);
-    }
+    // The phase is the runtime's own word for it, set in note_phase. This
+    // callback serves both the sampler and the VAE tiler, and only the
+    // sampler's numbers are steps of the thing the progress bar measures — the
+    // tiler's are tiles, and reporting them made a finished picture restart its
+    // count from 1 of 12.
+    if (e->phase.load() != PHASE_SAMPLING || steps <= 0) return;
 
-    if (e->phase.load() == PHASE_SAMPLING) {
-        e->sampling_started.store(true);
+    e->step.store(step);
+    e->total_steps.store(steps);
+    if (time > 0.0f) {
+        e->seconds_per_step.store(time);
     }
 }
 
@@ -594,6 +632,8 @@ Java_ai_ondevice_engine_SdBridge_nativeProgress(JNIEnv * env, jobject, jlong han
     auto * e = as_sd(handle);
     if (e == nullptr) return jni_from_string(env, "{}");
     const int phase = e->phase.load();
+    std::string stage;
+    { std::lock_guard<std::mutex> lock(g_stage_mutex); stage = g_stage; }
     return jni_from_string(env, dump_json(json{
         { "step",           e->step.load() },
         { "steps",          e->total_steps.load() },
@@ -602,6 +642,11 @@ Java_ai_ondevice_engine_SdBridge_nativeProgress(JNIEnv * env, jobject, jlong han
         { "previewSerial",  e->preview_serial.load() },
         { "phase",          phase == PHASE_SAMPLING ? "sampling"
                             : phase == PHASE_DECODING ? "decoding" : "preparing" },
+        // The runtime's own last word, so a phase that lasts minutes says which
+        // minutes-long thing it is: encoding a prompt through a 4B language
+        // model and decoding a latent are both "not sampling" and nothing else
+        // alike.
+        { "stage",          stage },
     }));
 }
 
@@ -668,7 +713,6 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
     g_current.store(e);
     e->generating.store(true);
     e->step.store(0);
-    e->expected_steps.store(e->steps);
     e->phase.store(PHASE_PREPARING);
     e->sampling_started.store(false);
     {

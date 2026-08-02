@@ -15,12 +15,21 @@ data class MissingComponent(
 
         /** It is attached and the model it is attached to cannot use it. */
         WONT_ATTACH,
+
+        /**
+         * It is attached to a checkpoint that has one of its own, and takes its
+         * place. Not a fault — overriding a built-in part is a legitimate thing
+         * to want — but it is never what an automatic choice meant to do, and
+         * the difference is invisible in the output until you compare two.
+         */
+        SUBSTITUTES,
     }
 
     val remedy: String get() = when (state) {
         State.NOT_INSTALLED -> "Add one from Models → Add"
         State.INSTALLED_NOT_ATTACHED -> "Switch it on under Attachments"
         State.WONT_ATTACH -> "Switch it off, or pick a base model it fits"
+        State.SUBSTITUTES -> "Switch it off to use the checkpoint's own"
     }
 }
 
@@ -71,6 +80,31 @@ object ComponentCheck {
         val family = DiffusionFamily.forName(architecture)
         // A full checkpoint supplies its own everything, so nothing is missing.
         val selfContained = bareDenoiser == false
+        // Nothing is missing from a full checkpoint — but something armed
+        // against one is standing in for a part that is already there, and
+        // sd.cpp gives no sign of it. This is the finding that cost five-sixths
+        // of the local detail in an SDXL picture while every screen in the app
+        // read as correct.
+        val substituting = if (!selfContained) {
+            emptyList()
+        } else {
+            val builtIn = buildList {
+                family?.encoders?.forEach { key ->
+                    AttachmentRole.entries.firstOrNull { it.paramKey == key }?.let(::add)
+                }
+                add(AttachmentRole.VAE)
+            }
+            (enabled intersect builtIn.toSet()).map { role ->
+                MissingComponent(
+                    what = "${role.label} replaces the one in the checkpoint",
+                    because = "this file carries its own, and sd.cpp takes an attached one in " +
+                        "place of it rather than beside it — which is worth doing deliberately " +
+                        "and is rarely worth doing by accident",
+                    state = MissingComponent.State.SUBSTITUTES,
+                )
+            }
+        }
+
         val needed = if (selfContained) {
             emptyList()
         } else {
@@ -115,7 +149,7 @@ object ComponentCheck {
             }
         }
 
-        return unfilled + mismatched + enabled.mapNotNull { role ->
+        return unfilled + substituting + mismatched + enabled.mapNotNull { role ->
             val requirement = role.requires ?: return@mapNotNull null
             val needed = role.required ?: return@mapNotNull null
             if (needed in enabled) return@mapNotNull null

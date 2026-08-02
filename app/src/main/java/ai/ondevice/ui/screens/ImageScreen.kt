@@ -126,14 +126,33 @@ fun ImageScreen(
             }
 
             // Loading four gigabytes is minutes of one opaque call. Name what
-            // is going in, and let the loader say where it has got to.
-            if (state.loadingModel && state.loadingWhat.isNotEmpty()) {
-                NCard(Modifier.padding(top = 10.dp), ring = NocturneColors.Accent800) {
-                    Text("Loading into memory", style = NocturneType.CardTitleSm)
-                    state.loadingWhat.forEach {
+            // is going in, let the loader say where it has got to — and then
+            // keep saying what is in there.
+            //
+            // This used to appear only while `loadingModel` was true, which
+            // meant it was on screen for exactly as long as the load and gone
+            // the instant it mattered most: the list of what a run is actually
+            // holding is worth reading *after* the load, when there is time to
+            // read it and a picture to explain. A load that hits a warm context
+            // never showed it at all.
+            val loadingNow = state.loadingModel && state.loadingWhat.isNotEmpty()
+            val resident = state.residentComponents
+            if (loadingNow || resident.isNotEmpty()) {
+                NCard(
+                    Modifier.padding(top = 10.dp),
+                    ring = if (loadingNow) NocturneColors.Accent800 else NocturneColors.Neutral700,
+                ) {
+                    Text(
+                        if (loadingNow) "Loading into memory" else "In memory",
+                        style = NocturneType.CardTitleSm,
+                    )
+                    (if (loadingNow) state.loadingWhat else resident).forEach {
                         Text(it, style = NocturneType.MonoXs, color = NocturneColors.Accent300)
                     }
-                    state.loadingStage?.let {
+                    // While loading this is the loader's progress; during a run
+                    // it is the sampler's or the decoder's. Either way it is the
+                    // runtime's own sentence and not a guess at one.
+                    (state.loadingStage ?: state.runStage)?.let {
                         Text(
                             it,
                             style = NocturneType.Help,
@@ -594,7 +613,18 @@ private fun AttachmentsSection(
         // empty because the run is about to fail.
         state.missingComponents.forEach { missing ->
             NCard(Modifier.padding(bottom = 8.dp)) {
-                Text(missing.what, style = NocturneType.CardTitleSm, color = NocturneColors.Accent200)
+                // A substitution is a choice, not a fault, and reads as one.
+                Text(
+                    missing.what,
+                    style = NocturneType.CardTitleSm,
+                    color = if (missing.state ==
+                        ai.ondevice.core.MissingComponent.State.SUBSTITUTES
+                    ) {
+                        NocturneColors.TextMuted
+                    } else {
+                        NocturneColors.Accent200
+                    },
+                )
                 Text(
                     "${missing.because}. ${missing.remedy}.",
                     style = NocturneType.CardBody,
@@ -649,7 +679,18 @@ private fun AttachmentsSection(
     // has spent a minute finding out.
     state.missingComponents.forEach { missing ->
         NCard(Modifier.padding(bottom = 8.dp)) {
-            Text(missing.what, style = NocturneType.CardTitleSm, color = NocturneColors.Accent200)
+            // A substitution is a choice, not a fault, and reads as one.
+            Text(
+                missing.what,
+                style = NocturneType.CardTitleSm,
+                color = if (missing.state ==
+                    ai.ondevice.core.MissingComponent.State.SUBSTITUTES
+                ) {
+                    NocturneColors.TextMuted
+                } else {
+                    NocturneColors.Accent200
+                },
+            )
             Text(
                 "${missing.because}. ${missing.remedy}.",
                 style = NocturneType.CardBody,

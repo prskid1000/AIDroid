@@ -290,7 +290,8 @@ class DiffusionEngine(
                 "decoding" -> DiffusionPhase.DECODING
                 else -> DiffusionPhase.PREPARING
             }
-            send(DiffusionEvent.Progress(step, steps, secondsPerStep, phase))
+            val stage = progress["stage"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+            send(DiffusionEvent.Progress(step, steps, secondsPerStep, phase, stage))
 
             val serial = progress["previewSerial"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
             if (serial != lastPreviewSerial) {
@@ -467,6 +468,8 @@ sealed interface DiffusionEvent {
         val steps: Int,
         val secondsPerStep: Float,
         val phase: DiffusionPhase,
+        /** The runtime's own last word, where it has said one. */
+        val stage: String? = null,
     ) : DiffusionEvent
     data class Preview(val image: DiffusionImage) : DiffusionEvent
     data class Completed(val image: DiffusionImage) : DiffusionEvent

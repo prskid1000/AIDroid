@@ -77,7 +77,7 @@ abstract class OnDeviceDatabase : RoomDatabase() {
         val MIGRATIONS: Array<androidx.room.migration.Migration> =
             arrayOf(
                 MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
-                MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
+                MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
             )
     }
 }
@@ -230,4 +230,12 @@ private val MIGRATION_7_8 = object : androidx.room.migration.Migration(7, 8) {
     }
 }
 
-internal const val DATABASE_VERSION = 8
+private val MIGRATION_8_9 = object : androidx.room.migration.Migration(8, 9) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        // Null everywhere, and deliberately so: only a load can answer it, and
+        // no load has happened yet under a build that records the answer.
+        db.execSQL("ALTER TABLE `models` ADD COLUMN `selfContained` INTEGER")
+    }
+}
+
+internal const val DATABASE_VERSION = 9
