@@ -92,6 +92,7 @@ fun ImageScreen(
     val pickSource = rememberSourceImagePicker(viewModel::setSourceImage)
     val pickControl = rememberSourceImagePicker(viewModel::setControlImage)
     val pickStyle = rememberSourceImagePicker(viewModel::setStyleImage)
+    val pickIdentity = rememberSourceImagePicker(viewModel::setIdentityImage)
 
     // The Advanced screen writes to the same diffusion model row, so pick up
     // anything it changed on the way back rather than showing a stale form.
@@ -316,6 +317,20 @@ fun ImageScreen(
                     emptyLabel = "Add a picture to take the look from",
                     onPick = pickStyle,
                     onClear = { viewModel.setStyleImage(null) },
+                )
+            }
+
+            // A fourth picture and a fourth thing: the face the identity
+            // adapters keep. Without it PhotoMaker and PuLID load their weights
+            // and change nothing — `pm_params.id_images` was never filled, so
+            // there was nobody to keep.
+            if (state.usesIdentityImage) {
+                SourceImageField(
+                    label = "Identity · PhotoMaker / PuLID",
+                    uri = state.identityImageUri,
+                    emptyLabel = "Add a face for the adapter to keep",
+                    onPick = pickIdentity,
+                    onClear = { viewModel.setIdentityImage(null) },
                 )
             }
 

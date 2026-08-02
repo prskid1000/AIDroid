@@ -197,6 +197,91 @@ class LoadContractTest {
     }
 
     /**
+     * That the three per-architecture defaults are left to the architecture.
+     *
+     * `sd_sample_params_init` writes INFINITY into `flow_shift`, `eta` and
+     * `img_cfg`, and each is a sentinel the runtime resolves later — the flow
+     * shift from the version it detected (5 for Wan, 7 for Hunyuan Video, 3
+     * for most), eta from the sampler, img_cfg from the model. The app held
+     * `flow_shift` at 0.0f and assigned it on every run, which replaced that
+     * resolution with a literal zero. `time_snr_shift(0, t)` is `0*t/(1-t)`,
+     * zero for every t, so the whole sigma schedule went to zero and
+     * `noise_scaling` handed the sampler back its own latent. Every flow model
+     * — Flux, SD3, Wan, Qwen-Image, LTX, Chroma — sampled a schedule with no
+     * noise in it, and nothing anywhere said so.
+     *
+     * A negative value is the sentinel on this side of the boundary, so the
+     * defaults have to be negative and the minimums have to allow it.
+     */
+    @Test
+    fun `the per-model sampler defaults are left to the model`() {
+        listOf("flow_shift", "eta", "img_cfg").forEach { key ->
+            val spec = described(key)
+            assertTrue("$key is undescribed", spec != null)
+            assertEquals(
+                "$key must default to the sentinel, not to a number that replaces the " +
+                    "architecture's own",
+                -1.0,
+                (spec!!.default as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDouble(),
+            )
+            assertTrue("$key cannot reach its sentinel: min is ${spec.min}", (spec.min ?: 0.0) <= -1.0)
+        }
+
+        val cpp = File("src/main/cpp/sd_jni.cpp").readText()
+        assertTrue(
+            "nothing converts the negative sentinel back to INFINITY, so the runtime reads " +
+                "a literal -1 instead of resolving its own default",
+            cpp.contains("or_model_default"),
+        )
+        assertTrue(
+            "flow_shift is still assigned raw somewhere; it has to go through the sentinel",
+            !cpp.contains("flow_shift                  = e->flow_shift") &&
+                !cpp.contains("flow_shift           = e->flow_shift"),
+        )
+    }
+
+    /**
+     * That the identity adapters are given someone to keep.
+     *
+     * Both are load-time paths and both were being passed, so the weights went
+     * resident. The generate-time half — `pm_params.id_images` and the two
+     * strengths — was left as `sd_img_gen_params_init` wrote it: no images,
+     * therefore no identity. Several hundred megabytes each, and a picture of
+     * nobody in particular.
+     */
+    @Test
+    fun `the identity adapters get an identity`() {
+        listOf("style_strength" to "photo_maker", "id_weight" to "pulid").forEach { (dial, file) ->
+            val spec = described(dial)
+            assertTrue("$dial is undescribed", spec != null)
+            assertEquals("$dial scales $file", file, spec!!.dependsOn?.key)
+            assertEquals("$dial has no field in sd_vid_gen_params_t", listOf("image"), spec.appliesTo?.output)
+        }
+        val cpp = File("src/main/cpp/sd_jni.cpp").readText()
+        assertTrue(
+            "pm_params.id_images is never filled, so PhotoMaker loads and does nothing",
+            cpp.contains("pm_params.id_images"),
+        )
+    }
+
+    /** The cache is the one setting here that buys minutes rather than quality. */
+    @Test
+    fun `the step cache is reachable`() {
+        val mode = described("cache_mode")
+        assertTrue("cache_mode is undescribed", mode != null)
+        assertTrue("disabled has to be selectable to be returned to", "disabled" in mode!!.values)
+        listOf("easycache", "ucache", "taylorseer").forEach {
+            assertTrue("$it is one of upstream's modes and is not offered", it in mode.values)
+        }
+        assertEquals("the cache is per run, not per context", false, mode.requiresReload)
+        assertEquals(
+            "the options only mean anything once a mode is chosen",
+            "cache_mode",
+            described("cache_option")?.dependsOn?.key,
+        )
+    }
+
+    /**
      * That a clip's hi-res stage is not offered as if it were a still's.
      *
      * They share the manifest rows and are different features. On an image,

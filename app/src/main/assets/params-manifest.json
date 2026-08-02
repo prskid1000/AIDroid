@@ -21,7 +21,7 @@
     "Defaults, ranges and steps below are the description of last resort. Where a runtime",
     "reports its own live default, that value wins — see ParamRepository.specsFor."
   ],
-  "manifestVersion": 15,
+  "manifestVersion": 16,
   "runtimes": {
     "llama.cpp": {
       "params": [
@@ -74,17 +74,6 @@
           "help": "Slide the window when the context fills, rather than stopping.",
           "requiresReload": false,
           "cliFlag": "--context-shift"
-        },
-        {
-          "key": "cache_prompt",
-          "group": "generation",
-          "type": "bool",
-          "default": true,
-          "tier": "ADVANCED",
-          "label": "Reuse prompt cache",
-          "help": "Reuse the KV cache across turns instead of reprocessing. A major speed win.",
-          "requiresReload": false,
-          "cliFlag": "--cache-prompt"
         },
         {
           "key": "temp",
@@ -346,17 +335,6 @@
           "cliFlag": "--frequency-penalty"
         },
         {
-          "key": "penalize_nl",
-          "group": "repetition",
-          "type": "bool",
-          "default": false,
-          "tier": "EXPERT",
-          "label": "Penalise newlines",
-          "help": "Apply the repetition penalties to the newline token as well.",
-          "requiresReload": false,
-          "cliFlag": "--penalize-nl"
-        },
-        {
           "key": "dry_multiplier",
           "group": "dry",
           "type": "float",
@@ -540,17 +518,6 @@
           "cliFlag": "--grammar"
         },
         {
-          "key": "json_schema",
-          "group": "constraints",
-          "type": "text",
-          "default": "",
-          "tier": "EXPERT",
-          "label": "JSON schema",
-          "help": "Compiled to GBNF and applied as a grammar.",
-          "requiresReload": false,
-          "cliFlag": "-j"
-        },
-        {
           "key": "logit_bias",
           "group": "constraints",
           "type": "map",
@@ -616,31 +583,6 @@
           "requiresReload": true,
           "sinceBuild": "b2000",
           "cliFlag": "-ctv"
-        },
-        {
-          "key": "no_kv_offload",
-          "group": "context",
-          "type": "bool",
-          "default": false,
-          "tier": "EXPERT",
-          "label": "Keep KV on CPU",
-          "help": "Hold the KV cache in system memory rather than on the accelerator.",
-          "requiresReload": true,
-          "cliFlag": "-nkvo"
-        },
-        {
-          "key": "defrag_thold",
-          "group": "context",
-          "type": "float",
-          "default": -1.0,
-          "min": -1.0,
-          "max": 1.0,
-          "step": 0.05,
-          "tier": "EXPERT",
-          "label": "KV defrag threshold",
-          "help": "Fragmentation level that triggers a KV cache defragmentation. -1 disables.",
-          "requiresReload": true,
-          "cliFlag": "-dt"
         },
         {
           "key": "n_parallel",
@@ -808,20 +750,6 @@
           "cliFlag": "--yarn-orig-ctx"
         },
         {
-          "key": "n_gpu_layers",
-          "group": "loading",
-          "type": "int",
-          "default": 99,
-          "min": 0,
-          "max": 99,
-          "step": 1,
-          "tier": "ADVANCED",
-          "label": "GPU layers",
-          "help": "Layers offloaded to the GPU. 0 is CPU only, 99 is all. Auto-computed from free memory.",
-          "requiresReload": true,
-          "cliFlag": "-ngl"
-        },
-        {
           "key": "n_threads",
           "group": "loading",
           "type": "int",
@@ -900,36 +828,6 @@
           "cliFlag": "--mlock"
         },
         {
-          "key": "split_mode",
-          "group": "loading",
-          "type": "enum",
-          "values": [
-            "none",
-            "layer",
-            "row"
-          ],
-          "default": "layer",
-          "tier": "EXPERT",
-          "label": "Split mode",
-          "help": "How to divide the model across devices. Relevant for multi-session Hexagon splits.",
-          "requiresReload": true,
-          "cliFlag": "-sm"
-        },
-        {
-          "key": "main_gpu",
-          "group": "loading",
-          "type": "int",
-          "default": 0,
-          "min": 0,
-          "max": 7,
-          "step": 1,
-          "tier": "EXPERT",
-          "label": "Primary device",
-          "help": "Index of the device that holds small tensors.",
-          "requiresReload": true,
-          "cliFlag": "-mg"
-        },
-        {
           "key": "check_tensors",
           "group": "loading",
           "type": "bool",
@@ -939,29 +837,6 @@
           "help": "Check tensor data for NaNs and corruption. Slows loading noticeably.",
           "requiresReload": true,
           "cliFlag": "--check-tensors"
-        },
-        {
-          "key": "pooling_type",
-          "group": "loading",
-          "type": "enum",
-          "values": [
-            "none",
-            "mean",
-            "cls",
-            "last",
-            "rank"
-          ],
-          "default": "none",
-          "tier": "EXPERT",
-          "label": "Pooling",
-          "help": "Embedding pooling strategy. Applies to embedding models only.",
-          "requiresReload": true,
-          "appliesTo": {
-            "modality": [
-              "embedding"
-            ]
-          },
-          "cliFlag": "--pooling"
         },
         {
           "key": "lora",
@@ -989,22 +864,6 @@
             ]
           },
           "cliFlag": "--mmproj"
-        },
-        {
-          "key": "mmproj_use_gpu",
-          "group": "vision",
-          "type": "bool",
-          "default": true,
-          "tier": "EXPERT",
-          "label": "Offload projector",
-          "help": "Run the vision projector on the accelerator.",
-          "requiresReload": true,
-          "appliesTo": {
-            "modality": [
-              "vision"
-            ]
-          },
-          "cliFlag": "--mmproj-use-gpu"
         },
         {
           "key": "chat_template",
@@ -1571,13 +1430,13 @@
           "key": "flow_shift",
           "group": "guidance",
           "type": "float",
-          "default": 0.0,
-          "min": 0.0,
+          "default": -1.0,
+          "min": -1.0,
           "max": 10.0,
           "step": 0.1,
           "tier": "EXPERT",
           "label": "Flow shift",
-          "help": "SD3 and Flux timestep shift.",
+          "help": "Sigma-schedule shift. -1 leaves the architecture's own — 5 for Wan, 7 for Hunyuan Video, 3 for most flow models. Any other value replaces it, and 0 flattens the schedule to nothing.",
           "requiresReload": false,
           "cliFlag": "--flow-shift"
         },
@@ -2510,6 +2369,129 @@
           "label": "Upscale model",
           "help": "ESRGAN-family upscaler. The Upscale button on a finished image runs it, in its own context; generation does not.",
           "requiresReload": false
+        },
+        {
+          "key": "img_cfg",
+          "group": "guidance",
+          "type": "float",
+          "default": -1.0,
+          "min": -1.0,
+          "max": 20.0,
+          "step": 0.1,
+          "tier": "EXPERT",
+          "label": "Image guidance",
+          "help": "Separate CFG for the reference image on an edit model. -1 leaves the model's own resolution of it.",
+          "requiresReload": false,
+          "cliFlag": "--img-cfg-scale"
+        },
+        {
+          "key": "eta",
+          "group": "sampling",
+          "type": "float",
+          "default": -1.0,
+          "min": -1.0,
+          "max": 10.0,
+          "step": 0.05,
+          "tier": "EXPERT",
+          "label": "Eta",
+          "help": "Noise re-injection for the ancestral and DDIM samplers. -1 lets the sampler pick: 1 for the ancestral ones, 0 for the rest.",
+          "requiresReload": false,
+          "cliFlag": "--eta"
+        },
+        {
+          "key": "shifted_timestep",
+          "group": "sampling",
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 1000,
+          "step": 1,
+          "tier": "EXPERT",
+          "label": "Shifted timestep",
+          "help": "Timestep shifting for the distilled schedules. 0 is off.",
+          "requiresReload": false,
+          "cliFlag": "--shifted-timestep"
+        },
+        {
+          "key": "cache_mode",
+          "group": "performance",
+          "type": "enum",
+          "default": "disabled",
+          "values": [
+            "disabled",
+            "easycache",
+            "ucache",
+            "dbcache",
+            "taylorseer",
+            "cache_dit",
+            "spectrum"
+          ],
+          "tier": "ADVANCED",
+          "label": "Step cache",
+          "help": "Reuses a step's residual while the model is changing little — the one setting here that buys minutes rather than quality. easycache and the block-level modes are for DiT models (Flux, SD3, Wan); ucache is for the UNet ones.",
+          "requiresReload": false,
+          "cliFlag": "--cache-mode"
+        },
+        {
+          "key": "cache_option",
+          "group": "performance",
+          "type": "string",
+          "default": "",
+          "tier": "EXPERT",
+          "label": "Cache options",
+          "help": "key=value, comma separated, as upstream takes them. easycache/ucache: threshold, start, end, decay, relative, reset. dbcache/taylorseer/cache_dit: Fn, Bn, threshold, warmup. spectrum: w, m, lam, window, flex, warmup, stop.",
+          "requiresReload": false,
+          "cliFlag": "--cache-option",
+          "dependsOn": {
+            "key": "cache_mode",
+            "notEquals": "disabled"
+          }
+        },
+        {
+          "key": "style_strength",
+          "group": "identity",
+          "type": "float",
+          "default": 20.0,
+          "min": 0.0,
+          "max": 100.0,
+          "step": 1.0,
+          "tier": "ADVANCED",
+          "label": "PhotoMaker style strength",
+          "help": "How far PhotoMaker may move from the face you supplied. Needs an identity picture; without one the adapter is loaded and idle.",
+          "requiresReload": false,
+          "cliFlag": "--style-ratio",
+          "dependsOn": {
+            "key": "photo_maker",
+            "notEquals": ""
+          },
+          "appliesTo": {
+            "output": [
+              "image"
+            ]
+          }
+        },
+        {
+          "key": "id_weight",
+          "group": "identity",
+          "type": "float",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 3.0,
+          "step": 0.05,
+          "tier": "ADVANCED",
+          "label": "PuLID identity weight",
+          "help": "How strongly PuLID holds the face you supplied.",
+          "requiresReload": false,
+          "cliFlag": "--pulid-id-weight",
+          "dependsOn": {
+            "key": "pulid",
+            "notEquals": ""
+          },
+          "appliesTo": {
+            "output": [
+              "image"
+            ]
+          }
         }
       ]
     },

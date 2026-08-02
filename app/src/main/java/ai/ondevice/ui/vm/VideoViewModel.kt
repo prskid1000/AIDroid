@@ -13,6 +13,7 @@ import ai.ondevice.engine.DiffusionClip
 import ai.ondevice.engine.DiffusionEngine
 import ai.ondevice.engine.DiffusionEvent
 import ai.ondevice.engine.DiffusionPhase
+import ai.ondevice.engine.LoadCancelled
 import ai.ondevice.engine.VideoRequest
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -217,29 +218,48 @@ class VideoViewModel @Inject constructor(
                             armed.map { "${it.role.label} · ${it.displayName}" },
                         loadingStage = null,
                     )
-                    val stageJob = viewModelScope.launch {
+                    // A child of this job, not a sibling on viewModelScope.
+                    //
+                    // As a sibling it outlived the cancel that was meant to
+                    // stop it: `stageJob.cancel()` below is never reached when
+                    // the load is cancelled, because the cancellation surfaces
+                    // out of `diffusion.load` and skips straight past it. The
+                    // poller then ran for the life of the screen, writing a
+                    // stage into a state that was no longer loading anything.
+                    val stageJob = launch {
                         while (isActive) {
                             delay(LOAD_STAGE_POLL_MILLIS)
                             _state.value = _state.value.copy(loadingStage = diffusion.loadStage)
                         }
                     }
-                    val loaded = diffusion.load(
-                        model.id,
-                        model.localPath,
-                        _state.value.availableAttachments,
-                        params = SparseParams.parse(model.paramOverridesJson),
-                    )
-                    stageJob.cancel()
+                    val loaded = try {
+                        diffusion.load(
+                            model.id,
+                            model.localPath,
+                            _state.value.availableAttachments,
+                            params = SparseParams.parse(model.paramOverridesJson),
+                        )
+                    } finally {
+                        stageJob.cancel()
+                    }
                     _state.value = _state.value.copy(
                         loadingModel = false,
                         loadingWhat = emptyList(),
                         loadingStage = null,
                     )
                     if (loaded.isFailure) {
+                        // Cancelling is not failing. The banner is for a load
+                        // that went wrong, and being told "The load was
+                        // cancelled" in red is the app reporting your own
+                        // decision back to you as a fault.
+                        val why = loaded.exceptionOrNull()
                         _state.value = _state.value.copy(
                             generating = false,
-                            error = loaded.exceptionOrNull()?.message
-                                ?: "The model could not be loaded.",
+                            error = if (why is LoadCancelled) {
+                                null
+                            } else {
+                                why?.message ?: "The model could not be loaded."
+                            },
                         )
                         return@launch
                     }

@@ -192,6 +192,8 @@ class ImageViewModel @Inject constructor(
 
     fun setControlImage(uri: String?) = update { copy(controlImageUri = uri) }
     fun setStyleImage(uri: String?) = update { copy(styleImageUri = uri) }
+
+    fun setIdentityImage(uri: String?) = update { copy(identityImageUri = uri) }
     fun setStyleStrength(value: Float) = update { copy(styleStrength = value) }
 
     fun setControlStrength(value: Float) = update { copy(controlStrength = value) }
@@ -304,22 +306,29 @@ class ImageViewModel @Inject constructor(
                             .map { "${it.role.label} · ${it.displayName}" },
                         loadingStage = null,
                     )
-                    val stageJob = viewModelScope.launch {
+                    // A child of this job, not a sibling on viewModelScope —
+                    // as a sibling it outlived the cancel meant to stop it,
+                    // because `stageJob.cancel()` below is skipped when the
+                    // load is cancelled out from under it.
+                    val stageJob = launch {
                         while (isActive) {
                             delay(LOAD_STAGE_POLL_MILLIS)
                             _state.value = _state.value.copy(loadingStage = diffusion.loadStage)
                         }
                     }
-                    val loaded = diffusion.load(
-                        model.id,
-                        model.localPath,
-                        // Everything the sheet lists, armed or not, so that a
-                        // component switched off is one the loader is told to
-                        // leave out rather than one it never hears about.
-                        _state.value.availableAttachments,
-                        params = SparseParams.parse(model.paramOverridesJson),
-                    )
-                    stageJob.cancel()
+                    val loaded = try {
+                        diffusion.load(
+                            model.id,
+                            model.localPath,
+                            // Everything the sheet lists, armed or not, so that a
+                            // component switched off is one the loader is told to
+                            // leave out rather than one it never hears about.
+                            _state.value.availableAttachments,
+                            params = SparseParams.parse(model.paramOverridesJson),
+                        )
+                    } finally {
+                        stageJob.cancel()
+                    }
                     _state.value = _state.value.copy(
                         loadingModel = false,
                         loadingWhat = emptyList(),
@@ -358,10 +367,20 @@ class ImageViewModel @Inject constructor(
                         // because that is a fact about this run and narrows the
                         // search without claiming to end it.
                         val armed = _state.value.attachments
+                        // Cancelling is not failing. A load the person stopped
+                        // themselves does not get a red banner, and does not
+                        // get the "switch components off one at a time" hint —
+                        // there is nothing here to narrow down.
+                        val why = loaded.exceptionOrNull()
+                        val cancelled = why is ai.ondevice.engine.LoadCancelled
                         _state.value = _state.value.copy(
                             generating = false,
-                            error = loaded.exceptionOrNull()?.message ?: "The diffusion model could not be loaded.",
-                            errorHint = armed.takeIf { it.isNotEmpty() }?.let { components ->
+                            error = if (cancelled) {
+                                null
+                            } else {
+                                why?.message ?: "The diffusion model could not be loaded."
+                            },
+                            errorHint = armed.takeIf { !cancelled && it.isNotEmpty() }?.let { components ->
                                 "Passed " + components.joinToString(", ") { it.role.label } +
                                     ". Switching them off one at a time under Components narrows " +
                                     "it down when one of them is the problem."
@@ -384,6 +403,7 @@ class ImageViewModel @Inject constructor(
                             .takeIf { _state.value.use == ImageUse.EDIT },
                         controlImageUri = _state.value.controlImageUri,
                         styleImageUri = _state.value.styleImageUri,
+                        identityImageUri = _state.value.identityImageUri,
                         maskPngPath = _state.value.maskPath
                             ?.takeIf { _state.value.use == ImageUse.REPAINT },
                         attachments = _state.value.attachments,
@@ -524,6 +544,7 @@ class ImageViewModel @Inject constructor(
                 sourceImageUri = null,
                 controlImageUri = null,
                 styleImageUri = null,
+                identityImageUri = null,
                 maskPath = null,
                 lastImage = null,
                 usedSeed = null,
@@ -899,6 +920,9 @@ class ImageViewModel @Inject constructor(
             "control_image" to s.controlImageUri,
             "control_strength" to s.controlStrength.takeIf { s.controlImageUri != null },
             "ip_adapter_strength" to s.styleStrength.takeIf { s.styleImageUri != null },
+            // Each only where there is a face for it to hold.
+            "style_strength" to s.photoMakerStrength.takeIf { s.identityImageUri != null },
+            "id_weight" to s.pulidWeight.takeIf { s.identityImageUri != null },
             "extend" to listOf(s.extendLeft, s.extendTop, s.extendRight, s.extendBottom)
                 .takeIf { s.use == ImageUse.EXTEND && it.any { px -> px > 0 } },
         )
@@ -1018,6 +1042,11 @@ data class ImageState(
     val controlImageUri: String? = null,
     /** What an IP-Adapter takes its look from — see DiffusionRequest.styleImageUri. */
     val styleImageUri: String? = null,
+    /** The face PhotoMaker and PuLID keep — see DiffusionRequest.identityImageUri. */
+    val identityImageUri: String? = null,
+    /** Upstream's own defaults for the two adapters that read that face. */
+    val photoMakerStrength: Float = 20f,
+    val pulidWeight: Float = 1f,
     val styleStrength: Float = 1.0f,
     val controlStrength: Float = 0.9f,
     /** Outpaint margins in pixels, per edge. */
@@ -1104,6 +1133,18 @@ data class ImageState(
 
     val usesControlImage: Boolean
         get() = armed(ai.ondevice.core.AttachmentRole.CONTROLNET)
+
+    /**
+     * The face the two identity adapters keep, which neither ever had.
+     *
+     * `pm_params.id_images` and `pulid_params` were left as
+     * `sd_img_gen_params_init` wrote them, so PhotoMaker and PuLID could be
+     * attached, could load several hundred megabytes each, and could not
+     * change the picture — there was nobody to keep.
+     */
+    val usesIdentityImage: Boolean
+        get() = armed(ai.ondevice.core.AttachmentRole.PHOTO_MAKER) ||
+            armed(ai.ondevice.core.AttachmentRole.PULID)
 
     private fun armed(role: ai.ondevice.core.AttachmentRole) =
         availableAttachments.any { it.enabled && it.role == role }

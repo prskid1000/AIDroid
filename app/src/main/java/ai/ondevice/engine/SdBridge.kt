@@ -142,6 +142,8 @@ object SdBridge {
         reference: ByteArray?, referenceWidth: Int, referenceHeight: Int,
         /** The picture an IP-Adapter takes its style from, read through CLIP-Vision. */
         style: ByteArray?, styleWidth: Int, styleHeight: Int,
+        /** The face PhotoMaker and PuLID are asked to keep. */
+        identity: ByteArray?, identityWidth: Int, identityHeight: Int,
         attachmentsJson: String,
     ): ByteArray?
 }

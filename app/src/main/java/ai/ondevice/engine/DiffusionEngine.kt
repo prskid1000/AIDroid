@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.add
@@ -40,6 +41,37 @@ class DiffusionEngine(
     var loadedModelId: String? = null
         private set
 
+    /**
+     * One load at a time, whatever the screens ask for.
+     *
+     * `nativeLoad` is a blocking JNI call that runs for minutes and cannot be
+     * interrupted — cancelling the coroutine waiting on it does not reach it.
+     * So a Cancel during a load left the call running with no handle recorded,
+     * `isCurrent` answering false, and the next Generate starting a *second*
+     * `new_sd_ctx` beside the first. Two multi-gigabyte allocations at once is
+     * not an error ggml returns; it is an abort, and the process goes with it.
+     * That is the crash, and it lands on the press *after* the cancel, which is
+     * why it read as "cancelling mid-load crashes the app".
+     */
+    private val loadLock = kotlinx.coroutines.sync.Mutex()
+
+    /**
+     * A Cancel pressed while the loader was running, waiting for it to stop.
+     *
+     * There is no cancelling `new_sd_ctx` — upstream has no flag to set and no
+     * callback to refuse from, and the time is spent inside file reads and
+     * allocations rather than in a graph. What the app can honour is the
+     * *intent*: let the load finish and drop the weights the moment it does,
+     * rather than seating gigabytes nobody asked to keep.
+     */
+    @Volatile
+    private var loadCancelled: Boolean = false
+
+    /** True while `nativeLoad` is running and has not yet returned a handle. */
+    @Volatile
+    var loading: Boolean = false
+        private set
+
     val available: Boolean get() = SdBridge.available
     val isLoaded: Boolean get() = handle != 0L
 
@@ -60,7 +92,31 @@ class DiffusionEngine(
         threads: Int = capabilities.inferenceThreads,
         params: ai.ondevice.core.SparseParams = ai.ondevice.core.SparseParams.EMPTY,
     ): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching {
+        // Held across the whole call, including `unload`: a free racing another
+        // thread's load is the same fault seen from the other side.
+        //
+        // `withLock` is not cancellable-safe to skip — a caller cancelled while
+        // queued here never enters, which is the right answer for a second
+        // Generate pressed during a load nobody wants any more.
+        loadLock.withLock {
+            loadCancelled = false
+            loading = true
+            try {
+                loadLocked(modelId, modelPath, attachments, threads, params)
+            } finally {
+                loading = false
+            }
+        }
+    }
+
+    private fun loadLocked(
+        modelId: String,
+        modelPath: String,
+        attachments: List<ModelAttachment>,
+        threads: Int,
+        params: ai.ondevice.core.SparseParams,
+    ): Result<Unit> {
+        return runCatching {
             check(SdBridge.available) {
                 SdBridge.loadError ?: "The stable-diffusion.cpp runtime is not installed in this build."
             }
@@ -111,6 +167,16 @@ class DiffusionEngine(
                 threads = threads,
             )
             check(newHandle != 0L) { "The runtime returned no handle for $modelPath." }
+            // A Cancel that arrived while the loader was working. The weights
+            // are on the heap by now — there was no interrupting the call — so
+            // honouring the press means giving them straight back rather than
+            // seating gigabytes for a run nobody is waiting for.
+            if (loadCancelled) {
+                SdBridge.nativeFree(newHandle)
+                loadCancelled = false
+                android.util.Log.i(TAG, "load of ${File(modelPath).name} finished after Cancel; freed")
+                throw LoadCancelled()
+            }
             handle = newHandle
             // Only the roles just handed to the loader.
             //
@@ -335,7 +401,16 @@ class DiffusionEngine(
         )
     }
 
+    /**
+     * Stop what is running, whichever of the two things that is.
+     *
+     * During a run this reaches the graph callback and the next ggml node
+     * declines to execute. During a load there is nothing to reach — upstream
+     * offers no cancel for `new_sd_ctx` — so the press is remembered and the
+     * weights are freed the moment the call returns.
+     */
     fun cancel() {
+        if (loading) loadCancelled = true
         if (handle != 0L) SdBridge.nativeCancel(handle)
     }
 
@@ -358,6 +433,7 @@ class DiffusionEngine(
         val reference = request.referenceImageUri?.let { decodeRgb(it) }
         val control = request.controlImageUri?.let { decodeRgb(it) }
         val style = request.styleImageUri?.let { decodeRgb(it) }
+        val identity = request.identityImageUri?.let { decodeRgb(it) }
         val mask = request.maskPngPath?.let { decodeRgbFromFile(it) }
 
         // Attachments the *runtime* takes per-run, as a role-tagged list.
@@ -403,6 +479,7 @@ class DiffusionEngine(
                     control?.pixels, control?.width ?: 0, control?.height ?: 0,
                     reference?.pixels, reference?.width ?: 0, reference?.height ?: 0,
                     style?.pixels, style?.width ?: 0, style?.height ?: 0,
+                    identity?.pixels, identity?.width ?: 0, identity?.height ?: 0,
                     attachmentsJson,
                 )
                 if (bytes == null) {
@@ -827,6 +904,15 @@ data class DiffusionRequest(
      * encoder, and was handed nothing to look at.
      */
     val styleImageUri: String? = null,
+    /**
+     * The face PhotoMaker and PuLID are asked to keep.
+     *
+     * `sd_pm_params_t.id_images` and the PuLID weight were left as
+     * `sd_img_gen_params_init` wrote them — no images, so no identity. Both
+     * adapters could be attached and both loaded, which is the expensive half
+     * of a feature that never did anything.
+     */
+    val identityImageUri: String? = null,
     val maskPngPath: String? = null,
     val attachments: List<ModelAttachment> = emptyList(),
 )
@@ -941,3 +1027,11 @@ sealed interface DiffusionEvent {
     data class Failed(val message: String, val suggestion: String?) : DiffusionEvent
 
 }
+
+/**
+ * A load that finished after the person had already said they did not want it.
+ *
+ * Its own type so the screens can tell it from a load that went wrong. Both
+ * come back as a failed [Result]; only one of them is worth a red banner.
+ */
+class LoadCancelled : Exception("The load was cancelled.")

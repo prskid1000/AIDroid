@@ -56,7 +56,31 @@ struct od_sd {
     int   steps       = 20;
     float cfg_scale   = 7.0f;
     float guidance    = 3.5f;
-    float flow_shift  = 0.0f;
+
+    /**
+     * Three settings whose real default is "whatever this architecture uses",
+     * and which upstream spells INFINITY. Negative here means that sentinel.
+     *
+     * `flow_shift` was the expensive one. `sd_sample_params_init` sets it to
+     * INFINITY, `set_flow_shift` reads that as "use `default_flow_shift`", and
+     * the loader had already picked one per architecture — 5 for Wan, 7 for
+     * Hunyuan, 3.16 for Boogu, 3 for the rest of the flow models. This struct
+     * defaulted it to 0 and assigned it unconditionally, so every run
+     * overwrote the architecture's own shift with zero. On a flow denoiser
+     * that is not a small change: `time_snr_shift(0, t)` is `0*t/(1-t)`, which
+     * is zero for every t, so every sigma in the schedule collapsed to zero
+     * and `noise_scaling` returned the latent untouched. Flux, SD3, Wan,
+     * Qwen-Image, LTX, Chroma — every modern architecture is a flow model, and
+     * on all of them the sampler was handed a schedule with no noise in it.
+     *
+     * `eta` and `img_cfg` are the same sentinel and were simply never sent;
+     * they are sent now, and a negative value still means "let it resolve".
+     */
+    float flow_shift  = -1.0f;
+    float img_cfg     = -1.0f;
+    float eta         = -1.0f;
+    /** Timestep shifting, upstream's own default of 0 meaning "off". */
+    int   shifted_timestep = 0;
     float slg_scale   = 0.0f;
     float skip_layer_start = 0.01f;
     float skip_layer_end   = 0.2f;
@@ -92,6 +116,32 @@ struct od_sd {
     float moe_boundary  = 0.875f;
     /** Steps for that high-noise expert; 0 means "the same as the other". */
     int   high_noise_steps = 0;
+
+    /**
+     * Step caching, which is the one setting here that buys minutes.
+     *
+     * EasyCache and the block-level caches reuse a step's residual when the
+     * model is changing little, and on a phone that is the difference between
+     * a run you wait for and one you abandon. Exposed the way upstream's own
+     * CLI exposes it — a mode and a `key=value` list — rather than as
+     * twenty-two rows, most of which belong to one mode and are meaningless
+     * under the others.
+     */
+    std::string cache_mode;    // empty is upstream's SD_CACHE_DISABLED
+    std::string cache_option;
+
+    /**
+     * The two identity adapters, which could be attached and never used.
+     *
+     * `photo_maker_path` and `pulid_weights_path` are load-time and were being
+     * passed, so the weights went into memory. What neither had was the
+     * generate-time half — `pm_params` and `pulid_params` were left as
+     * `sd_img_gen_params_init` wrote them, which means no identity image and
+     * therefore no identity. Several hundred megabytes resident, and a picture
+     * of nobody in particular.
+     */
+    float pm_style_strength = 20.0f;
+    float pulid_id_weight   = 1.0f;
 
     // The hi-res stage, which both stills and clips have.
     //
@@ -517,6 +567,13 @@ const std::map<std::string, row> & table() {
         { "cfg_scale",        { [](od_sd & e, const json & v) { e.cfg_scale = as_float(v, e.cfg_scale); } } },
         { "guidance",         { [](od_sd & e, const json & v) { e.guidance = as_float(v, e.guidance); } } },
         { "flow_shift",       { [](od_sd & e, const json & v) { e.flow_shift = as_float(v, e.flow_shift); } } },
+        { "img_cfg",          { [](od_sd & e, const json & v) { e.img_cfg = as_float(v, e.img_cfg); } } },
+        { "eta",              { [](od_sd & e, const json & v) { e.eta = as_float(v, e.eta); } } },
+        { "shifted_timestep", { [](od_sd & e, const json & v) { e.shifted_timestep = std::max(0, as_int(v, e.shifted_timestep)); } } },
+        { "cache_mode",       { [](od_sd & e, const json & v) { e.cache_mode = as_string(v); } } },
+        { "cache_option",     { [](od_sd & e, const json & v) { e.cache_option = as_string(v); } } },
+        { "style_strength",   { [](od_sd & e, const json & v) { e.pm_style_strength = as_float(v, e.pm_style_strength); } } },
+        { "id_weight",        { [](od_sd & e, const json & v) { e.pulid_id_weight = as_float(v, e.pulid_id_weight); } } },
         { "slg_scale",        { [](od_sd & e, const json & v) { e.slg_scale = as_float(v, e.slg_scale); } } },
         { "skip_layer_start", { [](od_sd & e, const json & v) { e.skip_layer_start = as_float(v, e.skip_layer_start); } } },
         { "skip_layer_end",   { [](od_sd & e, const json & v) { e.skip_layer_end = as_float(v, e.skip_layer_end); } } },
@@ -564,6 +621,13 @@ const std::map<std::string, json (*)(const od_sd &)> & default_table() {
         { "cfg_scale",        [](const od_sd & e) { return json(e.cfg_scale); } },
         { "guidance",         [](const od_sd & e) { return json(e.guidance); } },
         { "flow_shift",       [](const od_sd & e) { return json(e.flow_shift); } },
+        { "img_cfg",          [](const od_sd & e) { return json(e.img_cfg); } },
+        { "eta",              [](const od_sd & e) { return json(e.eta); } },
+        { "shifted_timestep", [](const od_sd & e) { return json(e.shifted_timestep); } },
+        { "cache_mode",       [](const od_sd & e) { return json(e.cache_mode.empty() ? "disabled" : e.cache_mode); } },
+        { "cache_option",     [](const od_sd & e) { return json(e.cache_option); } },
+        { "style_strength",   [](const od_sd & e) { return json(e.pm_style_strength); } },
+        { "id_weight",        [](const od_sd & e) { return json(e.pulid_id_weight); } },
         { "slg_scale",        [](const od_sd & e) { return json(e.slg_scale); } },
         { "skip_layer_start", [](const od_sd & e) { return json(e.skip_layer_start); } },
         { "skip_layer_end",   [](const od_sd & e) { return json(e.skip_layer_end); } },
@@ -790,6 +854,94 @@ bool write_wav(const std::string & path, const sd_audio_t & audio) {
  * struct's own initialiser leaves empty. The vector lives on `od_sd`, which
  * outlives the call the params struct is passed to.
  */
+/** A negative dial means "leave upstream's INFINITY, which resolves per model". */
+float or_model_default(float value) {
+    return value < 0.0f ? INFINITY : value;
+}
+
+/**
+ * The cache mode and its options, in upstream's own two-flag shape.
+ *
+ * The option names are the ones `--cache-option` documents, and which one a
+ * name lands on depends on the mode: `threshold` is the reuse threshold for
+ * the EasyCache family and the residual-difference threshold for the
+ * block-level ones. Anything unrecognised is left alone rather than guessed at.
+ */
+void apply_cache(const od_sd & e, sd_cache_params_t & cache) {
+    sd_cache_params_init(&cache);
+    const std::string & mode = e.cache_mode;
+    if (mode.empty() || mode == "disabled") return;
+
+    if      (mode == "easycache")  cache.mode = SD_CACHE_EASYCACHE;
+    else if (mode == "ucache")     cache.mode = SD_CACHE_UCACHE;
+    else if (mode == "dbcache")    cache.mode = SD_CACHE_DBCACHE;
+    else if (mode == "taylorseer") cache.mode = SD_CACHE_TAYLORSEER;
+    else if (mode == "cache_dit")  cache.mode = SD_CACHE_CACHE_DIT;
+    else if (mode == "spectrum")   cache.mode = SD_CACHE_SPECTRUM;
+    else {
+        SLOGE("unknown cache mode '%s'; caching stays off", mode.c_str());
+        return;
+    }
+
+    const bool block_level = cache.mode == SD_CACHE_DBCACHE ||
+                             cache.mode == SD_CACHE_TAYLORSEER ||
+                             cache.mode == SD_CACHE_CACHE_DIT;
+
+    size_t at = 0;
+    const std::string & text = e.cache_option;
+    while (at < text.size()) {
+        size_t comma = text.find(',', at);
+        if (comma == std::string::npos) comma = text.size();
+        const std::string pair = text.substr(at, comma - at);
+        at = comma + 1;
+        const size_t eq = pair.find('=');
+        if (eq == std::string::npos) continue;
+        auto trim = [](std::string s) {
+            while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) s.erase(s.begin());
+            while (!s.empty() && (s.back() == ' ' || s.back() == '\t')) s.pop_back();
+            return s;
+        };
+        const std::string key   = trim(pair.substr(0, eq));
+        const std::string value = trim(pair.substr(eq + 1));
+        if (key.empty() || value.empty()) continue;
+
+        float number = 0.0f;
+        try { number = std::stof(value); } catch (...) { continue; }
+        const bool flag = number != 0.0f;
+
+        if      (key == "threshold" && block_level) cache.residual_diff_threshold = number;
+        else if (key == "threshold")                cache.reuse_threshold = number;
+        else if (key == "start")                    cache.start_percent = number;
+        else if (key == "end")                      cache.end_percent = number;
+        else if (key == "decay")                    cache.error_decay_rate = number;
+        else if (key == "relative")                 cache.use_relative_threshold = flag;
+        else if (key == "reset")                    cache.reset_error_on_compute = flag;
+        else if (key == "Fn")                       cache.Fn_compute_blocks = (int) number;
+        else if (key == "Bn")                       cache.Bn_compute_blocks = (int) number;
+        else if (key == "warmup")                   cache.max_warmup_steps = (int) number;
+        else if (key == "w")                        cache.spectrum_w = number;
+        else if (key == "m")                        cache.spectrum_m = (int) number;
+        else if (key == "lam")                      cache.spectrum_lam = number;
+        else if (key == "window")                   cache.spectrum_window_size = (int) number;
+        else if (key == "flex")                     cache.spectrum_flex_window = number;
+        else if (key == "stop")                     cache.spectrum_stop_percent = number;
+        else SLOGE("cache option '%s' is not one this mode takes; ignored", key.c_str());
+    }
+}
+
+/** The parts of a sampler pass both outputs share, sentinels intact. */
+void apply_sample_params(const od_sd & e, sd_sample_params_t & sample) {
+    sample.sample_steps                = e.steps;
+    sample.guidance.txt_cfg            = e.cfg_scale;
+    sample.guidance.img_cfg            = or_model_default(e.img_cfg);
+    sample.guidance.distilled_guidance = e.guidance;
+    sample.flow_shift                  = or_model_default(e.flow_shift);
+    sample.eta                         = or_model_default(e.eta);
+    sample.shifted_timestep            = e.shifted_timestep;
+    sample.sample_method               = str_to_sample_method(e.sampling_method.c_str());
+    sample.scheduler                   = str_to_scheduler(e.schedule.c_str());
+}
+
 void apply_slg(const od_sd & e, sd_slg_params_t & slg) {
     slg.scale       = e.slg_scale;
     slg.layer_start = e.skip_layer_start;
@@ -1541,13 +1693,8 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerateVideo(
     params.vace_strength   = e->vace_strength;
     params.moe_boundary    = e->moe_boundary;
 
-    params.sample_params.sample_steps                = e->steps;
-    params.sample_params.guidance.txt_cfg            = e->cfg_scale;
-    params.sample_params.guidance.distilled_guidance = e->guidance;
-    params.sample_params.flow_shift                  = e->flow_shift;
+    apply_sample_params(*e, params.sample_params);
     apply_slg(*e, params.sample_params.guidance.slg);
-    params.sample_params.sample_method = str_to_sample_method(e->sampling_method.c_str());
-    params.sample_params.scheduler     = str_to_scheduler(e->schedule.c_str());
     // Wan 2.2 is two experts either side of a noise boundary, and each takes
     // its own step count. Defaulting the second to the first keeps one dial
     // meaningful for the architectures that have only one denoiser.
@@ -1557,6 +1704,7 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerateVideo(
                                                        : e->steps;
 
     params.vae_tiling_params.enabled = e->vae_tiling;
+    apply_cache(*e, params.cache);
     const std::string hires_dropped = apply_video_hires(*e, params.hires, upscaler_model);
     if (!hires_dropped.empty()) {
         SLOGI("hi-res stage skipped: %s", hires_dropped.c_str());
@@ -1658,6 +1806,7 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
         jbyteArray jcontrol, jint controlW, jint controlH,
         jbyteArray jref, jint refW, jint refH,
         jbyteArray jstyle, jint styleW, jint styleH,
+        jbyteArray jidentity, jint identityW, jint identityH,
         jstring jattachments) {
     auto * e = as_sd(handle);
     if (e == nullptr || e->ctx == nullptr) {
@@ -1694,6 +1843,11 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
     // IP-Adapter loaded, cost its weights and a 2.4 GB encoder, and was handed
     // nothing to look at.
     owned_image style = take_image(env, jstyle, styleW, styleH);
+    // The face PhotoMaker and PuLID are asked to keep — a fourth distinct
+    // picture, and the last field of the five that nothing filled. Both
+    // adapters could be attached, both loaded their weights, and neither was
+    // ever shown a person, so the run was the run without them.
+    owned_image identity = take_image(env, jidentity, identityW, identityH);
 
     // Attachments arrive as a role-tagged list, not as named arguments.
     std::vector<sd_lora_t>   loras;
@@ -1757,16 +1911,21 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
     params.seed            = e->seed;
     params.strength        = e->strength;
 
-    params.sample_params.sample_steps         = e->steps;
-    params.sample_params.guidance.txt_cfg     = e->cfg_scale;
-    params.sample_params.guidance.distilled_guidance = e->guidance;
+    apply_sample_params(*e, params.sample_params);
     apply_slg(*e, params.sample_params.guidance.slg);
-    params.sample_params.flow_shift           = e->flow_shift;
-    params.sample_params.sample_method        = str_to_sample_method(e->sampling_method.c_str());
-    params.sample_params.scheduler            = str_to_scheduler(e->schedule.c_str());
 
     params.vae_tiling_params.enabled = e->vae_tiling;
+    apply_cache(*e, params.cache);
     apply_hires(*e, params.hires, upscaler_model);
+
+    // The generate-time half of the two identity adapters. The weights were
+    // already resident; without these they were resident and idle.
+    params.pm_params.style_strength = e->pm_style_strength;
+    params.pulid_params.id_weight   = e->pulid_id_weight;
+    if (identity.image.data != nullptr) {
+        params.pm_params.id_images       = &identity.image;
+        params.pm_params.id_images_count = 1;
+    }
 
     if (reference.image.data != nullptr) {
         params.ref_images       = &reference.image;
