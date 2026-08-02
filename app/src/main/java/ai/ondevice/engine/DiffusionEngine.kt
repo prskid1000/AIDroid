@@ -130,7 +130,13 @@ class DiffusionEngine(
             // the runtime can make it.
             val taken = loadedComponents()
             residentComponents = taken.mapNotNull { (role, path) ->
-                role?.let { it to File(path).name }
+                role?.let {
+                    // Its size too. The checkpoint's was on screen and the
+                    // components' were not, so a 2.4 GB encoder and a 168 MB
+                    // decoder read as the same weight — and the encoder is
+                    // usually the reason a bundle does not fit.
+                    ResidentPart(it, File(path).name, File(path).length())
+                }
             }
             residentModel = File(modelPath).let { "${it.name} · ${formatBytes(it.length())}" }
             residentBytes = File(modelPath).length() +
@@ -141,7 +147,7 @@ class DiffusionEngine(
                 "loaded ${File(modelPath).name} (${File(modelPath).length() / 1024 / 1024} MB) " +
                     "threads=$threads " +
                     "wtype=${weightType.ifBlank { "as stored" }} " +
-                    "attached=" + residentComponents.map { it.first.name }
+                    "attached=" + residentComponents.map { it.role.name }
                     .ifEmpty { listOf("none") }.joinToString("+"),
             )
             loadedModelId = modelId
@@ -190,7 +196,7 @@ class DiffusionEngine(
      * component is switched off, and differed silently until now.
      */
     @Volatile
-    var residentComponents: List<Pair<AttachmentRole, String>> = emptyList()
+    var residentComponents: List<ResidentPart> = emptyList()
         private set
 
     /**
@@ -298,7 +304,7 @@ class DiffusionEngine(
             android.util.Log.i(
                 TAG,
                 "unloading " + (residentModel ?: loadedModelId ?: "?") +
-                    residentComponents.joinToString("") { " -${it.first.name}" } +
+                    residentComponents.joinToString("") { " -${it.role.name}" } +
                     " (freeing ~${formatBytes(residentBytes)})" +
                     (because?.let { ": $it" } ?: ""),
             )
@@ -878,6 +884,20 @@ data class DiffusionImage(val width: Int, val height: Int, val pixels: IntArray)
         return PngText.withTextChunk(body.toByteArray(), "parameters", parametersJson)
     }
 }
+
+/**
+ * One component the loader reported taking, and what it costs.
+ *
+ * [bytes] is its size on disk, which is the honest figure for what it occupies
+ * — the runtime reports none of its own, and the weights dominate a diffusion
+ * context by enough that the file size is nearer than anything this app could
+ * compute.
+ */
+data class ResidentPart(
+    val role: AttachmentRole,
+    val fileName: String,
+    val bytes: Long,
+)
 
 /** Which part of the run is happening. */
 enum class DiffusionPhase(val label: String) {

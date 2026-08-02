@@ -846,7 +846,12 @@ private fun LivePreview(state: ImageState) {
                     state.phase == ai.ondevice.engine.DiffusionPhase.DECODING ->
                         "decoding the latent to pixels · almost done"
                     state.step <= 0 -> "warming up…"
-                    else -> "sampling · no preview decoder installed"
+                    // Not "no preview decoder installed", which describes a
+                    // missing file. There is none to install: previews are a
+                    // linear projection of the latent and need no decoder at
+                    // all, so the line named a remedy that does not exist for a
+                    // problem nobody has. A preview simply has not arrived yet.
+                    else -> "sampling · first preview at the next step"
                 },
                 style = NocturneType.MonoSm,
                 color = if (state.generating) {

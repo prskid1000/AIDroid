@@ -929,7 +929,14 @@ class ImageViewModel @Inject constructor(
      * its absence is what made this card vanish for a self-contained model.
      */
     private fun residentLines(): List<String> = listOfNotNull(diffusion.residentModel) +
-        diffusion.residentComponents.map { (role, file) -> "${role.label} · $file" }
+        diffusion.residentComponents.map {
+            "${it.role.label} · ${it.fileName} · " +
+                if (it.bytes >= 1_000_000_000L) {
+                    String.format("%.2f GB", it.bytes / 1_000_000_000.0)
+                } else {
+                    String.format("%.0f MB", it.bytes / 1_000_000.0)
+                }
+        }
 
     private fun residentSize(): String? = diffusion.residentBytes
         .takeIf { it > 0L }

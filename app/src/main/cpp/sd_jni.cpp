@@ -112,6 +112,17 @@ struct od_sd {
     std::atomic<bool>  supports_video{false};
     /** Set by Cancel, read by the graph callback before every ggml node. */
     std::atomic<bool>  cancelled{false};
+    /**
+     * A Cancel pressed before sampling began, waiting for it to begin.
+     *
+     * Upstream's own cancel abandons whatever graph is running, and the
+     * conditioner asserts on the empty result it then gets —
+     * `GGML_ASSERT(!hidden_states.empty())` in `LLMEmbedder::encode_prompt`,
+     * which is `ggml_abort` and takes the process with it. So the flag is not
+     * handed over until sampling has started, which is where the minutes are
+     * and where an abandoned graph is handled rather than asserted on.
+     */
+    std::atomic<bool>  cancel_deferred{false};
 
     std::mutex           preview_mutex;
     std::vector<uint8_t> preview_rgb;
@@ -264,6 +275,11 @@ void note_phase(const std::string & line) {
                says("generating latent")) {
         e->phase.store(PHASE_SAMPLING);
         e->sampling_started.store(true);
+        // A Cancel pressed during the prompt encode has been waiting for this.
+        if (e->cancel_deferred.exchange(false) && e->ctx != nullptr) {
+            SLOGI("cancel deferred through the prompt encode; applying it now");
+            sd_cancel_generation(e->ctx, SD_CANCEL_ALL);
+        }
         // Each image of a batch declares its own total, so the latch that tells
         // the sampler from the tensor loader is dropped here rather than once
         // per run. See progress_cb.
@@ -1259,7 +1275,16 @@ Java_ai_ondevice_engine_SdBridge_nativeCancel(JNIEnv *, jobject, jlong handle) {
     // stop. The atomic below is read by the graph callback, which ggml asks
     // before every node.
     e->cancelled.store(true);
-    sd_cancel_generation(e->ctx, SD_CANCEL_ALL);
+    // Only once sampling is running. Before that, upstream's cancel abandons
+    // the conditioner's graph and the assert on its empty result is an abort,
+    // not an error — the app dies rather than stopping. The press is remembered
+    // and applied the moment sampling begins; the graph callback below already
+    // covers everything after that point.
+    if (e->sampling_started.load()) {
+        sd_cancel_generation(e->ctx, SD_CANCEL_ALL);
+    } else {
+        e->cancel_deferred.store(true);
+    }
 }
 
 /** What this context can make, so the app offers the screen that fits it. */
@@ -1320,6 +1345,7 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerateVideo(
     e->phase.store(PHASE_PREPARING);
     e->sampling_started.store(false);
     e->sampler_steps.store(0);
+    e->cancel_deferred.store(false);
     { std::lock_guard<std::mutex> lora_lock(g_lora_mutex); g_lora_report.clear(); }
     {
         std::lock_guard<std::mutex> preview_lock(e->preview_mutex);
@@ -1526,6 +1552,7 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
     e->phase.store(PHASE_PREPARING);
     e->sampling_started.store(false);
     e->sampler_steps.store(0);
+    e->cancel_deferred.store(false);
     { std::lock_guard<std::mutex> lock(g_lora_mutex); g_lora_report.clear(); }
     {
         std::lock_guard<std::mutex> preview_lock(e->preview_mutex);

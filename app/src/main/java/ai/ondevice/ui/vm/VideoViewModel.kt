@@ -249,7 +249,14 @@ class VideoViewModel @Inject constructor(
                     recognisedAs = diffusion.detectedVersion,
                     supportsVideo = diffusion.supportsVideo,
                     residentComponents = listOfNotNull(diffusion.residentModel) +
-                        diffusion.residentComponents.map { (role, file) -> "${role.label} · $file" },
+                        diffusion.residentComponents.map {
+                            "${it.role.label} · ${it.fileName} · " +
+                                if (it.bytes >= 1_000_000_000L) {
+                                    String.format("%.2f GB", it.bytes / 1_000_000_000.0)
+                                } else {
+                                    String.format("%.0f MB", it.bytes / 1_000_000.0)
+                                }
+                        },
                 )
 
                 // Asked of the loaded context rather than of the architecture's
