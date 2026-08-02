@@ -104,7 +104,19 @@ class ParamRepository(
         .map { it.key }
         .toSet()
 
-    /** The visible parameter set for a screen. */
+    /**
+     * The parameter set for a screen, each row carrying why it cannot be
+     * edited — or null, when it can.
+     *
+     * Gated rows used to be dropped, and the screen said so in aggregate: "11
+     * hidden by dependsOn or build gate". That is a count of things you cannot
+     * see, cannot name and cannot act on. A parameter that does not apply to
+     * the loaded model is worth showing precisely *because* it does not: it
+     * says what this model does not have, and what would bring it back.
+     *
+     * The tier pills and the search box still filter, because those are the
+     * user's own filters rather than the app's.
+     */
     fun visible(
         specs: List<ParamSpec>,
         values: SparseParams,
@@ -115,17 +127,10 @@ class ParamRepository(
         architecture: String?,
         query: String = "",
     ): VisibleParams {
-        val applicable = specs.filter { spec ->
-            appliesToMatches(spec, modality, architecture) && buildInRange(spec, loadedBuildTag)
-        }
-        val afterDependencies = applicable.filter { dependencySatisfied(it, values) }
-        val hiddenByGate = applicable.size - afterDependencies.size +
-            (specs.size - applicable.size)
-
         val afterTier = if (showAll || tier == null) {
-            afterDependencies
+            specs
         } else {
-            afterDependencies.filter { it.tier.ordinal <= tier.ordinal }
+            specs.filter { it.tier.ordinal <= tier.ordinal }
         }
 
         val afterSearch = if (query.isBlank()) {
@@ -137,28 +142,61 @@ class ParamRepository(
             }
         }
 
+        val rows = afterSearch.map { spec ->
+            GatedParam(
+                spec = spec,
+                disabledBecause = appliesToRefusal(spec, modality, architecture)
+                    ?: buildRefusal(spec, loadedBuildTag)
+                    ?: dependencyRefusal(spec, values),
+            )
+        }
+
         return VisibleParams(
-            specs = afterSearch,
-            shownCount = afterSearch.size,
-            hiddenCount = hiddenByGate,
+            rows = rows,
+            shownCount = rows.count { it.disabledBecause == null },
+            disabledCount = rows.count { it.disabledBecause != null },
             totalCount = specs.size,
         )
     }
 
-    private fun appliesToMatches(spec: ParamSpec, modality: String?, architecture: String?): Boolean {
-        val applies = spec.appliesTo ?: return true
-        applies.modality?.let { if (modality != null && modality !in it) return false }
-        applies.arch?.let { if (architecture != null && architecture !in it) return false }
-        return true
+    private fun appliesToMatches(spec: ParamSpec, modality: String?, architecture: String?): Boolean =
+        appliesToRefusal(spec, modality, architecture) == null
+
+    private fun appliesToRefusal(
+        spec: ParamSpec,
+        modality: String?,
+        architecture: String?,
+    ): String? {
+        val applies = spec.appliesTo ?: return null
+        applies.modality?.let { kinds ->
+            if (modality != null && modality !in kinds) {
+                return "Only for ${kinds.joinToString(", ")} models. This one is $modality."
+            }
+        }
+        applies.arch?.let { gates ->
+            if (architecture == null) return@let
+            if (gates.none { archKey(it) == archKey(architecture) }) {
+                return "Only for ${gates.joinToString(", ")}. This model is $architecture."
+            }
+        }
+        return null
     }
 
-    /** A parameter for a newer build simply stays hidden until the runtime catches up, then appears on its own — no app update, no user action. */
-    private fun buildInRange(spec: ParamSpec, loadedBuildTag: String?): Boolean {
-        if (loadedBuildTag == null) return true
-        val current = buildOrdinal(loadedBuildTag) ?: return true
-        spec.sinceBuild?.let { since -> buildOrdinal(since)?.let { if (current < it) return false } }
-        spec.untilBuild?.let { until -> buildOrdinal(until)?.let { if (current >= it) return false } }
-        return true
+    /** A parameter for a newer build waits until the runtime catches up, then works on its own — no app update, no user action. */
+    private fun buildRefusal(spec: ParamSpec, loadedBuildTag: String?): String? {
+        if (loadedBuildTag == null) return null
+        val current = buildOrdinal(loadedBuildTag) ?: return null
+        spec.sinceBuild?.let { since ->
+            buildOrdinal(since)?.let {
+                if (current < it) return "Needs runtime build $since or newer; this one is $loadedBuildTag."
+            }
+        }
+        spec.untilBuild?.let { until ->
+            buildOrdinal(until)?.let {
+                if (current >= it) return "Removed from the runtime in build $until; this one is $loadedBuildTag."
+            }
+        }
+        return null
     }
 
     /** `b6482` → 6482. Non-`b` tags (whisper's `v1.7.6`) fall back to a version sort. */
@@ -172,13 +210,34 @@ class ParamRepository(
         }
     }
 
-    private fun dependencySatisfied(spec: ParamSpec, values: SparseParams): Boolean {
-        val dep = spec.dependsOn ?: return true
-        val current: JsonElement = values[dep.key] ?: defaultFor(spec, dep.key) ?: return false
-        dep.equals?.let { return sameValue(current, it) }
-        dep.notEquals?.let { return !sameValue(current, it) }
-        return true
+    private fun dependencyRefusal(spec: ParamSpec, values: SparseParams): String? {
+        val dep = spec.dependsOn ?: return null
+        val label = labelFor(dep.key)
+        val current: JsonElement = values[dep.key]
+            ?: defaultFor(spec, dep.key)
+            ?: return "Enabled once $label is set."
+        dep.equals?.let {
+            return if (sameValue(current, it)) null else "Enabled when $label is ${renderJson(it)}."
+        }
+        dep.notEquals?.let {
+            val forbidden = renderJson(it)
+            return if (!sameValue(current, it)) {
+                null
+            } else if (forbidden.isBlank()) {
+                "Enabled once $label is set."
+            } else {
+                "Enabled when $label is anything but $forbidden."
+            }
+        }
+        return null
     }
+
+    /** The name a parameter is shown under, for a sentence about it. */
+    private fun labelFor(key: String): String = cached
+        ?.runtimes
+        ?.values
+        ?.firstNotNullOfOrNull { rt -> rt.params.firstOrNull { it.key == key }?.label }
+        ?: key
 
     private fun defaultFor(spec: ParamSpec, key: String): JsonElement? = cached
         ?.runtimes
@@ -198,15 +257,50 @@ class ParamRepository(
     companion object {
         const val ASSET = "params-manifest.json"
 
+        /**
+         * One spelling, for two vocabularies that name the same thing.
+         *
+         * An architecture reaches this app from either of two places, and they
+         * do not agree. A GGUF's `general.architecture` says `sd3`, and the
+         * manifest's gates are written to match it. stable-diffusion.cpp,
+         * which is the only thing that can name a checkpoint carrying no
+         * metadata, prints its own label: `SDXL`, `Flux.2 klein`, `SD3.x`.
+         * Both end up in the same column, and comparing them literally meant a
+         * model the runtime had named lost every parameter gated on its
+         * architecture — the IP-Adapter, the ControlNet, the CLIP-vision
+         * encoder and the three text encoders all disappeared from a model
+         * that takes all six, because the row said `SDXL` and the gate said
+         * `sdxl`.
+         *
+         * Case and separators carry no meaning in either vocabulary, so both
+         * sides are stripped to letters and digits. The trailing `x` goes with
+         * them: `SD1.x`, `SD2.x` and `SD3.x` are how the runtime writes "any
+         * point release of", and the family is what the gate is asking about.
+         */
+        internal fun archKey(name: String): String {
+            val squashed = name.lowercase().filter { it.isLetterOrDigit() }
+            val versionWildcard = squashed.length > 1 &&
+                squashed.last() == 'x' &&
+                squashed[squashed.lastIndex - 1].isDigit()
+            return if (versionWildcard) squashed.dropLast(1) else squashed
+        }
+
         /** Where a runtime-reported key with no manifest row is filed. */
         const val UNDESCRIBED_GROUP = "not described yet"
     }
 }
 
+/** One parameter as the screen should render it, and why it is not editable. */
+data class GatedParam(
+    val spec: ParamSpec,
+    /** Null when it can be edited; otherwise what would have to change first. */
+    val disabledBecause: String?,
+)
+
 data class VisibleParams(
-    val specs: List<ParamSpec>,
+    val rows: List<GatedParam>,
     val shownCount: Int,
-    val hiddenCount: Int,
+    val disabledCount: Int,
     val totalCount: Int,
 )
 

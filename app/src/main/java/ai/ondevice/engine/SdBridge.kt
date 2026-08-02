@@ -28,7 +28,6 @@ object SdBridge {
     external fun nativeLoad(
         modelPath: String,
         vaePath: String,
-        taesdPath: String,
         controlNetPath: String,
         /** The remaining sd_ctx_params_t auxiliary paths. */
         clipLPath: String,

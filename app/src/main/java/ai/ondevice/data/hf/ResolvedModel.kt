@@ -108,7 +108,6 @@ enum class CompanionRole(val cardinality: Cardinality) {
     T5XXL(Cardinality.ONE),
     /** FLUX.2's prompt encoder: a whole language model, not a CLIP. */
     LLM_ENCODER(Cardinality.ONE),
-    TAESD(Cardinality.ONE),
     CONTROLNET(Cardinality.ONE),
     UPSCALER(Cardinality.ONE),
     VOICES(Cardinality.ALL),
@@ -123,7 +122,6 @@ enum class CompanionRole(val cardinality: Cardinality) {
             CLIP_G -> "CLIP-G text encoder"
             T5XXL -> "T5-XXL text encoder"
             LLM_ENCODER -> "Text encoder (language model)"
-            TAESD -> "TAESD (live preview)"
             CONTROLNET -> "ControlNet"
             UPSCALER -> "Upscaler"
             VOICES -> "Voice style vectors"

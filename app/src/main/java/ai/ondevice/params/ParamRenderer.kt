@@ -7,8 +7,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import ai.ondevice.core.SparseParams
 import ai.ondevice.ui.components.NChipRow
@@ -47,6 +50,14 @@ fun ParamRow(
     showKeyLine: Boolean = true,
     /** Installed files a `path` parameter may be pointed at. */
     pathChoices: List<PathChoice> = emptyList(),
+    /**
+     * Why this row cannot be edited, or null when it can.
+     *
+     * A row that does not apply is shown rather than dropped: what a model
+     * cannot do is worth as much as what it can, and a count of hidden things
+     * is not something anyone can act on.
+     */
+    disabledBecause: String? = null,
 ) {
     val current = values[spec.key] ?: spec.default
     val modified = spec.key in values &&
@@ -56,7 +67,8 @@ fun ParamRow(
         modifier
             .fillMaxWidth()
             .ruleBelow()
-            .padding(vertical = 11.dp),
+            .padding(vertical = 11.dp)
+            .alpha(if (disabledBecause == null) 1f else 0.45f),
     ) {
         Row(
             Modifier.fillMaxWidth().padding(bottom = 3.dp),
@@ -92,12 +104,39 @@ fun ParamRow(
         }
 
         // Widget selection is table-driven off the type. No parameter names here.
-        ParamControl(spec, values, onChange, pathChoices)
+        //
+        // A disabled row still draws its control, so the value it holds stays
+        // legible; the overlay eats the touches rather than every widget in the
+        // design system having to grow an `enabled` flag.
+        Box {
+            ParamControl(spec, values, onChange, pathChoices)
+            if (disabledBecause != null) {
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    awaitPointerEvent().changes.forEach { it.consume() }
+                                }
+                            }
+                        },
+                )
+            }
+        }
 
+        disabledBecause?.let {
+            Text(
+                it,
+                style = NocturneType.Help,
+                color = NocturneColors.Accent300,
+                modifier = Modifier.padding(top = 5.dp),
+            )
+        }
         if (spec.help.isNotBlank()) {
             NHelp(spec.help, Modifier.padding(top = 5.dp))
         }
-        if (modified) {
+        if (modified && disabledBecause == null) {
             Text(
                 "reset to ${spec.defaultDisplay}",
                 style = NocturneType.Help,

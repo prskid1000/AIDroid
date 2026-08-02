@@ -124,8 +124,8 @@ fun AllParametersScreen(
             }
 
             NHelp(
-                "${state.visible.shownCount} shown · ${state.visible.hiddenCount} hidden by dependsOn " +
-                    "or build gate",
+                "${state.visible.shownCount} available · ${state.visible.disabledCount} shown but " +
+                    "not usable here, each with the reason under it",
                 Modifier.padding(bottom = 4.dp),
             )
 
@@ -171,7 +171,8 @@ fun AllParametersScreen(
             }
 
             var lastGroup: String? = null
-            state.visible.specs.forEach { spec ->
+            state.visible.rows.forEach { row ->
+                val spec = row.spec
                 if (spec.group != lastGroup) {
                     SectionKicker(groupLabel(spec.group), Modifier.padding(top = 16.dp, bottom = 4.dp))
                     lastGroup = spec.group
@@ -204,6 +205,7 @@ fun AllParametersScreen(
                         values = state.values,
                         onChange = viewModel::setValue,
                         pathChoices = state.pathChoices,
+                        disabledBecause = row.disabledBecause,
                     )
                 }
             }
@@ -265,16 +267,25 @@ fun AllParametersScreen(
 /**
  * The heading a parameter group gets.
  *
- * Most groups read fine as they are written. The four that hold the add-on
- * paths do not: `encoder`, `decoder`, `control` and `postprocess` are the
- * families a role belongs to, and the point of naming them is that CLIP-L,
- * CLIP-G, T5-XXL and the LLM are four spellings of one job — turning the prompt
- * into conditioning — rather than four unrelated files.
+ * A component and the settings that belong to it are one thing to think about,
+ * and the manifest now files them that way — the ControlNet's path and its
+ * strength under one heading, the IP-Adapter's path, its strength and the
+ * encoder it looks through under another. They used to be two headings apart,
+ * which made the strength read as a global setting and the path as a component
+ * with nothing to tune.
+ *
+ * `encoder` groups CLIP-L, CLIP-G, T5-XXL and the LLM because they are four
+ * spellings of one job — turning the prompt into conditioning — rather than
+ * four unrelated files.
  */
 private fun groupLabel(group: String): String = when (group) {
     "encoder" -> "Prompt encoder"
     "decoder" -> "Decoder"
-    "control" -> "Style & control"
+    "controlnet" -> "ControlNet"
+    "ipadapter" -> "IP-Adapter"
+    "lora" -> "LoRA"
+    "embeddings" -> "Embeddings"
+    "img2img" -> "Image to image"
     "postprocess" -> "Post-processing"
     else -> group
 }

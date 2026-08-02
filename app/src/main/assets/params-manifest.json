@@ -1486,20 +1486,6 @@
           "cliFlag": "--schedule"
         },
         {
-          "key": "strength",
-          "group": "img2img",
-          "type": "float",
-          "default": 0.75,
-          "min": 0.0,
-          "max": 1.0,
-          "step": 0.05,
-          "tier": "ADVANCED",
-          "label": "Denoise strength",
-          "help": "The key dial in this mode. 0 leaves the source untouched, 1 ignores it.",
-          "requiresReload": false,
-          "cliFlag": "--strength"
-        },
-        {
           "key": "clip_skip",
           "group": "generation",
           "type": "int",
@@ -1512,17 +1498,6 @@
           "help": "-1 uses the architecture default: 1 for SD1.x, 2 for SD2.x and SDXL.",
           "requiresReload": false,
           "cliFlag": "--clip-skip"
-        },
-        {
-          "key": "vae_tiling",
-          "group": "model",
-          "type": "bool",
-          "default": false,
-          "tier": "ADVANCED",
-          "label": "VAE tiling",
-          "help": "Tiled VAE decode. Critical on mobile — a large memory reduction at high resolutions.",
-          "requiresReload": false,
-          "cliFlag": "--vae-tiling"
         },
         {
           "key": "batch_count",
@@ -1617,18 +1592,18 @@
           "cliFlag": "--skip-layer-end"
         },
         {
-          "key": "control_strength",
-          "group": "controlnet",
+          "key": "strength",
+          "group": "img2img",
           "type": "float",
-          "default": 0.9,
+          "default": 0.75,
           "min": 0.0,
           "max": 1.0,
           "step": 0.05,
-          "tier": "EXPERT",
-          "label": "ControlNet strength",
-          "help": "How strongly the control image constrains the result.",
+          "tier": "ADVANCED",
+          "label": "Denoise strength",
+          "help": "The key dial in this mode. 0 leaves the source untouched, 1 ignores it.",
           "requiresReload": false,
-          "cliFlag": "--control-strength"
+          "cliFlag": "--strength"
         },
         {
           "key": "type",
@@ -1667,26 +1642,15 @@
           "cliFlag": "-t"
         },
         {
-          "key": "vae",
-          "group": "decoder",
-          "type": "path",
-          "default": "",
+          "key": "vae_tiling",
+          "group": "model",
+          "type": "bool",
+          "default": false,
           "tier": "ADVANCED",
-          "label": "External VAE",
-          "help": "The decoder that turns the latent into pixels. A bare diffusion GGUF ships without one, so a separate VAE has to fill the slot — when only one is installed it is chosen for you.",
-          "requiresReload": true,
-          "cliFlag": "--vae"
-        },
-        {
-          "key": "taesd",
-          "group": "decoder",
-          "type": "path",
-          "default": "",
-          "tier": "ADVANCED",
-          "label": "TAESD",
-          "help": "Tiny autoencoder. Enables the live preview during sampling.",
-          "requiresReload": true,
-          "cliFlag": "--taesd"
+          "label": "VAE tiling",
+          "help": "Tiled VAE decode. Critical on mobile — a large memory reduction at high resolutions.",
+          "requiresReload": false,
+          "cliFlag": "--vae-tiling"
         },
         {
           "key": "clip_l",
@@ -1772,8 +1736,61 @@
           }
         },
         {
+          "key": "vae",
+          "group": "decoder",
+          "type": "path",
+          "default": "",
+          "tier": "ADVANCED",
+          "label": "External VAE",
+          "help": "The decoder that turns the latent into pixels. A bare diffusion GGUF ships without one, so a separate VAE has to fill the slot — when only one is installed it is chosen for you.",
+          "requiresReload": true,
+          "cliFlag": "--vae"
+        },
+        {
+          "key": "control_net",
+          "group": "controlnet",
+          "type": "path",
+          "default": "",
+          "tier": "ADVANCED",
+          "label": "ControlNet model",
+          "help": "Path to the ControlNet weights.",
+          "requiresReload": true,
+          "cliFlag": "--control-net",
+          "appliesTo": {
+            "arch": [
+              "sd1",
+              "sd1_inpaint",
+              "sd1_pix2pix",
+              "sd1_tiny_unet",
+              "sd2",
+              "sd2_inpaint",
+              "sd2_tiny_unet",
+              "sdxl",
+              "sdxl_inpaint",
+              "sdxl_pix2pix",
+              "sdxl_ssd1b",
+              "sdxl_vega",
+              "svd"
+            ]
+          }
+        },
+        {
+          "key": "control_strength",
+          "group": "controlnet",
+          "type": "float",
+          "default": 0.9,
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.05,
+          "tier": "EXPERT",
+          "label": "ControlNet strength",
+          "help": "How strongly the control image constrains the result.",
+          "requiresReload": false,
+          "cliFlag": "--control-strength"
+        },
+        {
           "key": "ip_adapter",
-          "group": "control",
+          "group": "ipadapter",
           "type": "path",
           "default": "",
           "tier": "ADVANCED",
@@ -1796,7 +1813,7 @@
         },
         {
           "key": "ip_adapter_strength",
-          "group": "control",
+          "group": "ipadapter",
           "type": "float",
           "default": 1.0,
           "min": 0.0,
@@ -1823,20 +1840,8 @@
           }
         },
         {
-          "key": "loras",
-          "group": "control",
-          "type": "weighted_paths",
-          "min": 0.0,
-          "max": 2.0,
-          "step": 0.05,
-          "tier": "ADVANCED",
-          "label": "LoRA adapters",
-          "help": "Small trained files that pull the picture towards a style or a subject. Several stack, each at its own strength: around 1.0 is what most are trained for, and past that they tend to take the picture over.",
-          "cliFlag": "--lora"
-        },
-        {
           "key": "clip_vision",
-          "group": "control",
+          "group": "ipadapter",
           "type": "path",
           "default": "",
           "tier": "ADVANCED",
@@ -1859,8 +1864,20 @@
           }
         },
         {
+          "key": "loras",
+          "group": "lora",
+          "type": "weighted_paths",
+          "min": 0.0,
+          "max": 2.0,
+          "step": 0.05,
+          "tier": "ADVANCED",
+          "label": "LoRA adapters",
+          "help": "Small trained files that pull the picture towards a style or a subject. Several stack, each at its own strength: around 1.0 is what most are trained for, and past that they tend to take the picture over.",
+          "cliFlag": "--lora"
+        },
+        {
           "key": "embd_dir",
-          "group": "control",
+          "group": "embeddings",
           "type": "path",
           "default": "",
           "tier": "ADVANCED",
@@ -1868,34 +1885,6 @@
           "help": "Textual-inversion embeddings.",
           "requiresReload": true,
           "cliFlag": "--embd-dir",
-          "appliesTo": {
-            "arch": [
-              "sd1",
-              "sd1_inpaint",
-              "sd1_pix2pix",
-              "sd1_tiny_unet",
-              "sd2",
-              "sd2_inpaint",
-              "sd2_tiny_unet",
-              "sdxl",
-              "sdxl_inpaint",
-              "sdxl_pix2pix",
-              "sdxl_ssd1b",
-              "sdxl_vega",
-              "svd"
-            ]
-          }
-        },
-        {
-          "key": "control_net",
-          "group": "control",
-          "type": "path",
-          "default": "",
-          "tier": "ADVANCED",
-          "label": "ControlNet model",
-          "help": "Path to the ControlNet weights.",
-          "requiresReload": true,
-          "cliFlag": "--control-net",
           "appliesTo": {
             "arch": [
               "sd1",

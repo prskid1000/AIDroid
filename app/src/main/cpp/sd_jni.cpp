@@ -365,12 +365,11 @@ Java_ai_ondevice_engine_SdBridge_nativeSystemInfo(JNIEnv * env, jobject) {
 
 JNIEXPORT jlong JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeLoad(
-        JNIEnv * env, jobject, jstring jmodel, jstring jvae, jstring jtaesd, jstring jcontrolNet,
+        JNIEnv * env, jobject, jstring jmodel, jstring jvae, jstring jcontrolNet,
         jstring jclipL, jstring jclipG, jstring jt5xxl, jstring jipAdapter, jstring jembeddings,
         jstring jclipVision, jstring jllm, jint threads) {
     const auto model      = jni_to_string(env, jmodel);
     const auto vae        = jni_to_string(env, jvae);
-    const auto taesd      = jni_to_string(env, jtaesd);
     const auto controlNet = jni_to_string(env, jcontrolNet);
     // The rest of sd_ctx_params_t's auxiliary paths.
     const auto clipL      = jni_to_string(env, jclipL);
@@ -432,7 +431,6 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
     sd_ctx_params_init(&params);
     params.model_path       = model.c_str();
     params.vae_path         = vae.empty() ? nullptr : vae.c_str();
-    params.taesd_path       = taesd.empty() ? nullptr : taesd.c_str();
     params.control_net_path = controlNet.empty() ? nullptr : controlNet.c_str();
     params.clip_l_path      = clipL.empty() ? nullptr : clipL.c_str();
     params.clip_g_path      = clipG.empty() ? nullptr : clipG.c_str();
@@ -509,9 +507,12 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
 
     sd_set_progress_callback(progress_cb, nullptr);
 
-    // TAESD decodes a latent to something that looks like the final image, but it is a *separate model file*.
-    const bool has_taesd = !taesd.empty();
-    sd_set_preview_callback(preview_cb, has_taesd ? PREVIEW_TAE : PREVIEW_PROJ,
+    // The preview is a linear projection of the latent, which costs nothing and
+    // needs no second decoder. sd.cpp can also decode it properly with a TAESD
+    // file, and that path is gone: it is another model to find, download and
+    // keep in memory, for a thumbnail that is discarded the moment the real
+    // decoder runs.
+    sd_set_preview_callback(preview_cb, PREVIEW_PROJ,
                             /* interval */ 1, /* denoised */ true, /* noisy */ false, nullptr);
 
     return reinterpret_cast<jlong>(engine);

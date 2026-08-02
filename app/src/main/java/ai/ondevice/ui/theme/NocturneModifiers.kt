@@ -92,7 +92,7 @@ fun Modifier.panel(
     radius: Dp = Radius.md,
 ): Modifier = ringedSurface(fill, ring, RoundedCornerShape(radius))
 
-/** The vertical scrim the canvas paints under the TAESD preview's progress readout: `linear-gradient(transparent, rgba(0,0,0,.6))`. */
+/** The vertical scrim the canvas paints under the live preview's progress readout: `linear-gradient(transparent, rgba(0,0,0,.6))`. */
 fun Modifier.bottomScrim(alpha: Float = 0.6f): Modifier = drawBehind {
     drawRect(
         brush = Brush.verticalGradient(

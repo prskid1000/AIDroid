@@ -52,9 +52,6 @@ enum class AttachmentRole(
     /** A replacement decoder — usually to fix washed-out colour. */
     VAE("VAE", "vae", RoleFamily.DECODER),
 
-    /** The tiny decoder that makes a live preview cheap enough to show. */
-    TAESD("TAESD preview decoder", "taesd", RoleFamily.DECODER),
-
     /** Flux and SD3 carry their text encoders separately. */
     CLIP_L("CLIP-L", "clip_l", RoleFamily.PROMPT_ENCODER),
     CLIP_G("CLIP-G", "clip_g", RoleFamily.PROMPT_ENCODER),
@@ -134,7 +131,6 @@ enum class AttachmentRole(
                 "controlnet" in tagSet || name.contains("control") && !name.contains("uncond") -> CONTROLNET
                 "lora" in tagSet || name.contains("lora") -> LORA
                 name.contains("ip-adapter") || name.contains("ip_adapter") -> IP_ADAPTER
-                name.startsWith("taesd") || name.contains("taesd") -> TAESD
                 // Read the whole path, not just the filename. The diffusers
                 // layout names the role in the *directory* and calls every file
                 // `diffusion_pytorch_model.safetensors`, so a VAE fetched that

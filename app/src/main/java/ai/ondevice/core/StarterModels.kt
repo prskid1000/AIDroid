@@ -241,6 +241,54 @@ object StarterModels {
             sizeHint = "2.4 GB",
         ),
 
+        // — one LoRA per family, because a LoRA is trained against one —
+        //
+        // A LoRA is a small set of weight deltas, and the deltas are shaped
+        // like the model they were trained on. An SDXL LoRA on FLUX matches no
+        // tensor name and changes nothing; there is no universal one. So there
+        // is one here per base model this app offers, and each says which.
+        //
+        // They are also the cheapest way to see the stack work: two at once,
+        // each at its own strength, is what the LoRA row on All Parameters is
+        // for.
+        //
+        // One caveat on all three: the file list is pre-narrowed only when the
+        // filename says "lora", which is a convention rather than a rule. Where
+        // it does not, every file in the repo is offered and the role is set by
+        // hand on the download screen — which is one extra tap, not a wall.
+        StarterModel(
+            repoId = "ostris/photorealistic-slider-sdxl-lora",
+            modality = Modality.DIFFUSION,
+            role = AttachmentRole.LORA,
+            // A slider: positive strength towards photographic, negative away
+            // from it. 24 MB is the whole of it.
+            summary = "Pushes SDXL towards photography and away from the illustrated look it " +
+                "drifts to. A slider, so a negative strength goes the other way.",
+            sizeHint = "24 MB",
+        ),
+        // Trained against SD 3.5 *medium*, which is the size this app offers.
+        // The plentiful SD 3.5 LoRAs are for Large — 8B against 2.5B, with more
+        // blocks and wider ones — and its deltas fit nothing here.
+        StarterModel(
+            repoId = "bghira/sd35m-photo-SLG-shift0.8-attn_ff-512to2048px",
+            modality = Modality.DIFFUSION,
+            role = AttachmentRole.LORA,
+            summary = "Photographic realism for SD 3.5 medium — trained from 512 up to 2048 " +
+                "pixels, so it holds up at the sizes a phone will actually render.",
+            sizeHint = "116 MB",
+        ),
+        StarterModel(
+            repoId = "nomadoor/flux-2-klein-4B-360-erp-outpaint-lora",
+            modality = Modality.DIFFUSION,
+            role = AttachmentRole.LORA,
+            // Trained against klein-base-4B, which is the Klein this app ships.
+            // The 9B LoRAs are the more numerous kind and fit a model that
+            // needs an 8B encoder beside it.
+            summary = "Extends a picture outwards into a full 360° panorama. Built for Klein " +
+                "4B, which is the FLUX card above — the 9B LoRAs elsewhere do not fit it.",
+            sizeHint = "46 MB",
+        ),
+
         // The upscaler is model-agnostic: it enlarges a finished PNG and does
         // not care what made it.
         StarterModel(

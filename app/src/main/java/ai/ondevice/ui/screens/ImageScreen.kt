@@ -111,7 +111,7 @@ fun ImageScreen(
     ) {
         Column(Modifier.verticalScroll(rememberScrollState())) {
 
-            TaesdPreview(state)
+            LivePreview(state)
 
             // Live while sampling, then the finished run's.
             (state.liveTrace ?: state.lastTrace)?.let { trace ->
@@ -803,7 +803,7 @@ private fun androidx.compose.foundation.layout.RowScope.EdgeStepper(
 
 /** The live preview. */
 @Composable
-private fun TaesdPreview(state: ImageState) {
+private fun LivePreview(state: ImageState) {
     Box(
         Modifier
             .fillMaxWidth()

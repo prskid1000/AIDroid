@@ -82,7 +82,6 @@ class DiffusionEngine(
             val newHandle = SdBridge.nativeLoad(
                 modelPath = modelPath,
                 vaePath = pathFor(AttachmentRole.VAE),
-                taesdPath = pathFor(AttachmentRole.TAESD),
                 controlNetPath = pathFor(AttachmentRole.CONTROLNET),
                 clipLPath = pathFor(AttachmentRole.CLIP_L),
                 clipGPath = pathFor(AttachmentRole.CLIP_G),

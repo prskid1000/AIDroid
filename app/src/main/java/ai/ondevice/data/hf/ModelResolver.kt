@@ -204,7 +204,7 @@ class ModelResolver(
             ModelFormat.GGML_BIN -> ggmlBins
             ModelFormat.ONNX -> onnxFiles
             // For an auxiliary pack the "variants" are the individual auxiliaries — canny, depth, openpose — and picking one is the point, not a quality trade-off.
-            else -> refineAuxiliaries(repoId, pinnedRevision, safetensors, auxiliaries, info.tags)
+            else -> auxiliaries
         }
 
         // A multi-graph ONNX model is grouped by directory, not by file — see
@@ -390,7 +390,7 @@ class ModelResolver(
     }
 
     /** Step 5 — auto-pair companions so a multi-file model is never hand-assembled. */
-    /** Companions are things a model needs *alongside* it — a vision projector, a TAESD decoder, Kokoro's voice packs. */
+    /** Companions are things a model needs *alongside* it — a vision projector, a VAE, Kokoro's voice packs. */
     private fun detectCompanions(
         files: List<String>,
         sizes: Map<String, HfPathInfo>,
@@ -415,36 +415,6 @@ class ModelResolver(
         architecture = architecture,
     )
 
-    /** Correct the filename's verdict against the file's own tensor names. */
-    private suspend fun refineAuxiliaries(
-        repoId: String,
-        revision: String,
-        safetensors: List<String>,
-        classified: List<String>,
-        tags: List<String> = emptyList(),
-    ): List<String> {
-        val ambiguous = safetensors.filter {
-            it !in classified || AttachmentRole.classify(it, tags) == AttachmentRole.TAESD
-        }
-        if (ambiguous.isEmpty() || safetensors.size > HEADER_PROBE_LIMIT) return classified
-
-        val verdicts = ambiguous.associateWith { filename ->
-            val url = api.resolveUrl(repoId, filename, revision)
-            api.rangeGet(url, SafetensorsHeaderReader.HEADER_BYTES).getOrNull()
-                ?.let(SafetensorsHeaderReader::parse)
-        }
-
-        fun isTaesd(filename: String) = verdicts[filename]?.hasPrefix(TAESD_TENSOR_PREFIX) == true
-        fun unreadable(filename: String) = filename in verdicts && verdicts[filename] == null
-
-        val kept = classified.filter { filename ->
-            AttachmentRole.classify(filename, tags) != AttachmentRole.TAESD ||
-                isTaesd(filename) || unreadable(filename)
-        }
-        val recovered = ambiguous.filter { it !in classified && isTaesd(it) }
-        return (kept + recovered).distinct()
-    }
-
     /** The containers weights come in, as opposed to the notes shipped beside them. */
     private val WEIGHT_CONTAINERS = setOf(
         "safetensors", "gguf", "ckpt", "pth", "pt", "bin", "onnx", "npz", "npy",
@@ -463,7 +433,6 @@ class ModelResolver(
         val n = name.lowercase()
         return when {
             n.contains("mmproj") -> CompanionRole.VISION_PROJECTOR
-            n.contains("taesd") -> CompanionRole.TAESD
             n.contains("vae") -> CompanionRole.VAE
             n.contains("clip_g") || n.contains("clip-g") -> CompanionRole.CLIP_G
             n.contains("clip_l") || n.contains("clip-l") -> CompanionRole.CLIP_L
@@ -846,11 +815,6 @@ class ModelResolver(
         /** Below this, a heavy quantisation has no redundancy to eat into. */
         const val SMALL_MODEL_PARAMS = 4_000_000_000L
 
-        /** How many safetensors a repo may hold before header probing is skipped. */
-        const val HEADER_PROBE_LIMIT = 8
-
-        /** What sd.cpp's TinyDecoder block is named — `src/model/vae/tae.hpp`. */
-        const val TAESD_TENSOR_PREFIX = "decoder.layers."
     }
 }
 

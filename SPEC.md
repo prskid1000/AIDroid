@@ -370,7 +370,6 @@ Covers text→image, image+text→image (img2img), inpainting, and ControlNet.
 | `model` | Full checkpoint (SD1.x / SD2.x / SDXL) |
 | `diffusion_model` | Standalone UNet/DiT (Flux, SD3) — used *instead of* `model` |
 | `vae` | External VAE. Auto-pair from repo when present |
-| `taesd` | Tiny autoencoder — enables fast live previews |
 | `clip_l`, `clip_g`, `t5xxl` | Text encoders, required for SD3/Flux |
 | `embd_dir` | Textual inversion embeddings directory |
 | `lora_model_dir` | LoRA directory; prompt syntax `<lora:name:weight>` |
@@ -442,7 +441,7 @@ Covers text→image, image+text→image (img2img), inpainting, and ControlNet.
 
 ### 5.4 Image generation UX
 
-- **Live preview** via TAESD during sampling — show intermediate latents, not just a spinner
+- **Live preview** during sampling — show intermediate latents, not just a spinner
 - **Cancel mid-generation** — must actually free memory, not just detach the callback
 - Progress: step N/M, elapsed, ETA, current backend
 - **Gallery** with full generation parameters embedded in PNG metadata (EXIF/tEXt) so any image is reproducible
@@ -652,7 +651,7 @@ Store the **full parameter set** alongside every generated artifact (message, im
 |---|---|
 | **Chat** | Message list, streaming output, image attach, tool-call rendering, thinking blocks collapsed, read-aloud, regenerate, edit-and-resend, branch, token counter, live tok/s |
 | **Chat settings** | Model picker, persona, system prompt, preset, sampling tiers |
-| **Image** | Prompt + negative, mode tabs (txt2img / img2img / inpaint), parameter panel, live TAESD preview, cancel, result actions |
+| **Image** | Prompt + negative, mode tabs (txt2img / img2img / inpaint), parameter panel, live preview, cancel, result actions |
 | **Mask editor** | Brush, size, hardness, erase, invert, clear, undo/redo |
 | **Gallery** | Grid, detail view with full parameters, reuse-parameters, share, delete |
 | **Transcribe** | Live mic mode + file mode, partial transcript, segment list, export |
