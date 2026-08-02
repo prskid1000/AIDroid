@@ -275,6 +275,72 @@ void note_phase(const std::string & line) {
     }
 }
 
+/**
+ * Which components the loader said it took, as role → path.
+ *
+ * The screen used to list what the *app sent*, which is a different claim and
+ * one it could not check. A component the loader declined, or never reached, or
+ * found already inside the checkpoint, appeared as resident all the same — the
+ * card said "in memory" about a file that was not.
+ *
+ * sd.cpp narrates each one — `loading vae from '…'`, `loading llm from '…'` —
+ * and says so again with ` failed` on the end when it does not take. So this is
+ * the loader's own account, in the same way `note_version` and `note_lora`
+ * already are.
+ */
+std::mutex g_loaded_mutex;
+std::vector<std::pair<std::string, std::string>> g_loaded;
+
+/** The runtime's word for a component, mapped to the app's role name. */
+const std::pair<const char *, const char *> COMPONENT_WORDS[] = {
+    // Longest first: "llm vision" must not be read as "llm".
+    { "llm vision",                     "LLM_VISION" },
+    { "LTX audio VAE",                  "AUDIO_VAE" },
+    { "motion module (AnimateDiff)",    "MOTION_MODULE" },
+    { "high noise diffusion model",     "HIGH_NOISE_DIFFUSION" },
+    { "unconditional diffusion model",  "UNCOND_DIFFUSION" },
+    { "embeddings connectors",          "EMBEDDING" },
+    { "PuLID weights",                  "PULID" },
+    { "clip_vision",                    "CLIP_VISION" },
+    { "clip_l",                         "CLIP_L" },
+    { "clip_g",                         "CLIP_G" },
+    { "t5xxl",                          "T5XXL" },
+    { "llm",                            "LLM_ENCODER" },
+    { "vae",                            "VAE" },
+};
+
+void note_component(const std::string & line) {
+    // `loading <what> from '<path>'`, with an optional ` failed` after it.
+    const auto loading = line.find("loading ");
+    if (loading == std::string::npos) return;
+    const auto from = line.find(" from '", loading);
+    if (from == std::string::npos) return;
+    const auto close = line.rfind('\'');
+    if (close == std::string::npos || close <= from + 7) return;
+
+    const auto what = line.substr(loading + 8, from - (loading + 8));
+    const auto path = line.substr(from + 7, close - (from + 7));
+    const bool failed = line.find("failed", close) != std::string::npos;
+
+    const char * role = nullptr;
+    for (const auto & [word, name] : COMPONENT_WORDS) {
+        if (what.find(word) != std::string::npos) { role = name; break; }
+    }
+    if (role == nullptr) return;
+
+    std::lock_guard<std::mutex> lock(g_loaded_mutex);
+    auto at = std::find_if(g_loaded.begin(), g_loaded.end(),
+                           [&](const auto & e) { return e.first == role; });
+    if (failed) {
+        // Announced and then declined. Taking it back out is the whole point:
+        // the announcement alone is what the app used to believe.
+        if (at != g_loaded.end()) g_loaded.erase(at);
+        return;
+    }
+    if (at != g_loaded.end()) at->second = path;
+    else g_loaded.emplace_back(role, path);
+}
+
 void note_stage(const char * text) {
     if (text == nullptr) return;
     std::string line(text);
@@ -295,6 +361,7 @@ void note_stage(const char * text) {
     }
     note_phase(line);
     note_lora(line);
+    note_component(line);
 }
 
 void note_version(const char * text) {
@@ -724,6 +791,24 @@ Java_ai_ondevice_engine_SdBridge_nativeLoraReport(JNIEnv * env, jobject) {
     return jni_from_string(env, g_lora_report.empty() ? "[]" : g_lora_report);
 }
 
+/**
+ * The components the loader actually took, as `[{"role","path"}]`.
+ *
+ * What is resident, rather than what was asked for. The two differ whenever a
+ * checkpoint carries its own encoders, whenever a file is declined, and
+ * whenever the loader never reaches one — and the screen was reporting the
+ * second while calling it the first.
+ */
+JNIEXPORT jstring JNICALL
+Java_ai_ondevice_engine_SdBridge_nativeLoadedComponents(JNIEnv * env, jobject) {
+    std::lock_guard<std::mutex> lock(g_loaded_mutex);
+    json out = json::array();
+    for (const auto & [role, path] : g_loaded) {
+        out.push_back(json{ { "role", role }, { "path", path } });
+    }
+    return jni_from_string(env, dump_json(out));
+}
+
 JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeLoadStage(JNIEnv * env, jobject) {
     std::lock_guard<std::mutex> lock(g_stage_mutex);
@@ -814,6 +899,7 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
     // A version left over from the last checkpoint would be read as this one's.
     { std::lock_guard<std::mutex> lock(g_version_mutex); g_version.clear(); }
     { std::lock_guard<std::mutex> lock(g_stage_mutex); g_stage.clear(); }
+    { std::lock_guard<std::mutex> lock(g_loaded_mutex); g_loaded.clear(); }
     g_bare_diffusion.store(false);
 
     static std::once_flag once;

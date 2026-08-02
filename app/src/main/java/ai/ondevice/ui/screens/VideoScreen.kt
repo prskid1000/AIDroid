@@ -115,7 +115,7 @@ fun VideoScreen(
             val loadingNow = state.loadingModel && state.loadingWhat.isNotEmpty()
             if (loadingNow || state.residentComponents.isNotEmpty()) {
                 NCard(
-                    Modifier.padding(top = 10.dp),
+                    Modifier.fillMaxWidth().padding(top = 10.dp),
                     ring = if (loadingNow) NocturneColors.Accent800 else NocturneColors.Neutral700,
                 ) {
                     Text(

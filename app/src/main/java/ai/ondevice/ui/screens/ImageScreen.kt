@@ -147,7 +147,10 @@ fun ImageScreen(
             // reloading with nothing having said why.
             if (loadingNow || resident.isNotEmpty() || state.unloadReason != null) {
                 NCard(
-                    Modifier.padding(top = 10.dp),
+                    // NCard wraps its content, and this one holds short
+                    // monospace lines, so it drew narrower than everything
+                    // around it and read as a different kind of thing.
+                    Modifier.fillMaxWidth().padding(top = 10.dp),
                     ring = if (loadingNow) NocturneColors.Accent800 else NocturneColors.Neutral700,
                 ) {
                     Text(

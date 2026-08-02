@@ -121,14 +121,20 @@ class DiffusionEngine(
             // runs an upscaler in a context of its own — so the screen was
             // naming two files as resident that the loader had never been told
             // about.
-            residentComponents = LOAD_TIME_ROLES.mapNotNull { role ->
-                pathFor(role).takeIf { it.isNotBlank() }?.let { role to File(it).name }
+            // What the loader took, in its own words — not what was sent to it.
+            //
+            // These differ more often than they look like they would: FLUX.2
+            // Klein carries no encoders and SDXL sometimes carries all of them,
+            // so a checkpoint can silently decline a file that was passed. The
+            // card says "In memory", which is a claim about memory, and only
+            // the runtime can make it.
+            val taken = loadedComponents()
+            residentComponents = taken.mapNotNull { (role, path) ->
+                role?.let { it to File(path).name }
             }
             residentModel = File(modelPath).let { "${it.name} · ${formatBytes(it.length())}" }
             residentBytes = File(modelPath).length() +
-                LOAD_TIME_ROLES.sumOf { role ->
-                    pathFor(role).takeIf { it.isNotBlank() }?.let { File(it).length() } ?: 0L
-                }
+                taken.sumOf { (_, path) -> File(path).length().takeIf { it > 0 } ?: 0L }
             lastUnloadReason = null
             android.util.Log.i(
                 TAG,
@@ -261,6 +267,24 @@ class DiffusionEngine(
                     applied = it["applied"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0,
                     total = it["total"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0,
                 )
+            }
+    }.getOrDefault(emptyList())
+
+    /**
+     * The components the loader reported taking, as role → path.
+     *
+     * A role the app has no name for is kept with a null role rather than
+     * dropped, so its bytes still count toward what is resident — the runtime
+     * loading something this app cannot name is a fact about memory either way.
+     */
+    private fun loadedComponents(): List<Pair<AttachmentRole?, String>> = runCatching {
+        (json.parseToJsonElement(SdBridge.nativeLoadedComponents()) as kotlinx.serialization.json.JsonArray)
+            .map { it.jsonObject }
+            .mapNotNull { row ->
+                val path = row["path"]?.jsonPrimitive?.content.orEmpty()
+                if (path.isBlank()) return@mapNotNull null
+                val name = row["role"]?.jsonPrimitive?.content
+                AttachmentRole.entries.firstOrNull { it.name == name } to path
             }
     }.getOrDefault(emptyList())
 

@@ -32,6 +32,15 @@ object SdBridge {
      * log callback throughout. This is that narration, so the screen can say
      * where it has got to instead of showing a spinner for four gigabytes.
      */
+    /**
+     * The components the loader actually took, as `[{"role","path"}]`.
+     *
+     * What is resident, not what was asked for. A checkpoint carrying its own
+     * encoders, a file the loader declined, one it never reached — all three
+     * make the two lists differ, and only this one is a fact about memory.
+     */
+    external fun nativeLoadedComponents(): String
+
     external fun nativeLoadStage(): String
 
     /**
