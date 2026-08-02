@@ -444,7 +444,7 @@ class ImageViewModel @Inject constructor(
                                 },
                             )
                             val file = withContext(Dispatchers.IO) {
-                                val target = java.io.File(storage.galleryDir(), "$seed.png")
+                                val target = storage.galleryFile(seed)
                                 target.writeBytes(event.image.toPng(params.toJsonString()))
                                 target
                             }
@@ -847,9 +847,9 @@ class ImageViewModel @Inject constructor(
                 result.fold(
                     onSuccess = { bigger ->
                         val entity = withContext(Dispatchers.IO) {
-                            val file = java.io.File(
-                                storage.galleryDir(),
-                                "${source.seed}-x${bigger.width / decoded.width}.png",
+                            val file = storage.galleryFile(
+                                source.seed,
+                                "-x${bigger.width / decoded.width}",
                             )
                             file.writeBytes(bigger.toPng(source.paramsJson))
                             GeneratedImageEntity(

@@ -197,7 +197,7 @@ private fun ClipDetail(state: LibraryDetailState) {
         contentAlignment = Alignment.Center,
     ) {
         coil3.compose.AsyncImage(
-            model = "${'$'}{clip.directory}/" + String.format("frame_%04d.png", frame),
+            model = "${clip.directory}/" + String.format("frame_%04d.png", frame),
             contentDescription = clip.prompt,
             contentScale = ContentScale.Fit,
             modifier = Modifier.fillMaxSize(),
@@ -215,7 +215,7 @@ private fun ClipDetail(state: LibraryDetailState) {
             style = NButtonStyle.Secondary,
         )
         Text(
-            "${'$'}{frame + 1}/${'$'}{clip.frameCount}",
+            "${frame + 1}/${clip.frameCount}",
             style = NocturneType.MonoXs,
             color = NocturneColors.TextMuted,
         )
@@ -243,7 +243,7 @@ private fun ClipDetail(state: LibraryDetailState) {
     Text(clip.prompt, style = NocturneType.Message)
     clip.negativePrompt?.takeIf { it.isNotBlank() }?.let {
         Text(
-            "negative: ${'$'}it",
+            "negative: $it",
             style = NocturneType.MonoXs,
             color = NocturneColors.TextMuted,
             modifier = Modifier.padding(top = 6.dp),

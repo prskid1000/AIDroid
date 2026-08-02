@@ -18,6 +18,22 @@ class ModelStorage(private val context: Context, private val db: OnDeviceDatabas
 
     fun galleryDir(): File = File(root(), "gallery").apply { mkdirs() }
 
+    /**
+     * A gallery file no earlier picture is already using.
+     *
+     * Images were named after their seed alone, and a seed is the one thing
+     * people reuse on purpose — rerunning 812934177 to compare two settings
+     * wrote the second result over the first. Losing the file was the smaller
+     * half of it: the database keeps a row per render, so the older row went on
+     * pointing at a path that now held the newer picture, and a gallery meant
+     * to show a comparison showed the same image twice.
+     *
+     * The seed stays in the name because it is what makes a file recognisable
+     * on disk; a counter is appended only when it has to be.
+     */
+    fun galleryFile(seed: Long, suffix: String = ""): File =
+        uniqueFile(galleryDir(), "$seed$suffix", "png")
+
     fun transcriptsDir(): File = File(root(), "transcripts").apply { mkdirs() }
 
     /** Rendered speech. */
@@ -83,6 +99,27 @@ class ModelStorage(private val context: Context, private val db: OnDeviceDatabas
     fun usedBytes(): Long = runCatching {
         modelsDir().walkTopDown().filter { it.isFile }.sumOf { it.length() }
     }.getOrDefault(0L)
+
+    companion object {
+        /**
+         * `dir/base.ext`, or the first `base-2`, `base-3`… that is free.
+         *
+         * Separate from [galleryFile] only so it can be tested against a real
+         * temporary directory without an Android Context — the behaviour it
+         * guards is "an artifact never lands on a path another artifact is
+         * already recorded at", and that is worth an assertion rather than a
+         * reading of the code.
+         */
+        fun uniqueFile(dir: File, base: String, ext: String): File {
+            File(dir, "$base.$ext").takeIf { !it.exists() }?.let { return it }
+            var n = 2
+            while (true) {
+                val candidate = File(dir, "$base-$n.$ext")
+                if (!candidate.exists()) return candidate
+                n++
+            }
+        }
+    }
 }
 
 data class OrphanReport(

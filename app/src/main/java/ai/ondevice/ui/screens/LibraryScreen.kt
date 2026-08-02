@@ -19,6 +19,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,6 +35,12 @@ import ai.ondevice.data.db.SynthesisEntity
 import ai.ondevice.data.db.TranscriptEntity
 import ai.ondevice.ui.BottomDestinations
 import ai.ondevice.ui.components.NBottomBar
+import ai.ondevice.ui.components.NButton
+import ai.ondevice.ui.components.NButtonStyle
+import ai.ondevice.ui.components.NDialog
+import ai.ondevice.ui.components.NDialogActions
+import ai.ondevice.ui.components.NDialogBody
+import ai.ondevice.ui.components.NDialogTitle
 import ai.ondevice.ui.components.NHelp
 import ai.ondevice.ui.components.NIconButton
 import ai.ondevice.ui.components.NPills
@@ -108,6 +115,7 @@ fun LibraryScreen(
             LibrarySection.IMAGES -> ImagesSection(
                 images = images,
                 onOpen = { id -> onOpenItem(PredictionKind.IMAGE, id) },
+                onDelete = viewModel::deleteImage,
             )
 
             LibrarySection.CLIPS -> ClipsSection(
@@ -152,6 +160,10 @@ private fun ChatsSection(
                     Fmt.relative(summary.conversation.updatedAt),
                 onClick = { onOpen(summary.conversation.id) },
                 onDelete = { onDelete(summary.conversation.id) },
+                kind = "conversation",
+                deleteDetail = "All ${summary.messageCount} message" +
+                    (if (summary.messageCount == 1) "" else "s") +
+                    " go with it, including anything attached to them.",
             )
         }
     }
@@ -169,6 +181,7 @@ private fun ConversationEntity.displayTitle(preview: String): String =
 private fun ImagesSection(
     images: List<GeneratedImageEntity>,
     onOpen: (String) -> Unit,
+    onDelete: (GeneratedImageEntity) -> Unit,
 ) {
     if (images.isEmpty()) {
         NHelp(
@@ -207,10 +220,18 @@ private fun ImagesSection(
                         color = NocturneColors.Accent100.copy(alpha = 0.75f),
                         modifier = Modifier.padding(4.dp),
                     )
+                    TileActions(
+                        onDelete = { onDelete(image) },
+                        kind = "image",
+                        deleteDetail = "Seed ${image.seed}, ${image.width}x${image.height}. " +
+                            "The PNG and its embedded parameter set both go, so this exact " +
+                            "result cannot be reused or reproduced from the library again.",
+                        modifier = Modifier.align(Alignment.TopEnd),
+                    )
                 }
             }
         }
-        NHelp("Tap any image for its full parameter set, what it cost to make, and one-tap reuse.")
+        NHelp("Open any image for its full parameter set, what it cost to make, and one-tap reuse.")
     }
 }
 
@@ -254,17 +275,25 @@ private fun ClipsSection(
                     contentAlignment = Alignment.BottomStart,
                 ) {
                     coil3.compose.AsyncImage(
-                        model = "${'$'}{clip.directory}/frame_0000.png",
+                        model = "${clip.directory}/frame_0000.png",
                         contentDescription = clip.prompt,
                         contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                         modifier = Modifier.matchParentSize(),
                     )
                     Text(
-                        "${'$'}{clip.frameCount} frames · ${'$'}{clip.fps} fps" +
+                        "${clip.frameCount} frames · ${clip.fps} fps" +
                             if (clip.audioPath != null) " · sound" else "",
                         style = NocturneType.MonoXs,
                         color = NocturneColors.Accent100.copy(alpha = 0.85f),
                         modifier = Modifier.padding(4.dp),
+                    )
+                    TileActions(
+                        onDelete = { onDelete(clip) },
+                        kind = "clip",
+                        deleteDetail = "${clip.frameCount} frames at ${clip.fps} fps" +
+                            (if (clip.audioPath != null) " and its audio" else "") +
+                            ". The whole folder of frames is removed.",
+                        modifier = Modifier.align(Alignment.TopEnd),
                     )
                 }
             }
@@ -307,6 +336,9 @@ private fun VoiceSection(
                 ).joinToString(" · "),
                 onClick = { onOpen(PredictionKind.SPEECH, synthesis.id) },
                 onDelete = { onDeleteSynthesis(synthesis) },
+                kind = "reading",
+                deleteDetail = "${Fmt.duration(synthesis.durationMillis)} of audio is removed. " +
+                    "The text it was read from is not kept anywhere else.",
             )
         }
         items(transcripts, key = { "transcript-${it.id}" }) { transcript ->
@@ -321,6 +353,9 @@ private fun VoiceSection(
                 // the library that listed something and then refused to open it.
                 onClick = { onOpen(PredictionKind.TRANSCRIBE, transcript.id) },
                 onDelete = { onDeleteTranscript(transcript) },
+                kind = "transcript",
+                deleteDetail = "${transcript.title} — every segment and its timings. " +
+                    "The recording it was made from is not deleted.",
             )
         }
     }
@@ -335,7 +370,22 @@ private fun LibraryRow(
     subtitle: String,
     onClick: (() -> Unit)?,
     onDelete: () -> Unit,
+    /** What this row is, for the confirm: "conversation", "recording", "reading". */
+    kind: String,
+    /** What deleting it actually removes, in the confirm's own words. */
+    deleteDetail: String,
 ) {
+    var confirming by androidx.compose.runtime.saveable.rememberSaveable(title) {
+        androidx.compose.runtime.mutableStateOf(false)
+    }
+    if (confirming) {
+        ConfirmDelete(
+            what = kind,
+            detail = deleteDetail,
+            onDismiss = { confirming = false },
+            onConfirm = onDelete,
+        )
+    }
     Row(
         Modifier
             .fillMaxWidth()
@@ -367,6 +417,86 @@ private fun LibraryRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        NIconButton(NIcons.Trash, "Delete", onClick = onDelete, size = 34.dp, iconSize = 15.dp)
+        NIconButton(
+            NIcons.Trash,
+            "Delete",
+            onClick = { confirming = true },
+            size = 34.dp,
+            iconSize = 15.dp,
+        )
+    }
+}
+
+/**
+ * The confirm every delete in this screen goes through.
+ *
+ * A row's Trash and a tile's Trash are both a single tap on a list of things
+ * the user made, several of which took minutes of the phone's life to produce
+ * and none of which can be recovered. Asking first is not friction here; the
+ * question just has to be answerable, so the body says what specifically goes
+ * rather than "are you sure?".
+ */
+@Composable
+private fun ConfirmDelete(
+    what: String,
+    detail: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    NDialog(onDismissRequest = onDismiss) {
+        NDialogTitle("Delete this $what?")
+        NDialogBody(detail)
+        NDialogActions {
+            NButton("Cancel", onClick = onDismiss, style = NButtonStyle.Secondary)
+            NButton(
+                "Delete",
+                onClick = { onDismiss(); onConfirm() },
+                style = NButtonStyle.Primary,
+            )
+        }
+    }
+}
+
+/**
+ * Delete, over the corner of a thumbnail.
+ *
+ * Opening is what tapping the tile already does, so the only action that needs
+ * a control of its own is the destructive one. Images had no delete at all and
+ * the clips grid was handed an `onDelete` it never called — throwing either
+ * away meant opening it first, which is a detour to get rid of something.
+ *
+ * It sits *on* the picture rather than beside it, over a scrim, because a tile
+ * has no margin to put it in and a frame can be any brightness.
+ */
+@Composable
+private fun TileActions(
+    onDelete: () -> Unit,
+    kind: String,
+    deleteDetail: String,
+    modifier: Modifier = Modifier,
+) {
+    var confirming by androidx.compose.runtime.saveable.rememberSaveable(deleteDetail) {
+        androidx.compose.runtime.mutableStateOf(false)
+    }
+    if (confirming) {
+        ConfirmDelete(
+            what = kind,
+            detail = deleteDetail,
+            onDismiss = { confirming = false },
+            onConfirm = onDelete,
+        )
+    }
+    Box(
+        modifier
+            .padding(4.dp)
+            .background(NocturneColors.Neutral900.copy(alpha = 0.72f), Radius.Sm),
+    ) {
+        NIconButton(
+            NIcons.Trash,
+            "Delete",
+            onClick = { confirming = true },
+            size = 28.dp,
+            iconSize = 13.dp,
+        )
     }
 }
