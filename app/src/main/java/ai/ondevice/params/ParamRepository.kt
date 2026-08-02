@@ -167,11 +167,31 @@ class ParamRepository(
         }
         applies.arch?.let { gates ->
             if (architecture == null) return@let
-            if (gates.none { archKey(it) == archKey(architecture) }) {
-                return "Only for ${gates.joinToString(", ")}. This model is $architecture."
-            }
+            if (gates.any { archKey(it) == archKey(architecture) }) return@let
+            // The manifest's list is a floor, not a ceiling.
+            //
+            // Two lists knew which encoders an architecture reads, and they
+            // disagreed. `DiffusionFamily` is derived from the branch of
+            // sd.cpp's conditioner dispatch that actually runs; the manifest's
+            // `appliesTo.arch` is typed by hand and stopped at FLUX.2. So every
+            // architecture added upstream since — Qwen-Image, Z-Image, Anima,
+            // Ovis, Ernie, Lens and the rest, all of which read their prompt
+            // through a language model — had that slot refused, and the file
+            // they cannot run without could not be attached.
+            //
+            // Asking the derived table first means a new architecture works the
+            // day its family is known, and the manifest never has to be edited
+            // in step with it.
+            if (readsEncoder(spec.key, architecture)) return@let
+            return "Only for ${gates.joinToString(", ")}. This model is $architecture."
         }
         return null
+    }
+
+    /** Whether this architecture conditions through the encoder [key] names. */
+    private fun readsEncoder(key: String, architecture: String): Boolean {
+        val family = ai.ondevice.core.DiffusionFamily.forName(architecture) ?: return false
+        return key in family.encoders || key in family.optionalEncoders
     }
 
     /** A parameter for a newer build waits until the runtime catches up, then works on its own — no app update, no user action. */
