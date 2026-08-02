@@ -14,6 +14,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -96,6 +100,8 @@ fun LibraryDetailScreen(
                     onOpenChat()
                 })
 
+                PredictionKind.VIDEO -> ClipDetail(state)
+
                 PredictionKind.IMAGE -> ImageDetail(
                     state = state,
                     onOpen = {
@@ -155,6 +161,92 @@ private fun ConversationDetail(state: LibraryDetailState, onOpen: () -> Unit) {
                 .fillMaxWidth()
                 .background(NocturneColors.Neutral900, Radius.Md)
                 .padding(horizontal = 11.dp, vertical = 9.dp),
+        )
+    }
+}
+
+/**
+ * A saved clip, played back frame by frame.
+ *
+ * The same one-frame-at-a-time approach the Video screen uses: the frames are
+ * PNGs on disk and only one is ever decoded, so a long clip costs no more to
+ * open than a short one.
+ */
+@Composable
+private fun ClipDetail(state: LibraryDetailState) {
+    val clip = state.clip ?: return
+    var frame by remember(clip.id) { mutableStateOf(0) }
+    var playing by remember(clip.id) { mutableStateOf(false) }
+
+    LaunchedEffect(playing, clip.id) {
+        if (!playing || clip.frameCount <= 0) return@LaunchedEffect
+        val frameMillis = (1000L / clip.fps.coerceAtLeast(1)).coerceAtLeast(16L)
+        while (true) {
+            kotlinx.coroutines.delay(frameMillis)
+            frame = (frame + 1) % clip.frameCount
+        }
+    }
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .aspectRatio(clip.width.toFloat() / clip.height.coerceAtLeast(1))
+            .clip(Radius.Md)
+            .background(NocturneColors.Neutral900)
+            .ring(NocturneColors.Divider, Radius.Md),
+        contentAlignment = Alignment.Center,
+    ) {
+        coil3.compose.AsyncImage(
+            model = "${'$'}{clip.directory}/" + String.format("frame_%04d.png", frame),
+            contentDescription = clip.prompt,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+
+    Row(
+        Modifier.fillMaxWidth().padding(top = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        NButton(
+            if (playing) "Pause" else "Play",
+            onClick = { playing = !playing },
+            style = NButtonStyle.Secondary,
+        )
+        Text(
+            "${'$'}{frame + 1}/${'$'}{clip.frameCount}",
+            style = NocturneType.MonoXs,
+            color = NocturneColors.TextMuted,
+        )
+        ai.ondevice.ui.components.NSlider(
+            value = frame.toFloat(),
+            onValueChange = { playing = false; frame = it.toInt() },
+            valueRange = 0f..(clip.frameCount - 1).coerceAtLeast(1).toFloat(),
+            modifier = Modifier.weight(1f),
+        )
+    }
+
+    // LTX-AV is the only architecture that returns one, so its presence is
+    // worth stating rather than leaving to be discovered.
+    clip.audioPath?.let {
+        Text(
+            "This clip has a soundtrack. Save it to hear the two together — the player above " +
+                "shows frames only.",
+            style = NocturneType.Help,
+            color = NocturneColors.TextMuted,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+    }
+
+    SectionKicker("Prompt", Modifier.padding(top = 18.dp, bottom = 8.dp))
+    Text(clip.prompt, style = NocturneType.Message)
+    clip.negativePrompt?.takeIf { it.isNotBlank() }?.let {
+        Text(
+            "negative: ${'$'}it",
+            style = NocturneType.MonoXs,
+            color = NocturneColors.TextMuted,
+            modifier = Modifier.padding(top = 6.dp),
         )
     }
 }

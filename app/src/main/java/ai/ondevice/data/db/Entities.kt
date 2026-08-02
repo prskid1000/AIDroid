@@ -170,6 +170,37 @@ data class GeneratedImageEntity(
     val createdAt: Long,
 )
 
+/**
+ * One generated clip, as a directory of frames rather than a file.
+ *
+ * A clip is not a big image and is not stored as one: the frames stay as PNGs
+ * on disk under [directory], and this row is the index into them. Holding a
+ * five-second 480p clip as a blob would be ~147 MB in one column, and the
+ * screen shows one frame at a time regardless.
+ *
+ * [frameCount] rather than a list of names, because the names are
+ * `frame_%04d.png` and derivable — a list would be the same information stored
+ * twice and able to disagree with the folder.
+ */
+@Entity(tableName = "generated_clips", indices = [Index("createdAt")])
+data class GeneratedClipEntity(
+    @PrimaryKey val id: String,
+    /** Absolute path to the folder holding the frames and any audio track. */
+    val directory: String,
+    val frameCount: Int,
+    val prompt: String,
+    val negativePrompt: String?,
+    val paramsJson: String,
+    val modelId: String?,
+    val seed: Long,
+    val width: Int,
+    val height: Int,
+    val fps: Int,
+    /** The WAV beside the frames, or null — only LTX-AV returns a soundtrack. */
+    val audioPath: String?,
+    val createdAt: Long,
+)
+
 @Entity(tableName = "transcripts", indices = [Index("createdAt")])
 data class TranscriptEntity(
     @PrimaryKey val id: String,

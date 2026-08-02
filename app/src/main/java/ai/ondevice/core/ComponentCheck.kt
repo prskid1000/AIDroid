@@ -47,8 +47,21 @@ object ComponentCheck {
      */
     private val UNET_ONLY = setOf(AttachmentRole.CONTROLNET, AttachmentRole.IP_ADAPTER)
 
-    /** The architectures those two were written against, as sd.cpp spells them. */
-    private val UNET_ARCHITECTURES = setOf("sd1", "sd2", "sdxl", "sdxl_refiner", "svd")
+    /**
+     * Whether a ControlNet or an IP-Adapter has anything to attach to.
+     *
+     * Asked of [DiffusionFamily] rather than answered here. This used to be a
+     * second list — `setOf("sd1", "sd2", "sdxl", "sdxl_refiner", "svd")`,
+     * compared for exact equality — and the strings it held were not the ones
+     * it would be compared against. sd.cpp prints `SD1.x`, not `sd1`, so the
+     * one architecture where a ControlNet is most used was told a ControlNet
+     * "does nothing" on it, in a warning worded with total confidence.
+     *
+     * Null, for a name nothing recognises, is not "no": nothing is claimed
+     * either way, because a wrong warning is worse than no warning.
+     */
+    private fun hasUnet(architecture: String): Boolean? =
+        DiffusionFamily.forName(architecture)?.unet
 
     /**
      * @param available every add-on the library holds for this model, ticked or not.
@@ -134,9 +147,7 @@ object ComponentCheck {
             )
         }
 
-        val mismatched = if (architecture.isNullOrBlank() ||
-            architecture.lowercase() in UNET_ARCHITECTURES
-        ) {
+        val mismatched = if (architecture.isNullOrBlank() || hasUnet(architecture) != false) {
             emptyList()
         } else {
             (enabled intersect UNET_ONLY).map { role ->

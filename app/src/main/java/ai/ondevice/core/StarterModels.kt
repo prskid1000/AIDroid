@@ -104,6 +104,37 @@ object StarterModels {
                 "it is most of what it costs.",
             sizeHint = "2.46 GB at Q4_0",
         ),
+        StarterModel(
+            repoId = SD15,
+            modality = Modality.DIFFUSION,
+            summary = "The oldest and the smallest, and the one a modest phone finishes " +
+                "fastest. Carries its own encoder and decoder, and takes every kind of " +
+                "add-on this app supports — it is the only base here that does.",
+            sizeHint = "1.75 GB at Q4_0",
+        ),
+        StarterModel(
+            repoId = FLUX1_SCHNELL,
+            modality = Modality.DIFFUSION,
+            summary = "Four steps, and the strongest prompt-following here. Needs CLIP-L, a " +
+                "T5 and a decoder supplied, which together cost more than half again what " +
+                "the denoiser does — budget about 6.5 GB before it will load.",
+            sizeHint = "4.01 GB at Q2_K",
+        ),
+        StarterModel(
+            repoId = ERNIE_TURBO,
+            modality = Modality.DIFFUSION,
+            summary = "Eight steps, and the best here at putting readable words inside a " +
+                "picture — posters, labels, signage. Its text encoder is 3B rather than the " +
+                "7–8B the others want, so the whole bundle is about 5.5 GB.",
+            sizeHint = "3.18 GB at Q2_K",
+        ),
+        StarterModel(
+            repoId = KREA2_TURBO,
+            modality = Modality.DIFFUSION,
+            summary = "Photographic by default rather than by prompt — the look most models " +
+                "need a LoRA to reach. About 6.7 GB with its encoder and decoder.",
+            sizeHint = "4.89 GB at Q2_K",
+        ),
     )
 
     // Repo ids used by more than one card, or long enough to be worth a name.
@@ -113,6 +144,15 @@ object StarterModels {
     private const val SDXL_TURBO = "gpustack/stable-diffusion-xl-1.0-turbo-GGUF"
     private const val IP_ADAPTER_REPO = "h94/IP-Adapter"
     private const val FLUX2_KLEIN = "leejet/FLUX.2-klein-4B-GGUF"
+    private const val SD15 = "gpustack/stable-diffusion-v1-5-GGUF"
+    private const val FLUX1_SCHNELL = "city96/FLUX.1-schnell-gguf"
+
+    private const val ERNIE_TURBO = "unsloth/ERNIE-Image-Turbo-GGUF"
+    private const val KREA2_TURBO = "vantagewithai/Krea-2-Turbo-GGUF"
+
+    /** SD 3.5 and FLUX.1 both read through it, at different quants. */
+    private const val T5_ENCODER_GGUF = "city96/t5-v1_1-xxl-encoder-gguf"
+    private const val FLUX_TEXT_ENCODERS = "comfyanonymous/flux_text_encoders"
 
     /**
      * What one architecture needs beside its base model, and what it can take.
@@ -205,7 +245,7 @@ object StarterModels {
                     sizeHint = "~168 MB",
                 ),
                 StarterModel(
-                    repoId = "city96/t5-v1_1-xxl-encoder-gguf",
+                    repoId = T5_ENCODER_GGUF,
                     modality = Modality.DIFFUSION,
                     role = AttachmentRole.T5XXL,
                     summary = "Optional. Long written-out prompts read better with it. " +
@@ -299,6 +339,140 @@ object StarterModels {
                         "found for this architecture — it is new enough that the style ones " +
                         "do not exist yet.",
                     sizeHint = "~46 MB",
+                ),
+            ),
+        ),
+        StarterBundle(
+            architecture = "SD1.x",
+            label = "SD 1.5",
+            base = ALL.first { it.repoId == SD15 },
+            parts = listOf(
+                StarterModel(
+                    repoId = "latent-consistency/lcm-lora-sdv1-5",
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.LORA,
+                    summary = "Optional, and the one to try first: it cuts a run to four " +
+                        "steps at a CFG scale near 1. Not a style — every style LoRA below " +
+                        "stacks on top of it.",
+                    sizeHint = "~135 MB",
+                ),
+                StarterModel(
+                    repoId = "comfyanonymous/ControlNet-v1-1_fp16_safetensors",
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.CONTROLNET,
+                    summary = "Hold an outline while the prompt changes everything else. Take " +
+                        "control_v11p_sd15_canny_fp16 — the control_lora_rank128 files beside " +
+                        "it are a fifth the size and are LoRA-compressed, which is not the " +
+                        "layout the runtime's ControlNet loader reads.",
+                    sizeHint = "~723 MB",
+                ),
+                StarterModel(
+                    repoId = IP_ADAPTER_REPO,
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.IP_ADAPTER,
+                    summary = "Take the style of a picture you supply, at " +
+                        "models/ip-adapter_sd15. A sixteenth the size of the SDXL one, and " +
+                        "the same vision encoder reads for both.",
+                    sizeHint = "~45 MB",
+                ),
+                StarterModel(
+                    repoId = IP_ADAPTER_REPO,
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.CLIP_VISION,
+                    summary = "Required by the IP-Adapter above and useless without it, at " +
+                        "models/image_encoder. Fifty times the adapter's size, which is the " +
+                        "real cost of this feature.",
+                    sizeHint = "~2.53 GB",
+                ),
+                StarterModel(
+                    repoId = "stabilityai/sd-vae-ft-mse",
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.VAE,
+                    summary = "Optional, and a substitution rather than a gap: this " +
+                        "checkpoint has its own decoder. The one SD 1.5's own publisher " +
+                        "retrained afterwards, and it is kinder to faces.",
+                    sizeHint = "~335 MB",
+                ),
+            ),
+        ),
+        StarterBundle(
+            architecture = "Flux",
+            label = "FLUX.1 schnell",
+            base = ALL.first { it.repoId == FLUX1_SCHNELL },
+            parts = listOf(
+                StarterModel(
+                    repoId = FLUX_TEXT_ENCODERS,
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.CLIP_L,
+                    summary = "Required, at clip_l.safetensors. FLUX reads its prompt through " +
+                        "this and the T5 together, and will not load without both.",
+                    sizeHint = "~246 MB",
+                ),
+                StarterModel(
+                    repoId = T5_ENCODER_GGUF,
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.T5XXL,
+                    summary = "Required. Take Q3_K_S — the fp16 release in the repo beside " +
+                        "clip_l is 9.79 GB, which is more than the denoiser.",
+                    sizeHint = "2.10 GB at Q3_K_S",
+                ),
+                StarterModel(
+                    repoId = "diffusers/FLUX.1-vae",
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.VAE,
+                    summary = "Required. FLUX produces 16-channel latents and nothing else " +
+                        "reads them. This is the fp16 copy — black-forest-labs' own repo is " +
+                        "gated and this app cannot sign in to one.",
+                    sizeHint = "~168 MB",
+                ),
+            ),
+        ),
+        StarterBundle(
+            architecture = "Ernie Image",
+            label = "ERNIE Image turbo",
+            base = ALL.first { it.repoId == ERNIE_TURBO },
+            parts = listOf(
+                StarterModel(
+                    repoId = "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.LLM_ENCODER,
+                    summary = "Required, and take Q4_K_M. sd.cpp builds a Ministral 3.3B for " +
+                        "this architecture specifically — not a Qwen, and not the prompt " +
+                        "enhancer of the same name published beside the weights.",
+                    sizeHint = "2.15 GB at Q4_K_M",
+                ),
+                StarterModel(
+                    repoId = "baidu/ERNIE-Image-Turbo",
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.VAE,
+                    summary = "Required, at vae/. The publisher's own repo carries it, and it " +
+                        "is the smallest decoder of any bundle here.",
+                    sizeHint = "~168 MB",
+                ),
+            ),
+        ),
+        StarterBundle(
+            architecture = "Krea2",
+            label = "Krea 2 turbo",
+            base = ALL.first { it.repoId == KREA2_TURBO },
+            parts = listOf(
+                StarterModel(
+                    repoId = "unsloth/Qwen3-VL-4B-Instruct-GGUF",
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.LLM_ENCODER,
+                    summary = "Required. Four billion, not the eight the file name elsewhere " +
+                        "suggests — Comfy-Org's repackage of this model ships a qwen3vl_4b, so " +
+                        "4B is the size the checkpoint was trained against. UD-IQ2_M keeps it " +
+                        "to a gigabyte and a half.",
+                    sizeHint = "1.53 GB at UD-IQ2_M",
+                ),
+                StarterModel(
+                    repoId = "Comfy-Org/Krea-2",
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.VAE,
+                    summary = "Required, at vae/qwen_image_vae.safetensors. Krea 2 borrows " +
+                        "Qwen-Image's decoder rather than shipping one of its own.",
+                    sizeHint = "~254 MB",
                 ),
             ),
         ),

@@ -160,6 +160,24 @@ class ParamRepository(
         architecture: String?,
     ): String? {
         val applies = spec.appliesTo ?: return null
+        // Which of diffusion's two outputs this setting reaches.
+        //
+        // Asked of the derived table rather than of a list here, and silent
+        // when that table does not recognise the architecture — an unknown
+        // model gets every setting rather than an arbitrary half of them.
+        applies.output?.let { kinds ->
+            val makesVideo = ai.ondevice.core.DiffusionFamily.isVideo(architecture)
+            if (makesVideo != null) {
+                val wanted = if (makesVideo) "video" else "image"
+                if (wanted !in kinds) {
+                    return if (makesVideo) {
+                        "Only applies to stills. $architecture generates video."
+                    } else {
+                        "Only applies to video. $architecture generates stills."
+                    }
+                }
+            }
+        }
         applies.modality?.let { kinds ->
             if (modality != null && modality !in kinds) {
                 return "Only for ${kinds.joinToString(", ")} models. This one is $modality."

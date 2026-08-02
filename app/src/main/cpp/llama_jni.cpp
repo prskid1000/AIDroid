@@ -310,12 +310,21 @@ const std::map<std::string, param_row> & param_table() {
         // from the model's VISION_PROJECTOR companion, and only readable at
         // load: mtmd builds its own graph against the weights.
         { "mmproj",           { true,  [](od_engine & e, const json & v) { e.params.mmproj.path = as_string(v); } } },
-        // The one kwarg with a switch of its own, because it is the one users
-        // reach for. It writes into the same map as the general form below, so
-        // whichever is set last wins and there is no second source of truth.
-        { "enable_thinking",  { false, [](od_engine & e, const json & v) {
-              e.chat_template_kwargs["enable_thinking"] = as_bool(v, true) ? "true" : "false";
-          } } },
+        // `enable_thinking` is not here, and is not a parameter.
+        //
+        // It is one key of the map below — `thinking_enabled()` reads it back
+        // out of exactly that map — so a switch of its own was a second door
+        // onto one value. The comment that used to sit here said "whichever is
+        // set last wins and there is no second source of truth", which is two
+        // claims and only the first is right: last-write-wins over a map
+        // iterated in JSON key order *is* a second source of truth, and the
+        // screen showed both rows without saying they were the same setting.
+        //
+        // The chat sheet already offers the kwargs whole, deliberately —
+        // "rather than as a switch per key somebody has to add each time,
+        // enable_thinking included". A model card saying
+        // `--chat-template-kwargs '{"enable_thinking":false}'` is naming this
+        // one door.
         { "chat_template_kwargs", { false, [](od_engine & e, const json & v) {
               if (v.is_string()) {
                   // Accepted as a string too, so the value can be pasted
@@ -359,7 +368,6 @@ const std::map<std::string, json (*)(const common_params &)> & default_table() {
         { "n_threads_batch",    [](const common_params & p) { return json(p.cpuparams_batch.n_threads); } },
         { "n_parallel",         [](const common_params & p) { return json(p.n_parallel); } },
         { "check_tensors",      [](const common_params & p) { return json(p.check_tensors); } },
-        { "enable_thinking",    [](const common_params &)   { return json(true); } },
         { "chat_template_kwargs", [](const common_params &) { return json::object(); } },
         { "rope_freq_base",     [](const common_params & p) { return json(p.rope_freq_base); } },
         { "rope_freq_scale",    [](const common_params & p) { return json(p.rope_freq_scale); } },

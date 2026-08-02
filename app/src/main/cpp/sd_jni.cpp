@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <list>
 #include <map>
 #include <mutex>
 #include <string>
@@ -17,6 +18,10 @@
 
 #include "stable-diffusion.h"
 #include "nlohmann/json.hpp"
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#define STBI_WRITE_NO_STDIO_STDLIB_HEADERS
+#include "stb_image_write.h"
 
 #include "jni_util.h"
 
@@ -65,6 +70,31 @@ struct od_sd {
     int64_t seed      = -1;
     bool  vae_tiling  = false;
 
+    // Video. Upstream's own defaults: a second of 16 fps, which is the shortest
+    // clip worth looking at and the longest most phones will finish.
+    int   video_frames = 16;
+    int   fps          = 16;
+    /** VACE's hold on the control frames, and inert without them. */
+    float vace_strength = 1.0f;
+    /** Where Wan 2.2 hands over from its high-noise expert to its low-noise one. */
+    float moe_boundary  = 0.875f;
+    /** Steps for that high-noise expert; 0 means "the same as the other". */
+    int   high_noise_steps = 0;
+
+    // The hi-res stage, which both stills and clips have.
+    //
+    // Generate small, enlarge, then denoise again at the larger size — which is
+    // a different thing from running an upscaler over a finished picture. On a
+    // clip it is the only *coherent* way to enlarge: the whole sequence's
+    // latent is scaled and re-sampled together, so frames stay consistent with
+    // one another. Running ESRGAN over each frame separately does not.
+    bool  hires_enabled  = false;
+    std::string hires_upscaler = "latent";
+    float hires_scale    = 1.5f;
+    int   hires_steps    = 0;      // 0 follows the main step count
+    float hires_denoise  = 0.5f;
+    int   hires_tile     = 0;
+
     // Published by the callbacks, read by a polling Kotlin coroutine.
     std::atomic<int>   step{0};
     std::atomic<int>   total_steps{0};
@@ -72,6 +102,14 @@ struct od_sd {
     std::atomic<bool>  generating{false};
     std::atomic<int>   phase{0};
     std::atomic<bool>  sampling_started{false};
+    /** The step total the sampler declared for this pass; 0 before it has. */
+    std::atomic<int>   sampler_steps{0};
+
+    // What the loaded checkpoint can make, as the runtime answered at load.
+    // Exclusive for everything but an SD 1.x with a motion module attached,
+    // which can do both.
+    std::atomic<bool>  supports_image{false};
+    std::atomic<bool>  supports_video{false};
     /** Set by Cancel, read by the graph callback before every ggml node. */
     std::atomic<bool>  cancelled{false};
 
@@ -226,6 +264,10 @@ void note_phase(const std::string & line) {
                says("generating latent")) {
         e->phase.store(PHASE_SAMPLING);
         e->sampling_started.store(true);
+        // Each image of a batch declares its own total, so the latch that tells
+        // the sampler from the tensor loader is dropped here rather than once
+        // per run. See progress_cb.
+        e->sampler_steps.store(0);
     } else if (says("get_learned_condition") || says("apply lora") ||
                says("apply_loras") || says("encode_first_stage") ||
                says("computing condition")) {
@@ -354,6 +396,22 @@ const std::map<std::string, row> & table() {
         { "control_strength", { [](od_sd & e, const json & v) { e.control_strength = as_float(v, e.control_strength); } } },
         { "ip_adapter_strength", { [](od_sd & e, const json & v) { e.ip_adapter_strength = as_float(v, e.ip_adapter_strength); } } },
         { "vae_tiling",       { [](od_sd & e, const json & v) { e.vae_tiling = as_bool(v, false); } } },
+        // Video. Inert on an image model, which is why they are in the same
+        // table rather than a second one: the runtime reports what it will act
+        // on, and `appliesTo` in the manifest decides what is worth showing.
+        { "video_frames",     { [](od_sd & e, const json & v) { e.video_frames = std::max(1, as_int(v, e.video_frames)); } } },
+        { "fps",              { [](od_sd & e, const json & v) { e.fps = std::max(1, as_int(v, e.fps)); } } },
+        { "vace_strength",    { [](od_sd & e, const json & v) { e.vace_strength = as_float(v, e.vace_strength); } } },
+        { "moe_boundary",     { [](od_sd & e, const json & v) { e.moe_boundary = as_float(v, e.moe_boundary); } } },
+        { "high_noise_steps", { [](od_sd & e, const json & v) { e.high_noise_steps = std::max(0, as_int(v, e.high_noise_steps)); } } },
+        // The hi-res stage. Both stills and clips have one, and on a clip it is
+        // the only coherent way to enlarge — the whole sequence's latent is
+        // scaled and re-denoised together.
+        { "hires_fix",        { [](od_sd & e, const json & v) { e.hires_enabled = as_bool(v, false); } } },
+        { "hires_upscaler",   { [](od_sd & e, const json & v) { e.hires_upscaler = as_string(v); } } },
+        { "hires_scale",      { [](od_sd & e, const json & v) { e.hires_scale = as_float(v, e.hires_scale); } } },
+        { "hires_steps",      { [](od_sd & e, const json & v) { e.hires_steps = std::max(0, as_int(v, e.hires_steps)); } } },
+        { "hires_denoise",    { [](od_sd & e, const json & v) { e.hires_denoise = as_float(v, e.hires_denoise); } } },
         { "sampling_method",  { [](od_sd & e, const json & v) { e.sampling_method = as_string(v); } } },
         { "schedule",         { [](od_sd & e, const json & v) { e.schedule = as_string(v); } } },
     };
@@ -381,6 +439,16 @@ const std::map<std::string, json (*)(const od_sd &)> & default_table() {
         { "control_strength", [](const od_sd & e) { return json(e.control_strength); } },
         { "ip_adapter_strength", [](const od_sd & e) { return json(e.ip_adapter_strength); } },
         { "vae_tiling",       [](const od_sd & e) { return json(e.vae_tiling); } },
+        { "video_frames",     [](const od_sd & e) { return json(e.video_frames); } },
+        { "fps",              [](const od_sd & e) { return json(e.fps); } },
+        { "vace_strength",    [](const od_sd & e) { return json(e.vace_strength); } },
+        { "moe_boundary",     [](const od_sd & e) { return json(e.moe_boundary); } },
+        { "high_noise_steps", [](const od_sd & e) { return json(e.high_noise_steps); } },
+        { "hires_fix",        [](const od_sd & e) { return json(e.hires_enabled); } },
+        { "hires_upscaler",   [](const od_sd & e) { return json(e.hires_upscaler); } },
+        { "hires_scale",      [](const od_sd & e) { return json(e.hires_scale); } },
+        { "hires_steps",      [](const od_sd & e) { return json(e.hires_steps); } },
+        { "hires_denoise",    [](const od_sd & e) { return json(e.hires_denoise); } },
         { "sampling_method",  [](const od_sd & e) { return json(e.sampling_method); } },
         { "schedule",         [](const od_sd & e) { return json(e.schedule); } },
     };
@@ -397,6 +465,29 @@ void progress_cb(int step, int steps, float time, void *) {
     // tiler's are tiles, and reporting them made a finished picture restart its
     // count from 1 of 12.
     if (e->phase.load() != PHASE_SAMPLING || steps <= 0) return;
+
+    // A third caller, which the phase cannot filter because it runs *inside*
+    // sampling: the tensor loader.
+    //
+    // Weights load lazily unless `eager_load` is set, so the first time a layer
+    // is needed the loader reads it in and reports its own progress — through
+    // this same callback, in tensors. The readout counted to 134 of 1234 and
+    // then 1680 of 1680, neither of which is a step, and the real step number
+    // was overwritten between every one of them.
+    //
+    // They are told apart by the total rather than by the count. Upstream's
+    // sampler declares its own total once, as `(0, steps)`, before the first
+    // denoise touches a weight — so the first total seen in this phase is the
+    // sampler's, and anything reporting a different one is not the sampler.
+    // Latching it also handles the case the old exact-match check got wrong:
+    // an ancestral sampler or an img2img run has a real total that is not the
+    // one that was asked for, and this takes whatever it turns out to be.
+    int expected = e->sampler_steps.load();
+    if (expected == 0) {
+        e->sampler_steps.store(steps);
+        expected = steps;
+    }
+    if (steps != expected) return;
 
     e->step.store(step);
     e->total_steps.store(steps);
@@ -430,6 +521,147 @@ struct owned_image {
     std::vector<uint8_t> data;
     sd_image_t           image{0, 0, 0, nullptr};
 };
+
+/** The name the enum uses for "whatever the file already is". */
+constexpr const char * WTYPE_UNCHANGED = "as-is";
+
+/**
+ * Every weight type this build can *produce*, which is a shorter list than the
+ * ones it can read.
+ *
+ * This is the set of cases `ggml_quantize_chunk` has (ggml.c), plus f32, which
+ * `convert_tensor` dequantises to itself without going through it. The rest of
+ * `sd_type_t` — q8_1, q8_K, the integer types, f64 — are types a file may
+ * legitimately contain and nothing here can write, and asking for one is not an
+ * error anybody sees: the switch falls through to `GGML_ABORT`, which ends the
+ * process from four minutes into a load, with no Java exception and nothing in
+ * the crash buffer naming the setting that did it.
+ *
+ * The IQ family is here because it cannot abort, not because it is a good idea.
+ * `convert_tensor` supplies an importance matrix of all ones, and an IQ quant
+ * against a flat imatrix is worse than its size suggests. The manifest offers
+ * none of them; this list only decides what is survivable, not what is sensible.
+ */
+const char * const CONVERTIBLE_TYPES[] = {
+    "f32", "f16", "bf16",
+    "q4_0", "q4_1", "q5_0", "q5_1", "q8_0", "q1_0",
+    "q2_K", "q3_K", "q4_K", "q5_K", "q6_K",
+    "tq1_0", "tq2_0", "mxfp4", "nvfp4",
+    "iq1_s", "iq1_m", "iq2_xxs", "iq2_xs", "iq2_s",
+    "iq3_xxs", "iq3_s", "iq4_nl", "iq4_xs",
+};
+
+/**
+ * The type to quantise to at load, read off the name the app sends.
+ *
+ * `sd_ctx_params_init` starts this at `SD_TYPE_COUNT`, which is upstream's way
+ * of saying "leave every tensor as the file wrote it", and that is what an
+ * empty name keeps. Anything else is matched against ggml's own registry rather
+ * than a table typed here, case-insensitively — upstream's help says `q3_K` and
+ * a manifest edited by hand will sooner or later say `q3_k`.
+ *
+ * @param refusal set when the name is one this build cannot honour; empty
+ *   otherwise. It is filled rather than logged because the alternative to
+ *   refusing is worse than a failed load — see CONVERTIBLE_TYPES.
+ */
+sd_type_t parse_wtype(const std::string & name, std::string & refusal) {
+    refusal.clear();
+    if (name.empty() || jni_iequals(name, WTYPE_UNCHANGED)) return SD_TYPE_COUNT;
+
+    for (const char * candidate : CONVERTIBLE_TYPES) {
+        if (!jni_iequals(name, candidate)) continue;
+        const auto type = str_to_sd_type(candidate);
+        if (type != SD_TYPE_COUNT) return type;
+    }
+
+    refusal = "This build cannot convert weights to \"" + name + "\" while loading. " +
+              "Choose one of: ";
+    bool first = true;
+    for (const char * candidate : CONVERTIBLE_TYPES) {
+        if (str_to_sd_type(candidate) == SD_TYPE_COUNT) continue;
+        if (!first) refusal += ", ";
+        refusal += candidate;
+        first = false;
+    }
+    refusal += ".";
+    return SD_TYPE_COUNT;
+}
+
+/**
+ * An LTX-AV soundtrack, as a 16-bit WAV beside its frames.
+ *
+ * Upstream hands back floats in [-1, 1]; nothing on Android plays those, and a
+ * WAV header is 44 bytes against pulling in an encoder. Clamped rather than
+ * scaled, because a sample outside the range is a defect in the model's output
+ * and quietly rescaling the whole track would hide it.
+ */
+bool write_wav(const std::string & path, const sd_audio_t & audio) {
+    if (audio.data == nullptr || audio.sample_count == 0) return false;
+    const uint32_t channels    = audio.channels > 0 ? audio.channels : 1;
+    const uint32_t rate        = audio.sample_rate > 0 ? audio.sample_rate : 44100;
+    const uint64_t total       = audio.sample_count * channels;
+    const uint32_t data_bytes  = (uint32_t) (total * 2);
+    const uint32_t byte_rate   = rate * channels * 2;
+
+    FILE * file = std::fopen(path.c_str(), "wb");
+    if (file == nullptr) return false;
+
+    const auto u32 = [&](uint32_t v) { std::fwrite(&v, 4, 1, file); };
+    const auto u16 = [&](uint16_t v) { std::fwrite(&v, 2, 1, file); };
+    std::fwrite("RIFF", 1, 4, file);
+    u32(36 + data_bytes);
+    std::fwrite("WAVEfmt ", 1, 8, file);
+    u32(16);                              // PCM header size
+    u16(1);                               // PCM, uncompressed
+    u16((uint16_t) channels);
+    u32(rate);
+    u32(byte_rate);
+    u16((uint16_t) (channels * 2));       // block align
+    u16(16);                              // bits per sample
+    std::fwrite("data", 1, 4, file);
+    u32(data_bytes);
+
+    for (uint64_t i = 0; i < total; ++i) {
+        float sample = audio.data[i];
+        if (sample > 1.0f) sample = 1.0f;
+        if (sample < -1.0f) sample = -1.0f;
+        const int16_t pcm = (int16_t) std::lround(sample * 32767.0f);
+        std::fwrite(&pcm, 2, 1, file);
+    }
+    std::fclose(file);
+    return true;
+}
+
+/**
+ * Fill the hi-res stage, which both stills and clips take.
+ *
+ * Generate small, enlarge, denoise again at the larger size. Distinct from the
+ * ESRGAN path, which runs over a *finished* picture in its own context and has
+ * no idea what the picture was meant to be. On a clip the difference is not
+ * subtle: this scales the whole sequence's latent and re-samples it together,
+ * so frames stay consistent with one another, where running an upscaler over
+ * each frame independently makes flat areas shimmer.
+ *
+ * @param upscaler_model the ESRGAN to use when the mode is `model`, or empty.
+ */
+void apply_hires(const od_sd & e, sd_hires_params_t & hires, const std::string & upscaler_model) {
+    hires.enabled = e.hires_enabled;
+    if (!hires.enabled) return;
+    const auto parsed = str_to_sd_hires_upscaler(e.hires_upscaler.c_str());
+    hires.upscaler = parsed == SD_HIRES_UPSCALER_COUNT ? SD_HIRES_UPSCALER_LATENT : parsed;
+    hires.scale    = e.hires_scale;
+    hires.steps    = e.hires_steps > 0 ? e.hires_steps : e.steps;
+    hires.denoising_strength = e.hires_denoise;
+    if (hires.upscaler == SD_HIRES_UPSCALER_MODEL) {
+        // Asking for the model mode with no model is asking for nothing; fall
+        // back to the latent one rather than passing a null it would read.
+        if (upscaler_model.empty()) {
+            hires.upscaler = SD_HIRES_UPSCALER_LATENT;
+        } else {
+            hires.model_path = upscaler_model.c_str();
+        }
+    }
+}
 
 owned_image take_image(JNIEnv * env, jbyteArray bytes, jint width, jint height) {
     owned_image out;
@@ -506,26 +738,78 @@ Java_ai_ondevice_engine_SdBridge_nativeSystemInfo(JNIEnv * env, jobject) {
     return jni_from_string(env, dump_json(info));
 }
 
+/**
+ * The whole of `sd_ctx_params_t`, as two JSON objects rather than as arguments.
+ *
+ * This took eleven positional strings and grew by one whenever a field turned
+ * out to matter. What that cost was not typing: the fields it did *not* take
+ * were invisible. `uncond_diffusion_model_path` unset meant Ideogram 4 could
+ * not run, `high_noise_diffusion_model_path` unset meant Wan 2.2 could not, and
+ * neither said so — the app simply had no way to name the file, so the
+ * architecture looked unsupported when it was unplumbed. `max_vram` and
+ * `stream_layers`, upstream's answer to a model larger than memory, were
+ * unreachable for the same reason on the device that needs them most.
+ *
+ * So: components keyed by `AttachmentRole.paramKey`, settings keyed by the
+ * struct's own field names, and a new field costs one line on each side. This
+ * is the shape `LlamaBridge.nativeLoad` has always had.
+ */
 JNIEXPORT jlong JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeLoad(
-        JNIEnv * env, jobject, jstring jmodel, jstring jvae, jstring jcontrolNet,
-        jstring jclipL, jstring jclipG, jstring jt5xxl, jstring jipAdapter, jstring jembeddings,
-        jstring jclipVision, jstring jllm, jint threads) {
-    const auto model      = jni_to_string(env, jmodel);
-    const auto vae        = jni_to_string(env, jvae);
-    const auto controlNet = jni_to_string(env, jcontrolNet);
-    // The rest of sd_ctx_params_t's auxiliary paths.
-    const auto clipL      = jni_to_string(env, jclipL);
-    const auto clipG      = jni_to_string(env, jclipG);
-    const auto t5xxl      = jni_to_string(env, jt5xxl);
-    const auto ipAdapter  = jni_to_string(env, jipAdapter);
-    const auto embeddings = jni_to_string(env, jembeddings);
-    // An IP-Adapter cannot work without this.
-    const auto clipVision = jni_to_string(env, jclipVision);
-    // FLUX.2 reads its prompt with a language model rather than with CLIP and
-    // T5 — Qwen3 for Klein, Mistral Small for dev — so the text encoder is a
-    // GGUF the size of a chat model and arrives through its own path.
-    const auto llm        = jni_to_string(env, jllm);
+        JNIEnv * env, jobject, jstring jmodel, jstring jcomponents, jstring jsettings,
+        jint threads) {
+    const auto model = jni_to_string(env, jmodel);
+
+    json components = json::object();
+    json settings   = json::object();
+    try {
+        const auto components_text = jni_to_string(env, jcomponents);
+        const auto settings_text   = jni_to_string(env, jsettings);
+        if (!components_text.empty()) components = json::parse(components_text);
+        if (!settings_text.empty())   settings   = json::parse(settings_text);
+    } catch (const std::exception & ex) {
+        jni_throw(env, std::string("The load request could not be read: ") + ex.what());
+        return 0;
+    }
+
+    // Every string the params struct points at lives here until new_sd_ctx has
+    // returned. `sd_ctx_params_t` holds borrowed `const char *`, and a temporary
+    // that dies at the end of its statement is a dangling pointer read minutes
+    // later, inside the loader, with no symptom that names this function.
+    // A list rather than a map: `push_back` never invalidates a reference to an
+    // element already in it, and there is no key to collide — "vae" arrives in
+    // one object and "vae_format" in the other, and a keyed store would have to
+    // be right about that forever.
+    std::list<std::string> held;
+
+    auto text_of = [&](const json & source, const char * key) -> const char * {
+        const auto found = source.find(key);
+        if (found == source.end() || !found->is_string()) return nullptr;
+        auto value = found->get<std::string>();
+        if (value.empty()) return nullptr;
+        return held.emplace_back(std::move(value)).c_str();
+    };
+    auto bool_of = [&](const char * key, bool fallback) {
+        const auto found = settings.find(key);
+        return (found != settings.end() && found->is_boolean()) ? found->get<bool>() : fallback;
+    };
+
+    // Quantise on the way in, which is what decides whether a file can run here
+    // at all. A 6 GB fp16 safetensors is not a large model badly packaged; it is
+    // the only packaging most architectures ever get, and no phone loads it.
+    // Asked for q4_0 it becomes about 2 GB before it reaches memory, so the
+    // question stops being "is there a GGUF of this" — the answer to which is
+    // no, for most of the list — and becomes one about time and quality.
+    //
+    // Refused before anything is allocated, because the failure it prevents is
+    // an abort rather than an error.
+    std::string wtype_refusal;
+    const char * wtype_name = text_of(settings, "wtype");
+    const auto wtype = parse_wtype(wtype_name == nullptr ? std::string() : wtype_name, wtype_refusal);
+    if (!wtype_refusal.empty()) {
+        jni_throw(env, wtype_refusal);
+        return 0;
+    }
 
     // A version left over from the last checkpoint would be read as this one's.
     { std::lock_guard<std::mutex> lock(g_version_mutex); g_version.clear(); }
@@ -575,25 +859,139 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
     sd_ctx_params_t params;
     sd_ctx_params_init(&params);
     params.model_path       = model.c_str();
-    params.vae_path         = vae.empty() ? nullptr : vae.c_str();
-    params.control_net_path = controlNet.empty() ? nullptr : controlNet.c_str();
-    params.clip_l_path      = clipL.empty() ? nullptr : clipL.c_str();
-    params.clip_g_path      = clipG.empty() ? nullptr : clipG.c_str();
-    params.t5xxl_path       = t5xxl.empty() ? nullptr : t5xxl.c_str();
-    params.ip_adapter_path  = ipAdapter.empty() ? nullptr : ipAdapter.c_str();
-    params.embeddings_connectors_path = embeddings.empty() ? nullptr : embeddings.c_str();
-    params.clip_vision_path = clipVision.empty() ? nullptr : clipVision.c_str();
-    params.llm_path         = llm.empty() ? nullptr : llm.c_str();
-    params.n_threads        = threads > 0 ? threads : od_default_threads();
-    params.enable_mmap      = true;
-    // Flash attention stays off.
+
+    // Components, keyed as the app names roles. Absent means absent: a null
+    // leaves upstream's own default, which for every one of these is "not
+    // supplied", and is a different thing from an empty string.
+    params.vae_path         = text_of(components, "vae");
+    params.control_net_path = text_of(components, "control_net");
+    params.clip_l_path      = text_of(components, "clip_l");
+    params.clip_g_path      = text_of(components, "clip_g");
+    params.t5xxl_path       = text_of(components, "t5xxl");
+    params.ip_adapter_path  = text_of(components, "ip_adapter");
+    params.embeddings_connectors_path = text_of(components, "embd_dir");
+    params.clip_vision_path = text_of(components, "clip_vision");
+    // FLUX.2 reads its prompt with a language model rather than with CLIP and
+    // T5 — Qwen3 for Klein, Mistral Small for dev — so the text encoder is a
+    // GGUF the size of a chat model and arrives through its own path.
+    params.llm_path         = text_of(components, "llm");
+    params.llm_vision_path  = text_of(components, "llm_vision");
+
+    // The companion denoisers. Each of these is the model, published in more
+    // than one piece, and each was a whole architecture the app could not run.
+    params.uncond_diffusion_model_path    = text_of(components, "uncond_diffusion_model");
+    params.high_noise_diffusion_model_path = text_of(components, "high_noise_diffusion_model");
+    params.motion_module_path             = text_of(components, "motion_module");
+
+    params.audio_vae_path     = text_of(components, "audio_vae");
+    params.photo_maker_path   = text_of(components, "photo_maker");
+    params.pulid_weights_path = text_of(components, "pulid");
+
+    // Textual inversions, which upstream takes as an array of name/path pairs
+    // rather than as a directory. The vectors outlive the call for the same
+    // reason `held` does.
+    std::vector<sd_embedding_t> embeddings;
+    std::vector<std::string>    embedding_text;
+    if (const auto listed = components.find("embeddings");
+        listed != components.end() && listed->is_array()) {
+        embedding_text.reserve(listed->size() * 2);
+        for (const auto & entry : *listed) {
+            if (!entry.is_object()) continue;
+            const auto name = entry.value("name", std::string());
+            const auto path = entry.value("path", std::string());
+            if (name.empty() || path.empty()) continue;
+            embedding_text.push_back(name);
+            embedding_text.push_back(path);
+        }
+        for (size_t i = 0; i + 1 < embedding_text.size(); i += 2) {
+            embeddings.push_back({ embedding_text[i].c_str(), embedding_text[i + 1].c_str() });
+        }
+    }
+    params.embeddings      = embeddings.empty() ? nullptr : embeddings.data();
+    params.embedding_count = (uint32_t) embeddings.size();
+
+    params.n_threads = threads > 0 ? threads : od_default_threads();
+    params.wtype     = wtype;
+
+    // Per-tensor precision, which `wtype` cannot express: upstream takes rules
+    // like `^vae\.=f16,model\.=q8_0`, so the decoder — where quantisation shows
+    // up as visible blotching — can stay at a higher precision than the
+    // denoiser that dominates the size.
+    params.tensor_type_rules = text_of(settings, "tensor_type_rules");
+
+    params.enable_mmap = bool_of("enable_mmap", true);
+
     // Attention without materialising the N-by-N matrix. Every video example
     // upstream ships passes --diffusion-fa, and the saving is memory as much as
-    // time, which is the constraint that binds on a phone.
-    params.flash_attn       = true;
+    // time, which is the constraint that binds on a phone. Still unmeasured.
+    params.flash_attn           = bool_of("flash_attn", true);
+    params.diffusion_flash_attn = bool_of("diffusion_flash_attn", false);
+
+    params.diffusion_conv_direct       = bool_of("diffusion_conv_direct", false);
+    params.vae_conv_direct             = bool_of("vae_conv_direct", false);
+    params.force_sdxl_vae_conv_scale   = bool_of("force_sdxl_vae_conv_scale", false);
+
+    // A model larger than memory, held mostly on disk.
+    //
+    // `max_vram` is a budget in GiB; `stream_layers` pages layers in and out
+    // against it; `eager_load` does the opposite and pulls everything in at
+    // load. These are the only knobs upstream offers for the case where the
+    // weights do not fit, which on a phone is most of the interesting cases —
+    // and none of them was reachable.
+    params.max_vram      = text_of(settings, "max_vram");
+    params.stream_layers = bool_of("stream_layers", false);
+    params.eager_load    = bool_of("eager_load", false);
+    params.auto_fit      = bool_of("auto_fit", false);
 
     params.backend        = "CPU";
     params.params_backend = "CPU";
+
+    // The enum settings, each refused by name rather than silently ignored.
+    // upstream returns its `_COUNT` sentinel for a string it does not know, and
+    // passing that through would select whichever behaviour the sentinel
+    // happens to land on.
+    std::string enum_refusal;
+    auto parse_enum = [&](const char * key, auto parser, auto sentinel, auto assign) {
+        const char * name = text_of(settings, key);
+        if (name == nullptr || !enum_refusal.empty()) return;
+        const auto parsed = parser(name);
+        if (parsed == sentinel) {
+            enum_refusal = std::string("\"") + name + "\" is not a value " + key + " accepts.";
+            return;
+        }
+        assign(parsed);
+    };
+    parse_enum("rng_type", str_to_rng_type, RNG_TYPE_COUNT,
+               [&](rng_type_t v) { params.rng_type = v; });
+    parse_enum("sampler_rng_type", str_to_rng_type, RNG_TYPE_COUNT,
+               [&](rng_type_t v) { params.sampler_rng_type = v; });
+    parse_enum("prediction", str_to_prediction, PREDICTION_COUNT,
+               [&](prediction_t v) { params.prediction = v; });
+    parse_enum("lora_apply_mode", str_to_lora_apply_mode, LORA_APPLY_MODE_COUNT,
+               [&](lora_apply_mode_t v) { params.lora_apply_mode = v; });
+    // No `str_to_vae_format` is exported, so this one is spelled out. The names
+    // are upstream's own `sd_vae_format_t` spellings.
+    if (const char * format = text_of(settings, "vae_format"); format != nullptr) {
+        const std::pair<const char *, sd_vae_format_t> formats[] = {
+            { "auto",  SD_VAE_FORMAT_AUTO },  { "flux",  SD_VAE_FORMAT_FLUX },
+            { "sd3",   SD_VAE_FORMAT_SD3 },   { "flux2", SD_VAE_FORMAT_FLUX2 },
+            { "wan",   SD_VAE_FORMAT_WAN },
+        };
+        bool matched = false;
+        for (const auto & [name, value] : formats) {
+            if (!jni_iequals(format, name)) continue;
+            params.vae_format = value;
+            matched = true;
+            break;
+        }
+        if (!matched && enum_refusal.empty()) {
+            enum_refusal = std::string("\"") + format + "\" is not a value vae_format accepts.";
+        }
+    }
+    if (!enum_refusal.empty()) {
+        jni_throw(env, enum_refusal);
+        return 0;
+    }
 
     {
         std::lock_guard<std::mutex> lock(g_last_error_mutex);
@@ -647,11 +1045,27 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
         return 0;
     }
 
-    if (!sd_ctx_supports_image_generation(engine->ctx)) {
+    // What this context can make, asked of the context rather than assumed.
+    //
+    // This used to demand image generation and refuse anything else, which
+    // rejected every video architecture at load — after its weights were read,
+    // so the cost was paid and then thrown away. `supports_image_generation` is
+    // upstream's `!supports_video_generation`, so the two are exclusive for
+    // every checkpoint *except* an SD 1.x carrying a motion module, which
+    // answers yes to both and is the one thing here that can do either.
+    //
+    // The refusal that is left is the honest one: a context that can make
+    // neither is a load with nothing to do afterwards.
+    engine->supports_image.store(sd_ctx_supports_image_generation(engine->ctx));
+    engine->supports_video.store(sd_ctx_supports_video_generation(engine->ctx));
+    if (!engine->supports_image.load() && !engine->supports_video.load()) {
         delete engine;
-        jni_throw(env, "This model loaded but does not support image generation.");
+        jni_throw(env, "This model loaded but can generate neither images nor video.");
         return 0;
     }
+    SLOGI("can generate: %s%s",
+          engine->supports_image.load() ? "images " : "",
+          engine->supports_video.load() ? "video" : "");
 
     sd_set_progress_callback(progress_cb, nullptr);
 
@@ -762,6 +1176,245 @@ Java_ai_ondevice_engine_SdBridge_nativeCancel(JNIEnv *, jobject, jlong handle) {
     sd_cancel_generation(e->ctx, SD_CANCEL_ALL);
 }
 
+/** What this context can make, so the app offers the screen that fits it. */
+JNIEXPORT jboolean JNICALL
+Java_ai_ondevice_engine_SdBridge_nativeSupportsImage(JNIEnv *, jobject, jlong handle) {
+    auto * e = as_sd(handle);
+    return e != nullptr && e->supports_image.load();
+}
+
+JNIEXPORT jboolean JNICALL
+Java_ai_ondevice_engine_SdBridge_nativeSupportsVideo(JNIEnv *, jobject, jlong handle) {
+    auto * e = as_sd(handle);
+    return e != nullptr && e->supports_video.load();
+}
+
+/**
+ * Generate a clip, and leave it on disk.
+ *
+ * Returns a manifest — `{"dir","frames":[…],"width","height","fps","audio"}` —
+ * rather than pixels. A five-second 480p clip is about 147 MB of raw RGB and
+ * upstream returns every frame at once; handing that back as a `byte[]` would
+ * hold it three times over, and the third copy is whatever the screen decodes
+ * it into. Frames are written as they are converted and released immediately.
+ *
+ * The audio is the LTX-AV case: it is the only architecture here that returns a
+ * soundtrack, and it comes back as floats that are written as a WAV beside the
+ * frames.
+ */
+JNIEXPORT jstring JNICALL
+Java_ai_ondevice_engine_SdBridge_nativeGenerateVideo(
+        JNIEnv * env, jobject, jlong handle,
+        jbyteArray jinit, jint initW, jint initH,
+        jbyteArray jend, jint endW, jint endH,
+        jbyteArray jcontrol, jint controlW, jint controlH,
+        jstring jattachments, jstring joutputDir) {
+    auto * e = as_sd(handle);
+    if (e == nullptr || e->ctx == nullptr) {
+        jni_throw(env, "No diffusion model is loaded.");
+        return nullptr;
+    }
+    if (!e->supports_video.load()) {
+        jni_throw(env, "This model does not generate video. An SD 1.x checkpoint needs a "
+                       "motion module attached before it can.");
+        return nullptr;
+    }
+
+    const auto out_dir = jni_to_string(env, joutputDir);
+    if (out_dir.empty()) {
+        jni_throw(env, "No output directory was given for the frames.");
+        return nullptr;
+    }
+
+    std::lock_guard<std::mutex> lock(e->mutex);
+    e->cancelled.store(false);
+    g_current.store(e);
+    e->generating.store(true);
+    e->step.store(0);
+    e->phase.store(PHASE_PREPARING);
+    e->sampling_started.store(false);
+    e->sampler_steps.store(0);
+    { std::lock_guard<std::mutex> lora_lock(g_lora_mutex); g_lora_report.clear(); }
+    {
+        std::lock_guard<std::mutex> preview_lock(e->preview_mutex);
+        e->preview_rgb.clear();
+    }
+
+    // The first frame, and the last.
+    //
+    // `end_image` has no counterpart in image generation: given both, the model
+    // is asked to travel from one still to the other, which is a different
+    // request from "animate this" and the one most worth having.
+    owned_image init    = take_image(env, jinit, initW, initH);
+    owned_image last    = take_image(env, jend, endW, endH);
+    owned_image control = take_image(env, jcontrol, controlW, controlH);
+
+    std::vector<sd_lora_t>   loras;
+    std::vector<std::string> lora_paths;
+    std::string              control_net_path;
+    /** Only read when the hi-res stage is set to the `model` upscaler. */
+    std::string              upscaler_model;
+    try {
+        const auto attachments_str = jni_to_string(env, jattachments);
+        if (!attachments_str.empty()) {
+            const auto parsed = json::parse(attachments_str);
+            for (const auto & item : parsed) {
+                const auto role = item.value("role", "");
+                const auto path = item.value("path", "");
+                if (path.empty()) continue;
+                if (role == "LORA") {
+                    lora_paths.push_back(path);
+                    loras.push_back(sd_lora_t{
+                        // Wan 2.2 runs two denoisers and a LoRA is trained for
+                        // one of them; upstream takes the flag per LoRA.
+                        /* is_high_noise */ item.value("highNoise", false),
+                        /* multiplier    */ item.value("weight", 1.0f),
+                        /* path          */ nullptr,
+                    });
+                } else if (role == "CONTROLNET") {
+                    control_net_path = path;
+                } else if (role == "UPSCALER") {
+                    upscaler_model = path;
+                }
+            }
+        }
+    } catch (const std::exception & ex) {
+        SLOGE("attachment list rejected: %s", ex.what());
+    }
+    for (size_t i = 0; i < loras.size(); ++i) {
+        loras[i].path = lora_paths[i].c_str();
+    }
+
+    if (!control_net_path.empty()) {
+        if (!sd_ctx_load_control_net(e->ctx, control_net_path.c_str())) {
+            SLOGE("control net refused: %s", control_net_path.c_str());
+        }
+    } else if (sd_ctx_has_control_net(e->ctx)) {
+        sd_ctx_unload_control_net(e->ctx);
+    }
+
+    sd_vid_gen_params_t params;
+    sd_vid_gen_params_init(&params);
+    if (!loras.empty()) {
+        params.loras      = loras.data();
+        params.lora_count = (uint32_t) loras.size();
+    }
+    params.prompt          = e->prompt.c_str();
+    params.negative_prompt = e->negative_prompt.c_str();
+    params.width           = e->width;
+    params.height          = e->height;
+    params.clip_skip       = e->clip_skip;
+    params.seed            = e->seed;
+    params.strength        = e->strength;
+    params.video_frames    = e->video_frames;
+    params.fps             = e->fps;
+    params.vace_strength   = e->vace_strength;
+    params.moe_boundary    = e->moe_boundary;
+
+    params.sample_params.sample_steps                = e->steps;
+    params.sample_params.guidance.txt_cfg            = e->cfg_scale;
+    params.sample_params.guidance.distilled_guidance = e->guidance;
+    params.sample_params.flow_shift                  = e->flow_shift;
+    params.sample_params.sample_method = str_to_sample_method(e->sampling_method.c_str());
+    params.sample_params.scheduler     = str_to_scheduler(e->schedule.c_str());
+    // Wan 2.2 is two experts either side of a noise boundary, and each takes
+    // its own step count. Defaulting the second to the first keeps one dial
+    // meaningful for the architectures that have only one denoiser.
+    params.high_noise_sample_params = params.sample_params;
+    params.high_noise_sample_params.sample_steps = e->high_noise_steps > 0
+                                                       ? e->high_noise_steps
+                                                       : e->steps;
+
+    params.vae_tiling_params.enabled = e->vae_tiling;
+    apply_hires(*e, params.hires, upscaler_model);
+
+    if (init.image.data != nullptr) {
+        params.init_image = init.image;
+        params.width  = (int) init.image.width;
+        params.height = (int) init.image.height;
+    }
+    if (last.image.data != nullptr) params.end_image = last.image;
+    // One control frame, applied to the sequence. Upstream takes an array —
+    // a different map per frame — which nothing in the app can author yet.
+    if (control.image.data != nullptr) {
+        params.control_frames      = &control.image;
+        params.control_frames_size = 1;
+    }
+
+    sd_image_t * frames    = nullptr;
+    int          frame_count = 0;
+    sd_audio_t * audio     = nullptr;
+    const bool   ok = generate_video(e->ctx, &params, &frames, &frame_count, &audio);
+
+    const bool cancelled = e->cancelled.load();
+    e->generating.store(false);
+    g_current.store(nullptr);
+
+    if (!ok || frames == nullptr || frame_count <= 0) {
+        if (frames != nullptr) free(frames);
+        if (audio != nullptr) { free(audio->data); free(audio); }
+        if (cancelled) return nullptr;
+        jni_throw(env, "The run produced no frames. This is usually memory — lower the "
+                       "size, ask for fewer frames, or enable vae_tiling.");
+        return nullptr;
+    }
+
+    // Written one at a time and freed as we go, so peak memory is upstream's
+    // buffer plus one encoded frame rather than plus a copy of all of them.
+    json listed = json::array();
+    int  width  = 0;
+    int  height = 0;
+    for (int i = 0; i < frame_count; ++i) {
+        const sd_image_t & frame = frames[i];
+        if (frame.data == nullptr) continue;
+        width  = (int) frame.width;
+        height = (int) frame.height;
+        char name[32];
+        std::snprintf(name, sizeof(name), "frame_%04d.png", i);
+        const std::string path = out_dir + "/" + name;
+        const int written = stbi_write_png(path.c_str(), (int) frame.width, (int) frame.height,
+                                           (int) frame.channel, frame.data,
+                                           (int) frame.width * (int) frame.channel);
+        if (written == 0) {
+            SLOGE("could not write %s", path.c_str());
+        } else {
+            listed.push_back(name);
+        }
+        free(frame.data);
+        frames[i].data = nullptr;
+    }
+    free(frames);
+
+    std::string audio_name;
+    if (audio != nullptr) {
+        if (audio->data != nullptr && audio->sample_count > 0) {
+            audio_name = "audio.wav";
+            if (!write_wav(out_dir + "/" + audio_name, *audio)) {
+                SLOGE("could not write the audio track");
+                audio_name.clear();
+            }
+        }
+        free(audio->data);
+        free(audio);
+    }
+
+    if (listed.empty()) {
+        jni_throw(env, "The frames could not be written. Check free space.");
+        return nullptr;
+    }
+
+    json manifest{
+        { "dir",    out_dir },
+        { "frames", listed },
+        { "width",  width },
+        { "height", height },
+        { "fps",    e->fps },
+    };
+    if (!audio_name.empty()) manifest["audio"] = audio_name;
+    SLOGI("wrote %zu frames to %s", listed.size(), out_dir.c_str());
+    return jni_from_string(env, dump_json(manifest));
+}
+
 /** Run one generation. */
 JNIEXPORT jbyteArray JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeGenerate(
@@ -786,6 +1439,7 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
     e->step.store(0);
     e->phase.store(PHASE_PREPARING);
     e->sampling_started.store(false);
+    e->sampler_steps.store(0);
     { std::lock_guard<std::mutex> lock(g_lora_mutex); g_lora_report.clear(); }
     {
         std::lock_guard<std::mutex> preview_lock(e->preview_mutex);
@@ -810,6 +1464,8 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
     std::vector<sd_lora_t>   loras;
     std::vector<std::string> lora_paths;
     std::string              control_net_path;
+    /** Only read when the hi-res stage is set to the `model` upscaler. */
+    std::string              upscaler_model;
     try {
         const auto attachments_str = jni_to_string(env, jattachments);
         if (!attachments_str.empty()) {
@@ -827,6 +1483,8 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
                     });
                 } else if (role == "CONTROLNET") {
                     control_net_path = path;
+                } else if (role == "UPSCALER") {
+                    upscaler_model = path;
                 }
             }
         }
@@ -875,6 +1533,7 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
     params.sample_params.scheduler            = str_to_scheduler(e->schedule.c_str());
 
     params.vae_tiling_params.enabled = e->vae_tiling;
+    apply_hires(*e, params.hires, upscaler_model);
 
     if (reference.image.data != nullptr) {
         params.ref_images       = &reference.image;

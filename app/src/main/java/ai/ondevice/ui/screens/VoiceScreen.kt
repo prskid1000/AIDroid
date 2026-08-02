@@ -776,6 +776,18 @@ private fun VoiceSettingsSheet(
 
         // Which *model* provides the engine, as distinct from which engine.
         val engineModels = state.ttsModels.filter { state.ttsModelProviders[it.id] == provider }
+        // An engine with nothing behind it says so.
+        //
+        // The picker was simply omitted in this case, which reads as "the list
+        // did not change" rather than "this engine has no model" — the two look
+        // identical when the previous engine's selection is still on screen
+        // above it.
+        if (provider != ai.ondevice.speech.SynthProvider.SYSTEM && engineModels.isEmpty()) {
+            NHelp(
+                "No ${provider.label} model is installed. Models → Add a model.",
+                Modifier.padding(top = 8.dp),
+            )
+        }
         if (provider != ai.ondevice.speech.SynthProvider.SYSTEM && engineModels.isNotEmpty()) {
             val engineLabels = engineModels.pickerLabels()
             NDropdown(

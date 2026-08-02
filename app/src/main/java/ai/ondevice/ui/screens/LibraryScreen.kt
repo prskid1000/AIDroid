@@ -61,6 +61,7 @@ fun LibraryScreen(
     val section by viewModel.section.collectAsStateWithLifecycle()
     val conversations by viewModel.conversations.collectAsStateWithLifecycle()
     val images by viewModel.images.collectAsStateWithLifecycle()
+    val clips by viewModel.clips.collectAsStateWithLifecycle()
     val syntheses by viewModel.syntheses.collectAsStateWithLifecycle()
     val transcripts by viewModel.transcripts.collectAsStateWithLifecycle()
 
@@ -73,6 +74,7 @@ fun LibraryScreen(
                         when (entry) {
                             LibrarySection.CHATS -> NIcons.Chat
                             LibrarySection.IMAGES -> NIcons.Image
+                            LibrarySection.CLIPS -> NIcons.Video
                             LibrarySection.VOICE -> NIcons.Voice
                         },
                         entry.label,
@@ -84,6 +86,7 @@ fun LibraryScreen(
                     when (section) {
                         LibrarySection.CHATS -> "${conversations.size}"
                         LibrarySection.IMAGES -> "${images.size}"
+                        LibrarySection.CLIPS -> "${clips.size}"
                         LibrarySection.VOICE -> "${syntheses.size + transcripts.size}"
                     },
                     style = NocturneType.MonoValue,
@@ -105,6 +108,12 @@ fun LibraryScreen(
             LibrarySection.IMAGES -> ImagesSection(
                 images = images,
                 onOpen = { id -> onOpenItem(PredictionKind.IMAGE, id) },
+            )
+
+            LibrarySection.CLIPS -> ClipsSection(
+                clips = clips,
+                onOpen = { id -> onOpenItem(PredictionKind.VIDEO, id) },
+                onDelete = viewModel::deleteClip,
             )
 
             LibrarySection.VOICE -> VoiceSection(
@@ -202,6 +211,65 @@ private fun ImagesSection(
             }
         }
         NHelp("Tap any image for its full parameter set, what it cost to make, and one-tap reuse.")
+    }
+}
+
+// — clips —
+
+/**
+ * One tile per clip, showing its first frame.
+ *
+ * The first frame rather than a thumbnail file: the frames are already PNGs on
+ * disk, so a separate thumbnail would be a second copy of something that is
+ * already there and able to go stale against it.
+ */
+@Composable
+private fun ClipsSection(
+    clips: List<ai.ondevice.data.db.GeneratedClipEntity>,
+    onOpen: (String) -> Unit,
+    onDelete: (ai.ondevice.data.db.GeneratedClipEntity) -> Unit,
+) {
+    if (clips.isEmpty()) {
+        NHelp(
+            "No clips yet. Image → the film icon generates them, on the same models and the " +
+                "same runtime as stills.",
+        )
+        return
+    }
+    Column(Modifier.fillMaxWidth()) {
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            contentPadding = PaddingValues(bottom = 10.dp),
+        ) {
+            items(clips, key = { it.id }) { clip ->
+                Box(
+                    Modifier
+                        .aspectRatio(1f)
+                        .clip(Radius.Sm)
+                        .background(NocturneColors.Neutral900)
+                        .nClickableFlat(onClick = { onOpen(clip.id) }),
+                    contentAlignment = Alignment.BottomStart,
+                ) {
+                    coil3.compose.AsyncImage(
+                        model = "${'$'}{clip.directory}/frame_0000.png",
+                        contentDescription = clip.prompt,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.matchParentSize(),
+                    )
+                    Text(
+                        "${'$'}{clip.frameCount} frames · ${'$'}{clip.fps} fps" +
+                            if (clip.audioPath != null) " · sound" else "",
+                        style = NocturneType.MonoXs,
+                        color = NocturneColors.Accent100.copy(alpha = 0.85f),
+                        modifier = Modifier.padding(4.dp),
+                    )
+                }
+            }
+        }
+        NHelp("Tap a clip to play it through. Deleting one removes its whole folder of frames.")
     }
 }
 

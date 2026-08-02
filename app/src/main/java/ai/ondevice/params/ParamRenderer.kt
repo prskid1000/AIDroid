@@ -7,6 +7,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -86,7 +91,7 @@ fun ParamRow(
                 )
             }
             Text(
-                summarise(spec, current),
+                summarise(spec, current, overridden = modified),
                 style = NocturneType.MonoValue,
                 color = NocturneColors.Accent300,
                 modifier = Modifier.weight(1f),
@@ -136,7 +141,9 @@ fun ParamRow(
         if (spec.help.isNotBlank()) {
             NHelp(spec.help, Modifier.padding(top = 5.dp))
         }
-        if (modified && disabledBecause == null) {
+        // A CODE row carries its own Reset inside the editor, and its default is
+        // a whole template — "reset to {%- if messages[0]…" is not a link.
+        if (modified && disabledBecause == null && spec.type != ParamType.CODE) {
             Text(
                 "reset to ${spec.defaultDisplay}",
                 style = NocturneType.Help,
@@ -257,6 +264,61 @@ private fun ParamControl(
             )
         }
 
+        ParamType.CODE -> {
+            val override = values.string(spec.key)
+            // The model's own, when there is no override — the runtime reports
+            // it as this parameter's default, so it is already here.
+            val fromModel = (spec.default as? JsonPrimitive)?.content.orEmpty()
+            var open by rememberSaveable(spec.key) { mutableStateOf(false) }
+            var draft by remember(override, fromModel) {
+                mutableStateOf(override ?: fromModel)
+            }
+
+            if (!open) {
+                ai.ondevice.ui.components.NButton(
+                    when {
+                        override != null -> "Edit override"
+                        fromModel.isNotBlank() -> "Edit the model's"
+                        else -> "Write one"
+                    },
+                    onClick = { open = true },
+                    style = ai.ondevice.ui.components.NButtonStyle.Secondary,
+                    block = true,
+                )
+            } else {
+                NTextArea(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    minHeight = 180.dp,
+                    textStyle = NocturneType.MonoXs,
+                )
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    // Committed on a press rather than per keystroke: a
+                    // half-typed template is a broken template, and this one
+                    // costs a reload to apply.
+                    ai.ondevice.ui.components.NButton(
+                        "Apply",
+                        onClick = { onChange(spec.key, draft); open = false },
+                        style = ai.ondevice.ui.components.NButtonStyle.Primary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    ai.ondevice.ui.components.NButton(
+                        if (override != null) "Reset" else "Cancel",
+                        onClick = {
+                            if (override != null) onChange(spec.key, null)
+                            draft = fromModel
+                            open = false
+                        },
+                        style = ai.ondevice.ui.components.NButtonStyle.Secondary,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+
         ParamType.STRING_ARRAY, ParamType.INT_ARRAY -> {
             val chips = values.stringList(spec.key)
                 ?: (spec.default as? kotlinx.serialization.json.JsonArray)
@@ -270,14 +332,22 @@ private fun ParamControl(
         }
 
         ParamType.MAP -> {
-            // logit_bias and friends. The token picker lives in the chat screen,
-            // where a tokenizer is loaded; here the raw pairs are editable.
+            // A JSON object, rendered as one.
+            //
+            // This was a single-line field, which is the wrong shape for the
+            // thing it holds: `{ "enable_thinking": false, "tools": [...] }` is
+            // typed on a phone keyboard, and a one-line box shows about eight
+            // characters of it at a time with no way to see the braces you are
+            // trying to balance. The raw-parameters escape hatch on the same
+            // screen already got this right — it is a text area — and there was
+            // no reason for the two to differ.
             val raw = values[spec.key]?.toString() ?: "{}"
-            NInput(
+            NTextArea(
                 value = raw,
                 onValueChange = { onChange(spec.key, it) },
+                minHeight = 72.dp,
                 textStyle = NocturneType.MonoSm,
-                placeholder = "{ \"token_id\": bias }",
+                placeholder = mapPlaceholder(spec.key),
             )
         }
 
@@ -307,6 +377,20 @@ private fun choicesFor(spec: ParamSpec, pathChoices: List<PathChoice>): List<Pat
     val wanted = ai.ondevice.core.AttachmentRole.entries.firstOrNull { it.paramKey == spec.key }
         ?: return pathChoices
     return pathChoices.filter { it.role == wanted }
+}
+
+/**
+ * An example of the shape this key expects, rather than of JSON in general.
+ *
+ * `{ "token_id": bias }` was shown for every map-valued parameter, which is
+ * right for exactly one of them and misleading for the rest — it reads as the
+ * required shape, and typing it into `chat_template_kwargs` produces a template
+ * variable called "token_id".
+ */
+private fun mapPlaceholder(key: String): String = when (key) {
+    "logit_bias" -> "{ \"9906\": 1.5 }"
+    "chat_template_kwargs" -> "{ \"enable_thinking\": false }"
+    else -> "{ }"
 }
 
 /** Two files of the same name are two rows that read as one; number them. */
@@ -421,10 +505,23 @@ private fun <T> List<T>.replaceAt(index: Int, value: T): List<T> =
     mapIndexed { i, existing -> if (i == index) value else existing }
 
 /** What the value line at the top of a row says. */
-private fun summarise(spec: ParamSpec, current: kotlinx.serialization.json.JsonElement?): String {
+private fun summarise(
+    spec: ParamSpec,
+    current: kotlinx.serialization.json.JsonElement?,
+    overridden: Boolean = false,
+): String {
     if (spec.type == ParamType.WEIGHTED_PATHS) {
         val count = ai.ondevice.core.WeightedPaths.parse(current).size
         return if (count == 0) "none" else "$count attached"
+    }
+    // Where it came from, not what it says. A chat template rendered into the
+    // value line is a thousand characters of Jinja in a right-aligned label.
+    if (spec.type == ParamType.CODE) {
+        return when {
+            overridden -> "overridden"
+            current?.let { renderJson(it) }?.isNotBlank() == true -> "from the model"
+            else -> "none"
+        }
     }
     return current?.let { renderJson(it) } ?: "—"
 }

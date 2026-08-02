@@ -44,6 +44,7 @@ class Converters {
         ConversationEntity::class,
         MessageEntity::class,
         GeneratedImageEntity::class,
+        GeneratedClipEntity::class,
         TranscriptEntity::class,
         SynthesisEntity::class,
         DownloadJobEntity::class,
@@ -61,6 +62,7 @@ abstract class OnDeviceDatabase : RoomDatabase() {
     abstract fun conversations(): ConversationDao
     abstract fun messages(): MessageDao
     abstract fun images(): GeneratedImageDao
+    abstract fun clips(): GeneratedClipDao
     abstract fun transcripts(): TranscriptDao
     abstract fun syntheses(): SynthesisDao
     abstract fun downloads(): DownloadDao
@@ -78,6 +80,7 @@ abstract class OnDeviceDatabase : RoomDatabase() {
             arrayOf(
                 MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
                 MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
+                MIGRATION_9_10,
             )
     }
 }
@@ -238,4 +241,33 @@ private val MIGRATION_8_9 = object : androidx.room.migration.Migration(8, 9) {
     }
 }
 
-internal const val DATABASE_VERSION = 9
+/** v10 — `generated_clips`, the video counterpart of `generated_images`. */
+private val MIGRATION_9_10 = object : androidx.room.migration.Migration(9, 10) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `generated_clips` (
+                `id` TEXT NOT NULL,
+                `directory` TEXT NOT NULL,
+                `frameCount` INTEGER NOT NULL,
+                `prompt` TEXT NOT NULL,
+                `negativePrompt` TEXT,
+                `paramsJson` TEXT NOT NULL,
+                `modelId` TEXT,
+                `seed` INTEGER NOT NULL,
+                `width` INTEGER NOT NULL,
+                `height` INTEGER NOT NULL,
+                `fps` INTEGER NOT NULL,
+                `audioPath` TEXT,
+                `createdAt` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_generated_clips_createdAt` ON `generated_clips` (`createdAt`)",
+        )
+    }
+}
+
+internal const val DATABASE_VERSION = 10

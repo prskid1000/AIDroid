@@ -79,17 +79,35 @@ class DiffusionEngine(
                 return params.string(role.paramKey).orEmpty()
             }
 
+            // Every load-time component, named the way the manifest names it.
+            //
+            // Derived from LOAD_TIME_ROLES rather than listed again here: the
+            // two lists were the same list written twice, and the second one
+            // was what decided whether a component reached the loader at all.
+            val components = buildJsonObject {
+                LOAD_TIME_ROLES.forEach { role ->
+                    pathFor(role).takeIf { it.isNotBlank() }?.let { put(role.paramKey, it) }
+                }
+            }
+
+            // The rest of sd_ctx_params_t, keyed by its own field names.
+            //
+            // Only what the caller actually set is sent, so upstream's default
+            // stands for everything else. `wtype` blank keeps the file's own
+            // precision, which is what most loads should still do — the
+            // conversion runs on the way in, and costs load time and a working
+            // buffer that have not been measured on hardware.
+            val settings = buildJsonObject {
+                LOAD_SETTING_KEYS.forEach { key ->
+                    params[key]?.let { put(key, it) }
+                }
+            }
+            val weightType = params.string(WEIGHT_TYPE_KEY).orEmpty().trim()
+
             val newHandle = SdBridge.nativeLoad(
                 modelPath = modelPath,
-                vaePath = pathFor(AttachmentRole.VAE),
-                controlNetPath = pathFor(AttachmentRole.CONTROLNET),
-                clipLPath = pathFor(AttachmentRole.CLIP_L),
-                clipGPath = pathFor(AttachmentRole.CLIP_G),
-                t5xxlPath = pathFor(AttachmentRole.T5XXL),
-                ipAdapterPath = pathFor(AttachmentRole.IP_ADAPTER),
-                embeddingsPath = pathFor(AttachmentRole.EMBEDDING),
-                clipVisionPath = pathFor(AttachmentRole.CLIP_VISION),
-                llmPath = pathFor(AttachmentRole.LLM_ENCODER),
+                componentsJson = components.toString(),
+                settingsJson = settings.toString(),
                 threads = threads,
             )
             check(newHandle != 0L) { "The runtime returned no handle for $modelPath." }
@@ -106,14 +124,27 @@ class DiffusionEngine(
             residentComponents = LOAD_TIME_ROLES.mapNotNull { role ->
                 pathFor(role).takeIf { it.isNotBlank() }?.let { role to File(it).name }
             }
+            residentModel = File(modelPath).let { "${it.name} · ${formatBytes(it.length())}" }
+            residentBytes = File(modelPath).length() +
+                LOAD_TIME_ROLES.sumOf { role ->
+                    pathFor(role).takeIf { it.isNotBlank() }?.let { File(it).length() } ?: 0L
+                }
+            lastUnloadReason = null
             android.util.Log.i(
                 TAG,
                 "loaded ${File(modelPath).name} (${File(modelPath).length() / 1024 / 1024} MB) " +
                     "threads=$threads " +
+                    "wtype=${weightType.ifBlank { "as stored" }} " +
                     "attached=" + residentComponents.map { it.first.name }
                     .ifEmpty { listOf("none") }.joinToString("+"),
             )
             loadedModelId = modelId
+            // What this context can make, asked of it rather than inferred from
+            // the architecture's name. An SD 1.x with a motion module answers
+            // yes to both, and no table of names could know that — it depends
+            // on whether a file was attached.
+            supportsImage = SdBridge.nativeSupportsImage(newHandle)
+            supportsVideo = SdBridge.nativeSupportsVideo(newHandle)
             // What the loader decided this checkpoint is, now that it has read
             // the tensors. Nothing else in the app can know it as reliably.
             detectedVersion = SdBridge.nativeDetectedVersion().takeIf { it.isNotBlank() }
@@ -157,6 +188,63 @@ class DiffusionEngine(
         private set
 
     /**
+     * The checkpoint itself, as its file name and size on disk.
+     *
+     * Separate from [residentComponents] because it is not a component, and
+     * absent from it for exactly that reason — which meant that a
+     * self-contained model holding no attachments produced an empty list, and
+     * the screen's "In memory" card, which renders only when the list is not
+     * empty, disappeared. SDXL turbo is the case: 3.94 GB resident, nothing
+     * attached, nothing on screen saying so. The one model that needs no help
+     * was the one the app went quiet about.
+     */
+    @Volatile
+    var residentModel: String? = null
+        private set
+
+    /**
+     * Roughly what is resident, in bytes on disk.
+     *
+     * The weights dominate a diffusion context by so much that their size on
+     * disk is the honest answer to "what is this costing" — nearer than any
+     * figure the app could get from the runtime, which reports none.
+     * Understates by the working buffers and overstates by anything mmap has
+     * not faulted in, and is labelled as approximate for both reasons.
+     */
+    @Volatile
+    var residentBytes: Long = 0L
+        private set
+
+    /**
+     * What the loaded context can generate, as the runtime answered.
+     *
+     * Both are false when nothing is loaded. They are not opposites: an SD 1.x
+     * with a motion module attached can do either, and which architectures
+     * those are is upstream's `sd_version_supports_animatediff`, not a list
+     * kept here.
+     */
+    @Volatile
+    var supportsImage: Boolean = false
+        private set
+
+    @Volatile
+    var supportsVideo: Boolean = false
+        private set
+
+    /**
+     * Why the last context was dropped, when it was dropped for a reason.
+     *
+     * Unloading is mostly invisible and mostly should be — but not when the app
+     * does it on the user's behalf. Running the upscaler drops the denoiser to
+     * make room, so the next generate reloads for minutes with nothing having
+     * explained why. Null after a load, and after an unload nobody needs told
+     * about.
+     */
+    @Volatile
+    var lastUnloadReason: String? = null
+        private set
+
+    /**
      * How much of each LoRA the last run applied, straight from sd.cpp's tally.
      *
      * Counting is upstream's, not the app's. A gate written here would need a
@@ -180,18 +268,26 @@ class DiffusionEngine(
     val loadStage: String?
         get() = if (SdBridge.available) SdBridge.nativeLoadStage().takeIf { it.isNotBlank() } else null
 
-    fun unload() {
+    /** @param because what to tell the user, when the app unloaded on their behalf. */
+    fun unload(because: String? = null) {
         if (handle != 0L) {
             android.util.Log.i(
                 TAG,
-                "unloading " + (loadedModelId ?: "?") +
-                    residentComponents.joinToString("") { " -${it.first.name}" },
+                "unloading " + (residentModel ?: loadedModelId ?: "?") +
+                    residentComponents.joinToString("") { " -${it.first.name}" } +
+                    " (freeing ~${formatBytes(residentBytes)})" +
+                    (because?.let { ": $it" } ?: ""),
             )
             SdBridge.nativeFree(handle)
             handle = 0L
+            lastUnloadReason = because
         }
         residentComponents = emptyList()
+        residentModel = null
+        residentBytes = 0L
         loadedModelId = null
+        supportsImage = false
+        supportsVideo = false
     }
 
     fun applyParams(params: SparseParams): ParamReport {
@@ -334,6 +430,161 @@ class DiffusionEngine(
         worker.join()
     }
 
+    /**
+     * Generate a clip, emitting the same progress and previews a still does.
+     *
+     * The frames land on disk and the flow carries their paths. Everything
+     * about the run — sampler, schedule, size, LoRAs — is the image path's,
+     * because upstream's two parameter structs agree about all of it; what
+     * differs is a handful of fields and one absence, and the absence is
+     * IP-Adapter, which `sd_vid_gen_params_t` has no room for at all.
+     */
+    fun generateVideo(request: VideoRequest): Flow<DiffusionEvent> = channelFlow {
+        if (handle == 0L) {
+            send(DiffusionEvent.Failed("No model is loaded.", "Models → pick a video model."))
+            return@channelFlow
+        }
+        if (!supportsVideo) {
+            send(
+                DiffusionEvent.Failed(
+                    "This model does not generate video.",
+                    "An SD 1.x checkpoint can, once a motion module is attached under Components.",
+                ),
+            )
+            return@channelFlow
+        }
+
+        val report = applyParams(request.params)
+        android.util.Log.i(
+            TAG,
+            "video params applied=${report.applied.size} rejected=${
+                report.rejected.ifEmpty { listOf("none") }.joinToString(",")
+            }",
+        )
+
+        val init = request.initImageUri?.let { decodeRgb(it) }
+        val end = request.endImageUri?.let { decodeRgb(it) }
+        val control = request.controlImageUri?.let { decodeRgb(it) }
+
+        val perRun = listOf(AttachmentRole.LORA, AttachmentRole.CONTROLNET)
+        val ticked = request.attachments.filter { it.enabled && it.role in perRun }
+        val attachmentsJson = buildJsonArray {
+            ticked.forEach { attachment ->
+                add(
+                    buildJsonObject {
+                        put("role", attachment.role.name)
+                        put("path", attachment.path)
+                        put("weight", attachment.weight)
+                    },
+                )
+            }
+            perRun
+                .filterNot { role -> ticked.any { it.role == role } }
+                .forEach { role ->
+                    ai.ondevice.core.WeightedPaths.parse(request.params[role.paramKey])
+                        .forEach { chosen ->
+                            add(
+                                buildJsonObject {
+                                    put("role", role.name)
+                                    put("path", chosen.path)
+                                    put("weight", chosen.weight)
+                                },
+                            )
+                        }
+                }
+        }.toString()
+
+        // A directory per run, so a cancelled or failed clip leaves its own
+        // mess and not a mixture of two.
+        val outputDir = File(context.filesDir, "video/${System.currentTimeMillis()}")
+        outputDir.mkdirs()
+
+        var done = false
+        val started = System.currentTimeMillis()
+        val worker = launch(Dispatchers.Default) {
+            try {
+                val manifest = SdBridge.nativeGenerateVideo(
+                    handle,
+                    init?.pixels, init?.width ?: 0, init?.height ?: 0,
+                    end?.pixels, end?.width ?: 0, end?.height ?: 0,
+                    control?.pixels, control?.width ?: 0, control?.height ?: 0,
+                    attachmentsJson,
+                    outputDir.absolutePath,
+                )
+                if (manifest == null) {
+                    outputDir.deleteRecursively()
+                    send(DiffusionEvent.Failed("The run produced no frames.", null))
+                } else {
+                    val clip = parseClip(manifest)
+                    android.util.Log.i(
+                        TAG,
+                        "generated ${clip.frames.size} frames at ${clip.width}x${clip.height} in " +
+                            "${(System.currentTimeMillis() - started) / 1000f}s" +
+                            (clip.audioPath?.let { " with audio" } ?: ""),
+                    )
+                    loraReport().forEach {
+                        android.util.Log.i(TAG, "lora ${it.file}: ${it.applied}/${it.total} applied")
+                    }
+                    send(DiffusionEvent.ClipCompleted(clip, loraReport()))
+                }
+            } catch (t: Throwable) {
+                outputDir.deleteRecursively()
+                android.util.Log.e(TAG, "video generation failed", t)
+                send(
+                    DiffusionEvent.Failed(
+                        t.message ?: "The run failed.",
+                        "Fewer frames, a smaller size, or vae_tiling.",
+                    ),
+                )
+            } finally {
+                done = true
+            }
+        }
+
+        var lastPreviewSerial = -1
+        while (isActive && !done) {
+            delay(POLL_MILLIS)
+            val progress = runCatching {
+                json.parseToJsonElement(SdBridge.nativeProgress(handle)).jsonObject
+            }.getOrNull() ?: continue
+
+            val step = progress["step"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+            val steps = progress["steps"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+            val secondsPerStep = progress["secondsPerStep"]?.jsonPrimitive?.content?.toFloatOrNull() ?: 0f
+            val phase = when (progress["phase"]?.jsonPrimitive?.content) {
+                "sampling" -> DiffusionPhase.SAMPLING
+                "decoding" -> DiffusionPhase.DECODING
+                else -> DiffusionPhase.PREPARING
+            }
+            val stage = progress["stage"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+            send(DiffusionEvent.Progress(step, steps, secondsPerStep, phase, stage))
+
+            val serial = progress["previewSerial"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+            if (serial != lastPreviewSerial) {
+                lastPreviewSerial = serial
+                SdBridge.nativePreview(handle)?.let { send(DiffusionEvent.Preview(unpack(it))) }
+            }
+        }
+        worker.join()
+    }
+
+    private fun parseClip(manifest: String): DiffusionClip {
+        val root = json.parseToJsonElement(manifest).jsonObject
+        val dir = root["dir"]?.jsonPrimitive?.content.orEmpty()
+        val frames = (root["frames"] as? kotlinx.serialization.json.JsonArray)
+            ?.map { "$dir/${it.jsonPrimitive.content}" }
+            .orEmpty()
+        return DiffusionClip(
+            directory = dir,
+            frames = frames,
+            width = root["width"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0,
+            height = root["height"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0,
+            fps = root["fps"]?.jsonPrimitive?.content?.toIntOrNull() ?: 16,
+            audioPath = root["audio"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+                ?.let { "$dir/$it" },
+        )
+    }
+
     // — image marshalling —
 
     private data class Rgb(val pixels: ByteArray, val width: Int, val height: Int)
@@ -394,7 +645,7 @@ class DiffusionEngine(
             // of that is what the kernel kills the app for, with no Java
             // exception and nothing in the crash buffer to explain it.
             // Generating again reloads on its own.
-            unload()
+            unload("the upscaler needs the memory the denoiser was holding; generating again reloads it")
             val rgb = ByteArray(image.width * image.height * 3)
             var at = 0
             image.pixels.forEach { pixel ->
@@ -433,11 +684,36 @@ class DiffusionEngine(
         return DiffusionImage(width, height, pixels)
     }
 
-    private companion object {
-        const val TAG = "DiffusionEngine"
+    /** Decimal GB and MB, which is how every model repo states a size. */
+    private fun formatBytes(bytes: Long): String = when {
+        bytes >= 1_000_000_000L -> String.format("%.2f GB", bytes / 1_000_000_000.0)
+        bytes >= 1_000_000L -> String.format("%.0f MB", bytes / 1_000_000.0)
+        else -> "$bytes B"
+    }
 
-        /** The roles `nativeLoad` has a field for, in the order it takes them. */
-        val LOAD_TIME_ROLES = listOf(
+    companion object {
+        /**
+         * The manifest key naming the precision to load at.
+         *
+         * Named here because this is the only thing that reads it. It reaches
+         * sd.cpp as a `nativeLoad` argument rather than through the parameter
+         * table, the way the component paths and `threads` do — sd.cpp settles
+         * a weight type while building the context and there is no way to
+         * change one afterwards, which is what `requiresReload` says about it.
+         */
+        const val WEIGHT_TYPE_KEY = "type"
+
+        private const val TAG = "DiffusionEngine"
+
+        /**
+         * The roles `sd_ctx_params_t` has a path for.
+         *
+         * This decides two things at once, which is why it is one list: what
+         * gets sent to the loader, and what the screen reports as resident.
+         * A role missing from here is a file the app can hold, display and
+         * believe it has attached, and never mention to the runtime.
+         */
+        private val LOAD_TIME_ROLES = listOf(
             AttachmentRole.VAE,
             AttachmentRole.CONTROLNET,
             AttachmentRole.CLIP_L,
@@ -447,10 +723,46 @@ class DiffusionEngine(
             AttachmentRole.EMBEDDING,
             AttachmentRole.CLIP_VISION,
             AttachmentRole.LLM_ENCODER,
+            AttachmentRole.UNCOND_DIFFUSION,
+            AttachmentRole.HIGH_NOISE_DIFFUSION,
+            AttachmentRole.MOTION_MODULE,
+            AttachmentRole.AUDIO_VAE,
+            AttachmentRole.PHOTO_MAKER,
+            AttachmentRole.PULID,
+            AttachmentRole.LLM_VISION,
+        )
+
+        /**
+         * The non-path fields of `sd_ctx_params_t`, by their own names.
+         *
+         * Load-time because sd.cpp settles each of them while building the
+         * context; changing one on a live context is not possible, which is
+         * what `requiresReload` says about them in the manifest. Anything not
+         * set by the caller is left at upstream's default rather than restated
+         * here — a default copied into two places is a default that drifts.
+         */
+        val LOAD_SETTING_KEYS = listOf(
+            WEIGHT_TYPE_KEY,
+            "tensor_type_rules",
+            "enable_mmap",
+            "flash_attn",
+            "diffusion_flash_attn",
+            "diffusion_conv_direct",
+            "vae_conv_direct",
+            "force_sdxl_vae_conv_scale",
+            "max_vram",
+            "stream_layers",
+            "eager_load",
+            "auto_fit",
+            "vae_format",
+            "prediction",
+            "rng_type",
+            "sampler_rng_type",
+            "lora_apply_mode",
         )
 
         /** Fast enough to look live, slow enough not to spin a core polling. */
-        const val POLL_MILLIS = 250L
+        private const val POLL_MILLIS = 250L
 
         /**
          * Side of the square the upscaler works on at a time.
@@ -461,7 +773,7 @@ class DiffusionEngine(
          * gigabytes of intermediates for a picture that fits in 12 MB. Tiles
          * cost seams at worst; the alternative costs the process.
          */
-        const val UPSCALE_TILE = 128
+        private const val UPSCALE_TILE = 128
     }
 }
 
@@ -488,6 +800,49 @@ data class DiffusionRequest(
     val maskPngPath: String? = null,
     val attachments: List<ModelAttachment> = emptyList(),
 )
+
+/**
+ * What a video run asks for.
+ *
+ * Deliberately not [DiffusionRequest] with extra fields: three of that type's
+ * five picture slots have no field in `sd_vid_gen_params_t` — there is no
+ * IP-Adapter, no inpainting mask and no reference image for an edit model — and
+ * a request type that accepts them would be a promise nothing keeps.
+ */
+data class VideoRequest(
+    val params: SparseParams,
+    /** The first frame. Without one the clip is made from the prompt alone. */
+    val initImageUri: String? = null,
+    /**
+     * The last frame.
+     *
+     * With both ends given the model travels between them, which is a different
+     * request from "animate this" and has no equivalent in image generation.
+     */
+    val endImageUri: String? = null,
+    /** One control map, held across every frame. */
+    val controlImageUri: String? = null,
+    val attachments: List<ModelAttachment> = emptyList(),
+)
+
+/**
+ * A finished clip, as files.
+ *
+ * Paths rather than pixels: a five-second 480p clip is ~147 MB of raw RGB, and
+ * the screen shows one frame at a time.
+ */
+data class DiffusionClip(
+    val directory: String,
+    /** Absolute paths, in order. */
+    val frames: List<String>,
+    val width: Int,
+    val height: Int,
+    val fps: Int,
+    /** LTX-AV's soundtrack as a WAV, or null — no other architecture returns one. */
+    val audioPath: String? = null,
+) {
+    val durationSeconds: Float get() = if (fps > 0) frames.size / fps.toFloat() else 0f
+}
 
 data class DiffusionImage(val width: Int, val height: Int, val pixels: IntArray) {
     fun toBitmap(): Bitmap = Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
@@ -532,6 +887,11 @@ sealed interface DiffusionEvent {
     data class Completed(
         val image: DiffusionImage,
         /** What each attached LoRA managed to change, or empty when none was attached. */
+        val loras: List<LoraApplication> = emptyList(),
+    ) : DiffusionEvent
+    /** The video counterpart, carrying paths because the frames are on disk. */
+    data class ClipCompleted(
+        val clip: DiffusionClip,
         val loras: List<LoraApplication> = emptyList(),
     ) : DiffusionEvent
     data class Failed(val message: String, val suggestion: String?) : DiffusionEvent

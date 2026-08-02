@@ -45,22 +45,62 @@ object SdBridge {
      */
     external fun nativeLoraReport(): String
 
+    /**
+     * Build a context.
+     *
+     * @param componentsJson every auxiliary file, keyed by
+     *   `AttachmentRole.paramKey` — `{"vae":"/p","clip_l":"/p"}`. A key left
+     *   out is a component not supplied, which is not the same as one supplied
+     *   empty. Textual inversions are the one array: `"embeddings":
+     *   [{"name":..,"path":..}]`.
+     * @param settingsJson the rest of `sd_ctx_params_t`, keyed by the struct's
+     *   own field names — `wtype`, `max_vram`, `stream_layers`, `flash_attn`,
+     *   `tensor_type_rules`, `prediction`, and so on.
+     *
+     * Two JSON objects rather than the eleven positional strings this used to
+     * take. The old shape did not merely make the call long — it made the
+     * fields it *omitted* invisible, and two whole architectures were
+     * unrunnable because nothing here could name a file they needed. A field
+     * added upstream now costs one line on each side.
+     */
     external fun nativeLoad(
         modelPath: String,
-        vaePath: String,
-        controlNetPath: String,
-        /** The remaining sd_ctx_params_t auxiliary paths. */
-        clipLPath: String,
-        clipGPath: String,
-        t5xxlPath: String,
-        ipAdapterPath: String,
-        embeddingsPath: String,
-        /** Required whenever [ipAdapterPath] is set — see AttachmentRole.CLIP_VISION. */
-        clipVisionPath: String,
-        /** FLUX.2's text encoder, which is a language model rather than CLIP or T5. */
-        llmPath: String,
+        componentsJson: String,
+        settingsJson: String,
         threads: Int,
     ): Long
+
+    /**
+     * What the loaded context can make, as the runtime answered at load.
+     *
+     * Exclusive for every checkpoint but one: an SD 1.x with a motion module
+     * attached says yes to both, and is the only thing here that can.
+     */
+    external fun nativeSupportsImage(handle: Long): Boolean
+
+    external fun nativeSupportsVideo(handle: Long): Boolean
+
+    /**
+     * Generate a clip and leave it on disk, returning a manifest rather than
+     * pixels — `{"dir","frames":[…],"width","height","fps","audio"}`.
+     *
+     * A five-second 480p clip is ~147 MB of raw RGB and the runtime returns
+     * every frame at once. Passing that back as a `ByteArray` would hold it
+     * three times over: the runtime's buffer, the Java copy, and whatever the
+     * screen decodes it into.
+     *
+     * @param end the last frame, when the request is to travel between two
+     *   stills. It has no counterpart in image generation.
+     * @param outputDir must exist and be writable.
+     */
+    external fun nativeGenerateVideo(
+        handle: Long,
+        init: ByteArray?, initWidth: Int, initHeight: Int,
+        end: ByteArray?, endWidth: Int, endHeight: Int,
+        control: ByteArray?, controlWidth: Int, controlHeight: Int,
+        attachmentsJson: String,
+        outputDir: String,
+    ): String?
 
     /** ESRGAN upscaling. */
     external fun nativeUpscale(

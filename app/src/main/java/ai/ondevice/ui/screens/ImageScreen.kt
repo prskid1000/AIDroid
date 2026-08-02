@@ -85,6 +85,7 @@ fun ImageScreen(
     onOpenRuntimes: () -> Unit,
     onAddModel: () -> Unit,
     onOpenAdvanced: () -> Unit,
+    onOpenVideo: () -> Unit,
     viewModel: ImageViewModel = activityImageViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -103,6 +104,9 @@ fun ImageScreen(
             // The same pair Chat and Voice carry.
             RootToolbar("Image") {
                 ToolbarAction(NIcons.Plus, "New image", viewModel::reset)
+                // Video sits behind this rather than in the tab bar: same
+                // runtime, same checkpoints, same loaded context.
+                ToolbarAction(NIcons.Video, "Video", onOpenVideo)
                 ToolbarAction(NIcons.Settings, "Image settings", { settingsOpen = true })
             }
         },
@@ -137,17 +141,42 @@ fun ImageScreen(
             // never showed it at all.
             val loadingNow = state.loadingModel && state.loadingWhat.isNotEmpty()
             val resident = state.residentComponents
-            if (loadingNow || resident.isNotEmpty()) {
+            // The card also draws for an unload the app decided on, which is
+            // otherwise the least explained thing that happens: running the
+            // upscaler drops the denoiser, and the next generate spends minutes
+            // reloading with nothing having said why.
+            if (loadingNow || resident.isNotEmpty() || state.unloadReason != null) {
                 NCard(
                     Modifier.padding(top = 10.dp),
                     ring = if (loadingNow) NocturneColors.Accent800 else NocturneColors.Neutral700,
                 ) {
                     Text(
-                        if (loadingNow) "Loading into memory" else "In memory",
+                        when {
+                            loadingNow -> "Loading into memory"
+                            resident.isEmpty() -> "Unloaded"
+                            else -> "In memory"
+                        },
                         style = NocturneType.CardTitleSm,
                     )
                     (if (loadingNow) state.loadingWhat else resident).forEach {
                         Text(it, style = NocturneType.MonoXs, color = NocturneColors.Accent300)
+                    }
+                    // Roughly, and said so: the weights dominate by enough that
+                    // their size on disk is the honest answer, and the runtime
+                    // reports no figure of its own to prefer over it.
+                    if (!loadingNow) {
+                        state.residentSize?.let {
+                            Text(it, style = NocturneType.MonoXs, color = NocturneColors.TextMuted)
+                        }
+                    }
+                    if (resident.isEmpty()) {
+                        state.unloadReason?.let {
+                            Text(
+                                it,
+                                style = NocturneType.Help,
+                                color = NocturneColors.TextMuted,
+                            )
+                        }
                     }
                     // While loading this is the loader's progress; during a run
                     // it is the sampler's or the decoder's. Either way it is the
@@ -619,221 +648,40 @@ private fun AttachmentsSection(
     state: ImageState,
     viewModel: ImageViewModel,
 ) {
-    if (state.availableAttachments.isEmpty()) {
-        SectionKicker("Components", Modifier.padding(top = 20.dp, bottom = 8.dp))
-
-        // A required component with nothing chosen is the difference between
-        // this screen being empty because there is nothing to add and being
-        // empty because the run is about to fail.
-        state.missingComponents.forEach { missing ->
-            NCard(Modifier.padding(bottom = 8.dp)) {
-                // A substitution is a choice, not a fault, and reads as one.
-                Text(
-                    missing.what,
-                    style = NocturneType.CardTitleSm,
-                    color = if (missing.state ==
-                        ai.ondevice.core.MissingComponent.State.SUBSTITUTES
-                    ) {
-                        NocturneColors.TextMuted
-                    } else {
-                        NocturneColors.Accent200
-                    },
-                )
-                Text(
-                    "${missing.because}. ${missing.remedy}.",
-                    style = NocturneType.CardBody,
-                    color = NocturneColors.Text.copy(alpha = 0.8f),
-                )
+    AttachmentsPicker(
+        available = state.availableAttachments,
+        armedCount = state.attachments.size,
+        missing = state.missingComponents,
+        unchosenRoles = state.unchosenRoles,
+        architectureLabel = state.recognisedAs ?: state.model?.architecture,
+        onToggle = viewModel::toggleAttachment,
+        onWeight = viewModel::setAttachmentWeight,
+        // A ControlNet and an IP-Adapter take one strength each, and it is a
+        // number about the run rather than about the file — so it is not the
+        // per-attachment weight, and it belongs beside its component all the
+        // same. It lived under the picture pickers on the main screen, which is
+        // where the picture is chosen and not where the component is.
+        strengthFor = { role ->
+            when (role) {
+                ai.ondevice.core.AttachmentRole.CONTROLNET -> state.controlStrength
+                ai.ondevice.core.AttachmentRole.IP_ADAPTER -> state.styleStrength
+                else -> null
             }
-        }
-
-        NCard {
-            // Two different situations wore the same sentence: a library with
-            // no add-ons in it, and a library holding several of one role with
-            // nobody having said which. Only the second is a decision waiting.
-            if (state.unchosenRoles.isEmpty()) {
-                Text("Nothing chosen for this model", style = NocturneType.CardTitleSm)
-                Text(
-                    "A prompt encoder, a VAE, a LoRA, a ControlNet — whichever of them this " +
-                        "architecture can take. Downloading one is enough for the parts a run " +
-                        "cannot do without; the rest are chosen under All Parameters.",
-                    style = NocturneType.CardBody,
-                    color = NocturneColors.Text.copy(alpha = 0.8f),
-                )
-                Text(
-                    "Add model lists a few that are known to work — look under Image add-ons.",
-                    style = NocturneType.CardBody,
-                    color = NocturneColors.Text.copy(alpha = 0.8f),
-                )
-            } else {
-                Text("Installed, not chosen", style = NocturneType.CardTitleSm)
-                Text(
-                    state.unchosenRoles.joinToString(", ") { it.label },
-                    style = NocturneType.CardBody,
-                    color = NocturneColors.Accent200,
-                )
-                Text(
-                    "Each of these fits this model and more than one file could fill it, so the " +
-                        "choice is yours: pick one per role under All Parameters and it appears " +
-                        "here as a switch.",
-                    style = NocturneType.CardBody,
-                    color = NocturneColors.Text.copy(alpha = 0.8f),
-                )
+        },
+        onStrength = { role, value ->
+            when (role) {
+                ai.ondevice.core.AttachmentRole.CONTROLNET -> viewModel.setControlStrength(value)
+                ai.ondevice.core.AttachmentRole.IP_ADAPTER -> viewModel.setStyleStrength(value)
+                else -> Unit
             }
-        }
-        return
-    }
-
-    SectionKicker(
-        "Components · ${state.attachments.size} of ${state.availableAttachments.size} on",
-        Modifier.padding(top = 20.dp, bottom = 8.dp),
+        },
+        emptyHelp = "A prompt encoder, a VAE, a LoRA, a ControlNet — whichever of them this " +
+            "architecture can take. Downloading one is enough for the parts a run cannot do " +
+            "without; the rest are chosen under All Parameters. Add model lists a few that are " +
+            "known to work — look under Image add-ons.",
     )
-
-    // Said here, next to the switches that fix it, rather than after Generate
-    // has spent a minute finding out.
-    state.missingComponents.forEach { missing ->
-        NCard(Modifier.padding(bottom = 8.dp)) {
-            // A substitution is a choice, not a fault, and reads as one.
-            Text(
-                missing.what,
-                style = NocturneType.CardTitleSm,
-                color = if (missing.state ==
-                    ai.ondevice.core.MissingComponent.State.SUBSTITUTES
-                ) {
-                    NocturneColors.TextMuted
-                } else {
-                    NocturneColors.Accent200
-                },
-            )
-            Text(
-                "${missing.because}. ${missing.remedy}.",
-                style = NocturneType.CardBody,
-                color = NocturneColors.Text.copy(alpha = 0.8f),
-            )
-        }
-    }
-
-    // Grouped by what the thing is *for*, in a fixed order, so the four ways of
-    // encoding a prompt sit under one heading instead of reading as four
-    // unrelated files scattered through the list.
-    state.availableAttachments
-        .groupBy { it.role.family }
-        .toList()
-        .sortedBy { (family, _) -> family.ordinal }
-        .forEach { (family, inFamily) ->
-            NHelp(family.label, Modifier.padding(top = 10.dp, bottom = 4.dp))
-            inFamily.forEach { attachment ->
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 6.dp)
-                        .background(
-                            if (attachment.enabled) NocturneColors.Accent900 else NocturneColors.Surface,
-                            Radius.Md,
-                        )
-                        .ring(
-                            if (attachment.enabled) NocturneColors.Accent else NocturneColors.Divider,
-                            Radius.Md,
-                        )
-                        .then(
-                            if (attachment.applicable) {
-                                Modifier.nClickableFlat { viewModel.toggleAttachment(attachment.modelId) }
-                            } else {
-                                Modifier
-                            },
-                        )
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                ) {
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        // The role leads, because the role is the slot; the
-                        // file is which one is in it.
-                        Text(
-                            attachment.role.label,
-                            style = NocturneType.Row,
-                            color = if (attachment.enabled) NocturneColors.Accent200 else NocturneColors.Text,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            when {
-                                !attachment.applicable -> "n/a"
-                                attachment.enabled -> "on"
-                                else -> "off"
-                            },
-                            style = NocturneType.Mono2Xs,
-                            color = if (attachment.enabled) NocturneColors.Accent else NocturneColors.TextMuted,
-                        )
-                    }
-                    // Chosen, but this model has no use for it — so it is not
-                    // armed, not passed to the loader, and says which.
-                    if (!attachment.applicable) {
-                        Text(
-                            "Not used by ${state.recognisedAs ?: state.model?.architecture ?: "this model"}",
-                            style = NocturneType.Help,
-                            color = NocturneColors.TextMuted,
-                            modifier = Modifier.padding(top = 2.dp),
-                        )
-                    }
-                    // Which file is in the slot — by the name it is known by,
-                    // which is the one given by hand where there is one. This
-                    // read the path directly and so never saw a rename, in the
-                    // one place a renamed component is most likely to be read.
-                    Text(
-                        attachment.displayName,
-                        style = NocturneType.MonoXs,
-                        color = NocturneColors.TextMuted,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
-                    // Only the roles the runtime actually weights get a dial,
-                    // and weight is a per-run thought, so it lives here rather
-                    // than beside the choice of file.
-                    if (attachment.enabled && attachment.role.weighted) {
-                        LabeledSlider(
-                            label = "Weight",
-                            value = attachment.weight,
-                            display = String.format("%.2f", attachment.weight),
-                            range = 0f..2f,
-                            onChange = { viewModel.setAttachmentWeight(attachment.modelId, it) },
-                            modifier = Modifier.padding(top = 6.dp),
-                        )
-                    }
-                    // A ControlNet and an IP-Adapter take one strength each,
-                    // and it is a number about the run rather than about the
-                    // file — so it is not the per-attachment weight above, and
-                    // it belongs beside its component all the same. It lived
-                    // under the picture pickers on the main screen, which is
-                    // where the picture is chosen and not where the component
-                    // is; two dials in two places for one idea.
-                    if (attachment.enabled) {
-                        when (attachment.role) {
-                            ai.ondevice.core.AttachmentRole.CONTROLNET -> LabeledSlider(
-                                label = "Strength",
-                                value = state.controlStrength,
-                                display = String.format("%.2f", state.controlStrength),
-                                range = 0f..1f,
-                                onChange = viewModel::setControlStrength,
-                                modifier = Modifier.padding(top = 6.dp),
-                            )
-                            ai.ondevice.core.AttachmentRole.IP_ADAPTER -> LabeledSlider(
-                                label = "Strength",
-                                value = state.styleStrength,
-                                display = String.format("%.2f", state.styleStrength),
-                                range = 0f..1f,
-                                onChange = viewModel::setStyleStrength,
-                                modifier = Modifier.padding(top = 6.dp),
-                            )
-                            else -> Unit
-                        }
-                    }
-                }
-            }
-        }
 }
 
-/** Outpainting margins. */
 @Composable
 private fun ExtendField(
     state: ImageState,
@@ -1045,7 +893,8 @@ private fun LivePreview(state: ImageState) {
 }
 
 @Composable
-private fun LabeledSlider(
+/** Shared with [AttachmentsPicker], which renders the weight and strength dials. */
+internal fun LabeledSlider(
     label: String,
     value: Float,
     display: String,

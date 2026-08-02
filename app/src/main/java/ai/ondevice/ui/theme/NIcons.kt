@@ -204,6 +204,18 @@ object NIcons {
         )
     }
 
+    /** A film frame: a rounded rectangle with the sprocket rail down one side. */
+    val Video: ImageVector by lazy {
+        icon(
+            1.8f,
+            stroked = listOf(
+                rrect(3f, 5f, 18f, 14f, 2f),
+                "M8 5v14",
+                "M5.5 8.5h0M5.5 12h0M5.5 15.5h0",
+            ),
+        )
+    }
+
     val Play: ImageVector by lazy { icon(2f, stroked = listOf("M8 5l11 7-11 7z")) }
     val Pause: ImageVector by lazy { icon(1.8f, stroked = listOf("M9 6v12M15 6v12")) }
 

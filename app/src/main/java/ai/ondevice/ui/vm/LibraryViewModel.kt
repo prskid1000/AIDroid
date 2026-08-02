@@ -1,6 +1,7 @@
 package ai.ondevice.ui.vm
 
 import ai.ondevice.data.db.ConversationEntity
+import ai.ondevice.data.db.GeneratedClipEntity
 import ai.ondevice.data.db.GeneratedImageEntity
 import ai.ondevice.data.db.OnDeviceDatabase
 import ai.ondevice.data.db.SynthesisEntity
@@ -21,6 +22,7 @@ import javax.inject.Inject
 enum class LibrarySection(val label: String) {
     CHATS("Chats"),
     IMAGES("Images"),
+    CLIPS("Clips"),
     VOICE("Voice"),
 }
 
@@ -62,6 +64,9 @@ class LibraryViewModel @Inject constructor(
     val images: StateFlow<List<GeneratedImageEntity>> = db.images().observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val clips: StateFlow<List<GeneratedClipEntity>> = db.clips().observeAll()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val syntheses: StateFlow<List<SynthesisEntity>> = db.syntheses().observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -78,6 +83,22 @@ class LibraryViewModel @Inject constructor(
             runCatching { java.io.File(image.path).delete() }
             db.predictionRuns().deleteForArtifact(image.id)
             db.images().deleteById(image.id)
+        }
+    }
+
+    /**
+     * A clip is a folder, so the folder goes.
+     *
+     * `deleteRecursively` rather than deleting the frames it knows about: a run
+     * that was cancelled part-way leaves frames this row never counted, and
+     * removing the row while leaving those behind is how a device fills up with
+     * files nothing refers to.
+     */
+    fun deleteClip(clip: GeneratedClipEntity) {
+        viewModelScope.launch {
+            runCatching { java.io.File(clip.directory).deleteRecursively() }
+            db.predictionRuns().deleteForArtifact(clip.id)
+            db.clips().deleteById(clip.id)
         }
     }
 

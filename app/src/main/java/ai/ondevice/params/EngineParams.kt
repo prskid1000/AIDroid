@@ -78,12 +78,30 @@ object EngineParams {
             ParamCapability(it, requiresReload = false, appliedBy = ParamCapability.Applier.APP)
         }
 
-    /** The diffusion keys that reach sd.cpp as `nativeLoad` arguments instead of through the dispatch table. */
+    /**
+     * The diffusion keys that reach sd.cpp through `nativeLoad` instead of
+     * through the dispatch table.
+     *
+     * Filtered, because this used to be every role there is — including the
+     * three that belong to llama, whisper and Kokoro. Declaring a key here is
+     * how a row reaches the parameter screen, so `mmproj`, `vad_model` and
+     * `voices` appeared on the image screen as undescribed text boxes: a
+     * setting you can type into that no diffusion context has a field for.
+     */
     private fun diffusionLoadKeys(): Set<String> =
-        AttachmentRole.entries.map { it.paramKey }.toSet() + SD_APP_KEYS
+        AttachmentRole.entries.filter { it.isDiffusionAuxiliary }.map { it.paramKey }.toSet() +
+            SD_APP_KEYS
 
-    /** Read by DiffusionEngine.load and by the upscale path, not by the table. */
-    private val SD_APP_KEYS = setOf("threads", "upscale_model")
+    /**
+     * Read by DiffusionEngine.load and by the upscale path, not by the table.
+     *
+     * The load-time settings are taken from [DiffusionEngine.LOAD_SETTING_KEYS]
+     * rather than repeated: that list is what actually reaches
+     * `sd_ctx_params_t`, so anything named here and missing there would be a
+     * row the screen offers and the loader never reads.
+     */
+    private val SD_APP_KEYS =
+        setOf("threads", "upscale_model") + ai.ondevice.engine.DiffusionEngine.LOAD_SETTING_KEYS
 
     /** Read by the voice screen's recorder, not by whisper.cpp: how often the capture loop hands a window over. */
     private val CAPTURE_KEYS = setOf("step_ms")

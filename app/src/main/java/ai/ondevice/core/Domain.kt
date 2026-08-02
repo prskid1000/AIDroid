@@ -92,6 +92,7 @@ enum class MessageRole { USER, ASSISTANT, SYSTEM, TOOL_CALL, TOOL_RESULT }
 enum class PredictionKind {
     CHAT,
     IMAGE,
+    VIDEO,
     SPEECH,
     TRANSCRIBE,
     ;
@@ -100,6 +101,7 @@ enum class PredictionKind {
         get() = when (this) {
             CHAT -> "Chat"
             IMAGE -> "Image"
+            VIDEO -> "Video"
             SPEECH -> "Speech"
             TRANSCRIBE -> "Transcript"
         }

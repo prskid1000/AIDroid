@@ -68,8 +68,21 @@ object FileLabels {
  */
 object Labels {
 
-    /** A name, and the details that could tell it from a namesake, best first. */
-    data class Item(val name: String, val qualifiers: List<String?>)
+    /**
+     * A name, the details that could tell it from a namesake, and the ones
+     * that belong to it whether or not anything else is called the same.
+     *
+     * @param always shown even when the name stands alone. For a repo that
+     *   holds many models rather than one — `ggerganov/whisper.cpp` is every
+     *   whisper size — the name is the repo and the variant is the identity,
+     *   so a unique label reading "whisper.cpp" names the runtime and not the
+     *   thing being picked.
+     */
+    data class Item(
+        val name: String,
+        val qualifiers: List<String?>,
+        val always: List<String?> = emptyList(),
+    )
 
     /**
      * One label per item, in order, unique wherever the inputs allow it.
@@ -103,8 +116,14 @@ object Labels {
     }
 
     private fun label(item: Item, depth: Int): String {
-        if (depth == 0) return item.name
-        val taken = item.qualifiers.filterNot { it.isNullOrBlank() }.take(depth)
-        return (listOf(item.name) + taken).joinToString(" · ")
+        val always = item.always.filterNot { it.isNullOrBlank() }
+        // Anything in `always` is part of the name for collision purposes too:
+        // two rows differing only by something already on screen are not
+        // ambiguous, and adding a further qualifier to separate them would be
+        // adding one nobody needed.
+        val taken = item.qualifiers
+            .filterNot { it.isNullOrBlank() || it in always }
+            .take(depth)
+        return (listOf(item.name) + always + taken).joinToString(" · ")
     }
 }

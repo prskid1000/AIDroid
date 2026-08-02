@@ -40,12 +40,26 @@ data class DiffusionFamily(
      * external VAE there is a fix for a known fault, not a missing part.
      */
     val vaeSeparate: Boolean = true,
+    /**
+     * Whether the denoiser is a UNet, which decides what can be bolted onto it.
+     *
+     * sd.cpp builds a ControlNet only in the SD1/SD2/SDXL/SVD shape, and an
+     * IP-Adapter injects at `input_blocks.N.1` names that exist in a UNet and
+     * nowhere else. On a diffusion transformer either file loads, costs its
+     * memory and changes nothing.
+     *
+     * `vaeSeparate` is not a stand-in for this even though it agrees on four of
+     * the five: Chroma Radiance keeps its decoder inside and is still a
+     * transformer.
+     */
+    val unet: Boolean = false,
 ) {
     companion object {
         /** SD 1.x and SD 2.x: one CLIP, and the decoder in the file. */
         val UNET = DiffusionFamily(
             encoders = setOf(CLIP_L),
             vaeSeparate = false,
+            unet = true,
         )
 
         /** Two text encoders, not one: SDXL conditions on ViT-L *and* ViT-bigG. */
@@ -152,6 +166,17 @@ data class DiffusionFamily(
             "sd3" to SD3,
             "sdxl" to SDXL,
             "sdxs" to UNET,
+            // SVD stays here and is *not* offered as a supported architecture in
+            // `runtimes.json`. Upstream lists it under
+            // `sd_version_supports_video_generation` and then has no branch for
+            // it in `prepare_video_generation_latents`: no image conditioning,
+            // and no `motion_bucket`, `cond_aug` or `fps_id` anywhere in the
+            // source. It would load, sample, and hand back noise.
+            //
+            // Keeping the name mapped means a file that turns out to be SVD is
+            // still described correctly rather than falling through as unknown;
+            // dropping it from the runtime's advertised list means the resolver
+            // stops telling anyone it will work.
             "svd" to PICTURE_CONDITIONED,
             "sd 2" to UNET,
             "sd2" to UNET,
@@ -168,6 +193,37 @@ data class DiffusionFamily(
         private const val T5XXL = "t5xxl"
         private const val LLM = "llm"
         private const val CLIP_VISION = "clip_vision"
+
+        /**
+         * The architectures that make frames rather than stills.
+         *
+         * Upstream's `sd_version_supports_video_generation`, name for name.
+         * It cannot live on [DiffusionFamily] itself because the families cut
+         * across it — LTX-AV and Z-Image are both `LLM_CONDITIONED`, and only
+         * one of them makes video — so it is its own question about the name.
+         *
+         * SVD is listed because upstream lists it, though nothing can usefully
+         * run it. What this answers is "does the video branch claim this",
+         * which is what a parameter needs to know before deciding whether it
+         * applies.
+         */
+        private val VIDEO_NAMES = listOf(
+            "svd", "wan 2", "wan2", "hunyuan video", "lingbot video", "ltxav",
+        )
+
+        /**
+         * Whether this architecture generates video, or null for a name this
+         * table does not know.
+         *
+         * Null rather than false, so a parameter gated on it shows itself for
+         * an unrecognised model: hiding a setting because of a name nobody
+         * recognises is hiding it for no reason anyone could act on.
+         */
+        fun isVideo(name: String?): Boolean? {
+            val key = name?.lowercase()?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+            if (VIDEO_NAMES.any { key.contains(it) }) return true
+            return if (forName(key) != null) false else null
+        }
 
         /**
          * What this model needs beside itself, or null when the name means

@@ -1,0 +1,579 @@
+package ai.ondevice.ui.screens
+
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.compose.AsyncImage
+import ai.ondevice.core.Fmt
+import ai.ondevice.ui.components.NButton
+import ai.ondevice.ui.components.NButtonStyle
+import ai.ondevice.ui.components.NCard
+import ai.ondevice.ui.components.NDropdown
+import ai.ondevice.ui.components.NHelp
+import ai.ondevice.ui.components.NInput
+import ai.ondevice.ui.components.NProgressBar
+import ai.ondevice.ui.components.NSlider
+import ai.ondevice.ui.components.NSwitch
+import ai.ondevice.ui.components.NTag
+import ai.ondevice.ui.components.NTagStyle
+import ai.ondevice.ui.components.NTextArea
+import ai.ondevice.ui.components.PhoneScaffold
+import ai.ondevice.ui.components.PushToolbar
+import ai.ondevice.ui.components.SectionKicker
+import ai.ondevice.ui.components.ToolbarAction
+import ai.ondevice.ui.components.nClickableFlat
+import ai.ondevice.ui.theme.NIcons
+import ai.ondevice.ui.theme.NocturneColors
+import ai.ondevice.ui.theme.NocturneType
+import ai.ondevice.ui.theme.Radius
+import ai.ondevice.ui.theme.ring
+import ai.ondevice.ui.vm.VideoState
+import ai.ondevice.ui.vm.VideoViewModel
+import androidx.compose.ui.draw.clip
+import androidx.hilt.navigation.compose.hiltViewModel
+
+/**
+ * S14 — video, on the same runtime and the same models as stills.
+ *
+ * Laid out like the Image screen because it is the same act with one more
+ * dimension: a prompt, optionally a picture to start from, and a result. What
+ * it does not carry is the three slots `sd_vid_gen_params_t` has no field for —
+ * no IP-Adapter, no mask, no reference image for an edit model — because a
+ * control that reaches nothing is worse than an absent one.
+ */
+@Composable
+fun VideoScreen(
+    onBack: () -> Unit,
+    onAddModel: () -> Unit,
+    onOpenAdvanced: () -> Unit,
+    viewModel: VideoViewModel = hiltViewModel(),
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    var settingsOpen by rememberSaveable { mutableStateOf(false) }
+
+    val pickFirst = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri -> uri?.let { viewModel.setFirstFrame(it.toString()) } }
+    val pickLast = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri -> uri?.let { viewModel.setLastFrame(it.toString()) } }
+
+    PhoneScaffold(
+        toolbar = {
+            PushToolbar(
+                title = "Video",
+                onBack = onBack,
+                subtitle = state.model?.label,
+            ) {
+                // The sibling, stated as a switch rather than left to the back
+                // arrow. Image and Video are the same runtime and the same
+                // loaded model shown two ways, and moving between them is a
+                // thing people do repeatedly rather than once.
+                ToolbarAction(NIcons.Image, "Stills instead", onBack)
+                ToolbarAction(NIcons.Settings, "Video settings", { settingsOpen = true })
+            }
+        },
+        contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 18.dp),
+    ) {
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+
+            ClipStage(state, viewModel)
+
+            if (!state.runtimeInstalled) {
+                NCard(Modifier.padding(top = 10.dp), ring = NocturneColors.Accent800) {
+                    Text("The diffusion runtime is not installed", style = NocturneType.CardTitleSm)
+                    NHelp("Settings → Runtimes, then install stable-diffusion.cpp.")
+                }
+            }
+
+            // What is in memory, and what the loader is doing while it fills.
+            val loadingNow = state.loadingModel && state.loadingWhat.isNotEmpty()
+            if (loadingNow || state.residentComponents.isNotEmpty()) {
+                NCard(
+                    Modifier.padding(top = 10.dp),
+                    ring = if (loadingNow) NocturneColors.Accent800 else NocturneColors.Neutral700,
+                ) {
+                    Text(
+                        if (loadingNow) "Loading into memory" else "In memory",
+                        style = NocturneType.CardTitleSm,
+                    )
+                    (if (loadingNow) state.loadingWhat else state.residentComponents).forEach {
+                        Text(it, style = NocturneType.MonoXs, color = NocturneColors.Accent300)
+                    }
+                    (state.loadingStage ?: state.runStage)?.let {
+                        Text(
+                            it,
+                            style = NocturneType.Help,
+                            color = NocturneColors.TextMuted,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+
+            state.loraOutcome.forEach { note ->
+                NCard(Modifier.padding(top = 10.dp), ring = NocturneColors.Accent800) {
+                    Text("LoRA had no effect", style = NocturneType.CardTitleSm,
+                        color = NocturneColors.Accent200)
+                    Text(note, style = NocturneType.CardBody)
+                }
+            }
+
+            state.error?.let { message ->
+                NCard(Modifier.padding(top = 10.dp), ring = NocturneColors.Accent800) {
+                    Text(message, style = NocturneType.CardTitleSm, color = NocturneColors.Accent200)
+                    state.errorHint?.let { NHelp(it, Modifier.padding(top = 4.dp)) }
+                }
+            }
+
+            // — the model —
+
+            SectionKicker("Model", Modifier.padding(top = 18.dp, bottom = 6.dp))
+            if (state.models.isEmpty()) {
+                NCard {
+                    Text("No diffusion model installed", style = NocturneType.CardTitleSm)
+                    NHelp(
+                        "Wan, Hunyuan and LTX-AV generate video directly. An SD 1.5 checkpoint " +
+                            "does too, once a motion module is attached to it.",
+                        Modifier.padding(top = 4.dp),
+                    )
+                    NButton(
+                        "Add a model",
+                        onClick = onAddModel,
+                        style = NButtonStyle.Secondary,
+                        block = true,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            } else {
+                NDropdown(
+                    options = state.models.map { it.label },
+                    selected = state.model?.label,
+                    onSelect = { label ->
+                        state.models.firstOrNull { it.label == label }?.let(viewModel::selectModel)
+                    },
+                    placeholder = "Choose a model…",
+                )
+                // Whether it can make video at all is the loader's answer, and
+                // nothing before the first load can know it — for SD 1.x it
+                // depends on whether a motion module was attached.
+                state.recognisedAs?.let {
+                    Row(
+                        Modifier.padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        NTag(it, style = NTagStyle.Outline)
+                        NTag(
+                            if (state.supportsVideo) "makes video" else "stills only",
+                            style = if (state.supportsVideo) NTagStyle.Neutral else NTagStyle.Outline,
+                        )
+                    }
+                }
+            }
+
+            // — the prompt —
+
+            SectionKicker("Prompt", Modifier.padding(top = 18.dp, bottom = 6.dp))
+            NTextArea(
+                value = state.prompt,
+                onValueChange = viewModel::setPrompt,
+                minHeight = 84.dp,
+                placeholder = "What should happen, and how the camera should move.",
+            )
+            NHelp(
+                "Motion is described here as much as subject — \"slowly pans left\", " +
+                    "\"leaves drifting down\" — because nothing else on this screen says it.",
+                Modifier.padding(top = 5.dp),
+            )
+
+            // — the two ends —
+
+            SectionKicker("Frames you supply", Modifier.padding(top = 18.dp, bottom = 6.dp))
+            NHelp(
+                "Both optional. With a first frame the clip starts from your picture; with " +
+                    "both, the model travels from one to the other.",
+                Modifier.padding(bottom = 8.dp),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                FrameSlot(
+                    label = "First frame",
+                    uri = state.firstFrameUri,
+                    modifier = Modifier.weight(1f),
+                    onPick = {
+                        pickFirst.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                        )
+                    },
+                    onClear = { viewModel.setFirstFrame(null) },
+                )
+                FrameSlot(
+                    label = "Last frame",
+                    uri = state.lastFrameUri,
+                    modifier = Modifier.weight(1f),
+                    onPick = {
+                        pickLast.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                        )
+                    },
+                    onClear = { viewModel.setLastFrame(null) },
+                )
+            }
+
+            // — length —
+
+            SectionKicker("Length", Modifier.padding(top = 18.dp, bottom = 6.dp))
+            LabelledSlider(
+                label = "Frames",
+                value = "${state.frames}",
+                position = state.frames.toFloat(),
+                range = 1f..129f,
+                onChange = { viewModel.setFrames(it.toInt()) },
+            )
+            LabelledSlider(
+                label = "Frames per second",
+                value = "${state.fps}",
+                position = state.fps.toFloat(),
+                range = 1f..60f,
+                onChange = { viewModel.setFps(it.toInt()) },
+            )
+            // The number that decides whether the run is possible. It grows with
+            // three things at once, which is why it is stated rather than left
+            // to be worked out from the three sliders above.
+            NHelp(
+                "${String.format("%.1f", state.requestedSeconds)} s · about " +
+                    "${state.estimatedFrameMegabytes} MB of frames held while it finishes",
+                Modifier.padding(top = 4.dp),
+                color = if (state.estimatedFrameMegabytes > 1500) {
+                    NocturneColors.Accent300
+                } else {
+                    NocturneColors.TextMuted
+                },
+            )
+
+            // — go —
+
+            val busy = state.generating || state.loadingModel
+            NButton(
+                when {
+                    state.cancelling -> "Stopping…"
+                    busy -> "Cancel"
+                    else -> "Generate clip"
+                },
+                onClick = { if (busy) viewModel.cancel() else viewModel.generate() },
+                style = if (busy) NButtonStyle.Secondary else NButtonStyle.Primary,
+                enabled = state.model != null && (busy || state.runtimeInstalled),
+                block = true,
+                modifier = Modifier.padding(top = 14.dp),
+            )
+        }
+    }
+
+    if (settingsOpen) {
+        VideoSettingsSheet(
+            state = state,
+            viewModel = viewModel,
+            onOpenAdvanced = { settingsOpen = false; onOpenAdvanced() },
+            onClose = { settingsOpen = false },
+        )
+    }
+}
+
+/**
+ * The clip, one frame at a time.
+ *
+ * Frames live on disk and are loaded as they are shown — a 129-frame clip at
+ * 512² is about 400 MB decoded, and exactly one of them is ever on screen.
+ */
+@Composable
+private fun ClipStage(state: VideoState, viewModel: VideoViewModel) {
+    val clip = state.clip
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .aspectRatio(1f)
+            .clip(Radius.Lg)
+            .background(NocturneColors.Surface)
+            .ring(NocturneColors.Divider, Radius.Lg),
+        contentAlignment = Alignment.Center,
+    ) {
+        when {
+            clip != null && state.currentFramePath != null ->
+                AsyncImage(
+                    model = state.currentFramePath,
+                    contentDescription = "Frame ${state.frameIndex + 1}",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit,
+                )
+
+            state.previewBitmap != null ->
+                androidx.compose.foundation.Image(
+                    bitmap = state.previewBitmap.asImageBitmap(),
+                    contentDescription = "Preview",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit,
+                )
+
+            else -> Text(
+                if (state.generating) state.phase.label else "No clip yet",
+                style = NocturneType.Help,
+                color = NocturneColors.TextMuted,
+            )
+        }
+    }
+
+    if (state.generating && state.progressSteps > 0) {
+        NProgressBar(
+            fraction = state.step / state.progressSteps.toFloat(),
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        Text(
+            "${state.phase.label} · ${state.step}/${state.progressSteps}" +
+                if (state.secondsPerStep > 0f) " · ${String.format("%.1f", state.secondsPerStep)} s/step" else "",
+            style = NocturneType.MonoXs,
+            color = NocturneColors.TextMuted,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+    }
+
+    if (clip != null) {
+        Row(
+            Modifier.fillMaxWidth().padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            NButton(
+                if (state.playing) "Pause" else "Play",
+                onClick = { if (state.playing) viewModel.pause() else viewModel.play() },
+                style = NButtonStyle.Secondary,
+            )
+            Text(
+                "${state.frameIndex + 1}/${clip.frames.size}",
+                style = NocturneType.MonoXs,
+                color = NocturneColors.TextMuted,
+            )
+            NSlider(
+                value = state.frameIndex.toFloat(),
+                onValueChange = { viewModel.seekTo(it.toInt()) },
+                valueRange = 0f..(clip.frames.size - 1).coerceAtLeast(1).toFloat(),
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Row(
+            Modifier.padding(top = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            NTag("${clip.width}×${clip.height}", style = NTagStyle.Outline)
+            NTag("${clip.fps} fps", style = NTagStyle.Outline)
+            NTag("${String.format("%.1f", clip.durationSeconds)} s", style = NTagStyle.Outline)
+            // Only LTX-AV returns one, so its presence is worth saying.
+            if (clip.audioPath != null) NTag("with audio", style = NTagStyle.Neutral)
+        }
+        Text(
+            "Discard clip",
+            style = NocturneType.Help,
+            color = NocturneColors.Accent,
+            modifier = Modifier.padding(top = 6.dp).nClickableFlat { viewModel.discard() },
+        )
+    }
+}
+
+@Composable
+private fun FrameSlot(
+    label: String,
+    uri: String?,
+    modifier: Modifier = Modifier,
+    onPick: () -> Unit,
+    onClear: () -> Unit,
+) {
+    Column(modifier) {
+        Text(label, style = NocturneType.Help, color = NocturneColors.TextMuted)
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .padding(top = 4.dp)
+                .clip(Radius.Sm)
+                .background(NocturneColors.Surface)
+                .ring(NocturneColors.Divider, Radius.Sm)
+                .nClickableFlat { onPick() },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (uri == null) {
+                Text("Choose…", style = NocturneType.Help, color = NocturneColors.TextMuted)
+            } else {
+                AsyncImage(
+                    model = uri,
+                    contentDescription = label,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            }
+        }
+        if (uri != null) {
+            Text(
+                "Remove",
+                style = NocturneType.Help,
+                color = NocturneColors.Accent,
+                modifier = Modifier.padding(top = 3.dp).nClickableFlat { onClear() },
+            )
+        }
+    }
+}
+
+@Composable
+private fun LabelledSlider(
+    label: String,
+    value: String,
+    position: Float,
+    range: ClosedFloatingPointRange<Float>,
+    onChange: (Float) -> Unit,
+    steps: Int = 0,
+) {
+    Column(Modifier.padding(top = 8.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(label, style = NocturneType.Row)
+            Text(value, style = NocturneType.MonoValue, color = NocturneColors.Accent300)
+        }
+        NSlider(
+            value = position,
+            onValueChange = onChange,
+            valueRange = range,
+            steps = steps,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+    }
+}
+
+/** Seed, and the components this clip will be built from. */
+@Composable
+private fun VideoSettingsSheet(
+    state: VideoState,
+    viewModel: VideoViewModel,
+    onOpenAdvanced: () -> Unit,
+    onClose: () -> Unit,
+) {
+    ai.ondevice.ui.components.NBottomSheet(onDismiss = onClose, title = "Video settings") {
+        // `weight(1f)` is load-bearing, not spacing. A Column measures its
+        // children with unbounded height, and a scrolling child given infinite
+        // height is a hard crash in Compose rather than a layout oddity — the
+        // weight is what bounds it to the sheet.
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+            // Size, steps, CFG and tiling live here rather than on the main
+            // screen, the way the Image screen keeps them: the screen itself is
+            // the prompt, the two end frames and the result, and these are what
+            // the run is made of rather than what it is.
+            SectionKicker("Sampling", Modifier.padding(bottom = 6.dp))
+            LabelledSlider(
+                label = "Size",
+                value = "${state.width}²",
+                position = state.width.toFloat(),
+                range = 256f..768f,
+                steps = 7,
+                onChange = { viewModel.setSize((it / 64).toInt() * 64) },
+            )
+            LabelledSlider(
+                label = "Steps",
+                value = "${state.steps}",
+                position = state.steps.toFloat(),
+                range = 1f..60f,
+                onChange = { viewModel.setSteps(it.toInt()) },
+            )
+            LabelledSlider(
+                label = "CFG scale",
+                value = String.format("%.1f", state.cfgScale),
+                position = state.cfgScale,
+                range = 1f..15f,
+                onChange = viewModel::setCfg,
+            )
+            Row(
+                Modifier.fillMaxWidth().padding(top = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Tiled decode", style = NocturneType.Row)
+                    NHelp("Decodes in tiles. On a clip this is usually what makes it fit at all.")
+                }
+                NSwitch(checked = state.vaeTiling, onCheckedChange = viewModel::setVaeTiling)
+            }
+
+            SectionKicker("Seed", Modifier.padding(top = 18.dp, bottom = 6.dp))
+            NInput(
+                value = if (state.seed < 0) "" else state.seed.toString(),
+                onValueChange = { viewModel.setSeed(it.toLongOrNull() ?: -1L) },
+                placeholder = "Random each run",
+                keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
+            )
+            state.usedSeed?.let {
+                NHelp("Last run used $it.", Modifier.padding(top = 4.dp))
+            }
+
+            AttachmentsPicker(
+                available = state.availableAttachments,
+                armedCount = state.attachments.size,
+                missing = state.missingComponents,
+                unchosenRoles = emptyList(),
+                architectureLabel = state.recognisedAs ?: state.model?.architecture,
+                onToggle = viewModel::toggleAttachment,
+                onWeight = viewModel::setAttachmentWeight,
+                // A ControlNet on a clip is weighted by VACE rather than by
+                // `control_strength` — the same slot, a different dial.
+                strengthFor = { role ->
+                    if (role == ai.ondevice.core.AttachmentRole.CONTROLNET) {
+                        state.controlStrength
+                    } else {
+                        null
+                    }
+                },
+                onStrength = { _, value -> viewModel.setControlStrength(value) },
+                emptyHelp = "A motion module is what turns an SD 1.5 checkpoint into one that " +
+                    "animates. Wan, Hunyuan and LTX-AV need their encoder and decoder instead. " +
+                    "IP-Adapters and the identity adapters are not listed at all: the runtime's " +
+                    "video path has no field for them, so one attached here would cost its " +
+                    "weights and never be read.",
+            )
+
+            // Where the Image screen keeps it too: the sheet is for what this
+            // run is made of, and the full set is one step further in.
+            NButton(
+                "All parameters",
+                onClick = onOpenAdvanced,
+                style = NButtonStyle.Ghost,
+                block = true,
+                modifier = Modifier.padding(top = 18.dp),
+            )
+            NHelp(
+                "Every setting the runtime reports, including the hi-res stage and Wan 2.2's " +
+                    "second denoiser.",
+                Modifier.padding(top = 4.dp),
+            )
+        }
+    }
+}

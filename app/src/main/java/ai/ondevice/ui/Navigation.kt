@@ -28,6 +28,7 @@ import ai.ondevice.ui.screens.RuntimesScreen
 import ai.ondevice.ui.screens.SamplerChainScreen
 import ai.ondevice.ui.screens.SettingsScreen
 import ai.ondevice.ui.screens.ToolsScreen
+import ai.ondevice.ui.screens.VideoScreen
 import ai.ondevice.ui.screens.VoiceScreen
 import ai.ondevice.ui.theme.NIcons
 
@@ -54,6 +55,16 @@ object Routes {
     const val PROMPT_INSPECTOR = "chat/prompt"
     const val MASK_EDITOR = "image/mask"
 
+    /**
+     * Video, pushed from Image rather than given a tab of its own.
+     *
+     * It runs on the same runtime, the same checkpoints and the same context —
+     * a clip generated after a still does not reload — so it belongs where
+     * those models already live. The bar is also being kept at five for
+     * Workflow, which is the next thing that wants a tab.
+     */
+    const val VIDEO = "image/video"
+
     /** One library item, opened. */
     const val LIBRARY_ITEM = "library/item/{kind}/{id}"
 
@@ -67,7 +78,14 @@ object Routes {
     fun modelDetail(modelId: String) = "models/detail/${android.net.Uri.encode(modelId)}"
 }
 
-/** Three things this device makes, then the two that describe it: what it has made, and what it can make things with. */
+/**
+ * Three things this device makes, then the two that describe it: what it has
+ * made, and what it can make things with.
+ *
+ * Video is deliberately not here. It shares the diffusion runtime, the
+ * checkpoints and the loaded context with Image, so it sits behind Image where
+ * those models already live — and the sixth slot is being held for Workflow.
+ */
 val BottomDestinations = listOf(
     NavDestination("Chat", NIcons.Chat, Routes.CHAT),
     NavDestination("Image", NIcons.Image, Routes.IMAGE),
@@ -114,6 +132,18 @@ fun OnDeviceApp(
                 onNavigate = { navController.navigateToRoot(it) },
                 onOpenMask = { navController.navigate(Routes.MASK_EDITOR) },
                 onOpenRuntimes = { navController.navigate(Routes.RUNTIMES) },
+                onAddModel = { navController.navigate(Routes.ADD_MODEL) },
+                onOpenAdvanced = {
+                    navController.navigate(
+                        Routes.parameters(ai.ondevice.engine.RuntimeRegistry.STABLE_DIFFUSION),
+                    )
+                },
+                onOpenVideo = { navController.navigate(Routes.VIDEO) },
+            )
+        }
+        composable(Routes.VIDEO) {
+            VideoScreen(
+                onBack = { navController.popBackStack() },
                 onAddModel = { navController.navigate(Routes.ADD_MODEL) },
                 onOpenAdvanced = {
                     navController.navigate(

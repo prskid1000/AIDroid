@@ -12,6 +12,16 @@ package ai.ondevice.core
  * The order is the order they appear in.
  */
 enum class RoleFamily(val label: String) {
+    /**
+     * A second set of denoiser weights, beside the checkpoint's own.
+     *
+     * Its own family because it is neither an encoder nor a decoder nor a
+     * style: these files are the model, published in more than one piece, and
+     * the run is wrong rather than merely plainer without them. That also keeps
+     * them out of `ADOPTABLE_FAMILIES` — a denoiser is never plumbing to be
+     * filled in on the user's behalf.
+     */
+    COMPANION_DENOISER("Companion denoiser"),
     PROMPT_ENCODER("Prompt encoder"),
     DECODER("Decoder"),
     STYLE_AND_CONTROL("Style & control"),
@@ -64,6 +74,52 @@ enum class AttachmentRole(
      */
     LLM_ENCODER("LLM", "llm", RoleFamily.PROMPT_ENCODER),
 
+    /**
+     * The denoiser a model runs for its unconditional pass.
+     *
+     * Ideogram 4 ships two files of equal size and uses the second wherever
+     * classifier-free guidance needs the un-prompted branch. Upstream takes it
+     * on `--uncond-diffusion-model`; without it the architecture cannot be run
+     * at all, which is a different thing from running plainly.
+     */
+    UNCOND_DIFFUSION("Unconditional denoiser", "uncond_diffusion_model", RoleFamily.COMPANION_DENOISER),
+
+    /**
+     * The denoiser used for the noisy end of the schedule.
+     *
+     * Wan 2.2's I2V and TI2V split the model in two by timestep — high-noise
+     * steps run one set of weights and low-noise steps the other. Both are
+     * required, and each is the full size of a denoiser.
+     */
+    HIGH_NOISE_DIFFUSION("High-noise denoiser", "high_noise_diffusion_model", RoleFamily.COMPANION_DENOISER),
+
+    /**
+     * AnimateDiff's temporal layers, which turn a still model into a video one.
+     *
+     * Not a LoRA: it is a separate module sd.cpp inserts between an SD 1.5
+     * UNet's existing blocks, and it is what makes frames relate to each other
+     * rather than being N unrelated pictures of the same prompt.
+     */
+    MOTION_MODULE("Motion module", "motion_module", RoleFamily.COMPANION_DENOISER),
+
+    /** The decoder for LTX-AV's audio track, which is a separate latent space from its video. */
+    AUDIO_VAE("Audio decoder", "audio_vae", RoleFamily.DECODER),
+
+    /**
+     * The vision tower of an LLM text encoder.
+     *
+     * Distinct from CLIP_VISION, which an IP-Adapter reads through: this one
+     * belongs to the language model, and is what lets an edit model be shown
+     * the picture it is being asked about.
+     */
+    LLM_VISION("LLM vision tower", "llm_vision", RoleFamily.PROMPT_ENCODER),
+
+    /** Keep one person's face across generations, from a few photographs. */
+    PHOTO_MAKER("PhotoMaker", "photo_maker", RoleFamily.STYLE_AND_CONTROL),
+
+    /** The same job as PhotoMaker by a different method, and the two do not combine. */
+    PULID("PuLID", "pulid", RoleFamily.STYLE_AND_CONTROL),
+
     /** Textual-inversion embeddings, loaded from a directory. */
     EMBEDDING("Embedding", "embd_dir", RoleFamily.STYLE_AND_CONTROL, multiple = true),
 
@@ -84,7 +140,24 @@ enum class AttachmentRole(
     VAD("Silero VAD", "vad_model", RoleFamily.STYLE_AND_CONTROL),
     ;
 
-    val isDiffusionAuxiliary: Boolean get() = true
+    /**
+     * Whether stable-diffusion.cpp has anywhere to put this.
+     *
+     * This returned `true` for everything, which made it a property that
+     * answered no question. Three roles here belong to the other runtimes —
+     * llama's `mmproj`, whisper's Silero VAD, Kokoro's voice packs — and the
+     * diffusion parameter screen declared all three as keys it accepts. The
+     * manifest has no diffusion row for any of them, so they rendered under
+     * "not described yet" as empty text boxes on the image screen: three
+     * settings offered to a runtime that has no field for them, which is the
+     * same silent no-op this codebase keeps finding, dressed as a feature.
+     *
+     * They stay in this enum because a file has one role whichever runtime
+     * loads it — that was the point of merging the two role enums. What they
+     * are not is something the diffusion loader can be told about.
+     */
+    val isDiffusionAuxiliary: Boolean
+        get() = this !in setOf(VISION_PROJECTOR, VOICES, VAD)
 
     /** Named by string, not by [AttachmentRole], because an enum entry cannot name a sibling in its own constructor call. */
     data class Requirement(val roleName: String, val because: String)

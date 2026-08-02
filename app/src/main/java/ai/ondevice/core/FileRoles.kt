@@ -72,6 +72,16 @@ object FileRoles {
         "lora" to AttachmentRole.LORA,
         "loras" to AttachmentRole.LORA,
         "embeddings" to AttachmentRole.EMBEDDING,
+        // Kokoro's speaker vectors, which live in `voices/` and are named for
+        // the speaker — `af_alloy.bin`, `bm_george.bin`. The rule for these was
+        // in BY_NAME, matched against the basename, and the word "voices"
+        // appears in no basename: every pack classified as nothing, so the
+        // resolver never offered them and the downloader never fetched them.
+        // Kokoro then installed as a graph with no voices, which
+        // `looksInstalled` correctly reports as not installed — the model was
+        // on the device and unusable, and the screen said "not installed" about
+        // a folder plainly containing it.
+        "voices" to AttachmentRole.VOICES,
         // The denoiser is the model itself, not something attached to it, and
         // saying so stops the folder rules above matching a repo *named* for a
         // component that also ships the model.
@@ -82,16 +92,54 @@ object FileRoles {
 
     /** Tokens that name one component and nothing else. */
     private val BY_NAME: List<Pair<List<String>, AttachmentRole>> = listOf(
+        // The companion denoisers, first because their files are otherwise
+        // named exactly like the checkpoint they sit beside —
+        // `ideogram4_uncond-Q4_0.gguf` differs from `ideogram4-Q4_0.gguf` by one
+        // token, and the two are the same size.
+        listOf("uncond") to AttachmentRole.UNCOND_DIFFUSION,
+        listOf("high_noise", "high-noise", "highnoise") to AttachmentRole.HIGH_NOISE_DIFFUSION,
+        // AnimateDiff names its modules `mm_sd_v15_v2` and `v3_sd15_mm`, so the
+        // token sits at either end. A bare `mm` anywhere would catch far too
+        // much, which is why these are anchored rather than contained.
+        listOf("motion_module", "motion-module", "mm_sd", "_mm.", "animatediff") to
+            AttachmentRole.MOTION_MODULE,
         listOf("mmproj") to AttachmentRole.VISION_PROJECTOR,
+        listOf("photomaker", "photo_maker", "photo-maker") to AttachmentRole.PHOTO_MAKER,
+        listOf("pulid") to AttachmentRole.PULID,
         listOf("ip-adapter", "ip_adapter", "ipadapter") to AttachmentRole.IP_ADAPTER,
+        // Before CLIP-L, because `clip_vision_l` names both and is the vision
+        // tower. The `image_encoder` folder catches the diffusers layout; these
+        // catch the flat one, where h94's own file is `clip_vision_h`.
+        listOf("clip_vision", "clip-vision", "clip_vit_h", "clip_vit_bigg_vision") to
+            AttachmentRole.CLIP_VISION,
         listOf("clip_l", "clip-l", "clip_vit_l") to AttachmentRole.CLIP_L,
         listOf("clip_g", "clip-g", "clip_vit_bigg") to AttachmentRole.CLIP_G,
         listOf("t5xxl", "t5-xxl", "t5_xxl") to AttachmentRole.T5XXL,
         listOf("esrgan", "upscal") to AttachmentRole.UPSCALER,
         listOf("silero", "_vad", "vad_") to AttachmentRole.VAD,
         listOf("voices") to AttachmentRole.VOICES,
+        // Before the bare `vae`, which would otherwise take it: LTX-AV's audio
+        // decoder is a second VAE, and handing it to the video one decodes
+        // latents it has never seen.
+        listOf("audio_vae", "audio-vae", "vae_audio") to AttachmentRole.AUDIO_VAE,
         listOf("vae") to AttachmentRole.VAE,
     )
+
+    /**
+     * A folder that narrows the answer without giving it.
+     *
+     * `text_encoders/` — plural, and the layout every Comfy-Org repackage uses
+     * — says only that what is inside conditions the prompt. Which encoder it
+     * is comes from the filename, and the strong rules above already answer for
+     * CLIP-L, CLIP-G and T5. Whatever is left in that folder is the language
+     * model: `qwen3vl_4b_fp8_scaled`, `ovis_2.5`, `umt5_xxl`.
+     *
+     * It is consulted after the filename rather than with the other folders
+     * because it is the weaker signal of the two — and because the singular
+     * `text_encoder/` above means CLIP-L specifically, in the diffusers layout,
+     * which is a different claim.
+     */
+    private const val GENERIC_ENCODER_FOLDER = "text_encoders"
 
     /**
      * @param path the repo-relative path, folders and all.
@@ -122,8 +170,30 @@ object FileRoles {
         if (name.contains("lora") || name.contains("lycoris") || name.contains("locon")) {
             return AttachmentRole.LORA
         }
+        // 2a. A vision tower inside `text_encoders/` belongs to the diffusion
+        //     model's language encoder, not to a chat model. It is the same
+        //     kind of file as llama's `mmproj` — which is exactly the problem,
+        //     and the folder is the only thing that tells them apart.
+        if (folders.any { it == GENERIC_ENCODER_FOLDER } &&
+            (name.contains("mmproj") || name.contains("vision"))
+        ) {
+            return AttachmentRole.LLM_VISION
+        }
+        if (name.contains("llm_vision") || name.contains("llm-vision")) {
+            return AttachmentRole.LLM_VISION
+        }
+
         BY_NAME.firstOrNull { (tokens, _) -> tokens.any { name.contains(it) } }
             ?.let { (_, role) -> return role }
+
+        // 2b. Inside `text_encoders/`, anything the tokens above did not name is
+        //     the language model. Krea 2's `qwen3vl_4b_fp8_scaled` and Ovis'
+        //     `ovis_2.5` are both this, and both classified as nothing at all —
+        //     so the encoder each of them cannot run without was invisible to
+        //     the resolver and never offered as a companion.
+        if (folders.any { it == GENERIC_ENCODER_FOLDER }) {
+            return AttachmentRole.LLM_ENCODER
+        }
 
         // 3. The weak token, and the repo's own word on it. `refcontrol_depth`
         //    is a LoRA in a repo tagged `lora`; `control_v11p_canny` is a

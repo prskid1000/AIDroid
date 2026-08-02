@@ -224,6 +224,29 @@ interface GeneratedImageDao {
 }
 
 @Dao
+interface GeneratedClipDao {
+    @Query("SELECT * FROM generated_clips ORDER BY createdAt DESC")
+    fun observeAll(): Flow<List<GeneratedClipEntity>>
+
+    @Query("SELECT * FROM generated_clips WHERE id = :id")
+    suspend fun get(id: String): GeneratedClipEntity?
+
+    @Query("SELECT COUNT(*) FROM generated_clips")
+    fun observeCount(): Flow<Int>
+
+    @Upsert
+    suspend fun upsert(clip: GeneratedClipEntity)
+
+    /**
+     * Removes the row only. The frames are a directory the caller has to delete
+     * itself — a DAO that reached into the filesystem would be a DAO that could
+     * delete a folder a failed transaction still refers to.
+     */
+    @Query("DELETE FROM generated_clips WHERE id = :id")
+    suspend fun deleteById(id: String)
+}
+
+@Dao
 interface TranscriptDao {
     @Query("SELECT * FROM transcripts ORDER BY createdAt DESC")
     fun observeAll(): Flow<List<TranscriptEntity>>

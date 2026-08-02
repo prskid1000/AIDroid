@@ -180,6 +180,17 @@ class OmniVoiceEngine {
     fun looksInstalled(directory: File): Boolean =
         REQUIRED.all { find(directory, it) != null }
 
+    /**
+     * Any one of OmniVoice's graphs is here, so this folder is its.
+     *
+     * Weaker than [looksInstalled] on purpose: it answers "whose folder is
+     * this", not "can this run". Kokoro's half-installed check accepts any
+     * folder holding an `.onnx` and no voice packs, which a partial OmniVoice
+     * also satisfies — this is what keeps the two from claiming each other.
+     */
+    fun partlyInstalled(directory: File): Boolean =
+        REQUIRED.any { find(directory, it) != null }
+
     /** Whether a directory also carries the encoders a voice clone needs. */
     fun cloningLooksInstalled(directory: File): Boolean =
         CLONING.all { find(directory, it) != null }

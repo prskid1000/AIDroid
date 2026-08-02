@@ -21,7 +21,7 @@
     "Defaults, ranges and steps below are the description of last resort. Where a runtime",
     "reports its own live default, that value wins — see ParamRepository.specsFor."
   ],
-  "manifestVersion": 10,
+  "manifestVersion": 14,
   "runtimes": {
     "llama.cpp": {
       "params": [
@@ -531,7 +531,7 @@
         {
           "key": "grammar",
           "group": "constraints",
-          "type": "text",
+          "type": "code",
           "default": "",
           "tier": "EXPERT",
           "label": "GBNF grammar",
@@ -1009,13 +1009,24 @@
         {
           "key": "chat_template",
           "group": "chat",
-          "type": "text",
+          "type": "code",
           "default": "",
           "tier": "EXPERT",
           "label": "Chat template",
-          "help": "Read from GGUF metadata by default. Overriding it changes the exact string sent to the tokenizer.",
-          "requiresReload": false,
+          "help": "The Jinja the runtime renders every turn through, read from the GGUF unless you override it here. Editing it is how a model with a broken or missing template gets a working one. Clearing the box gives the model's own back.",
+          "requiresReload": true,
           "cliFlag": "--chat-template"
+        },
+        {
+          "key": "chat_template_kwargs",
+          "group": "chat",
+          "type": "map",
+          "default": {},
+          "tier": "ADVANCED",
+          "label": "Template arguments",
+          "help": "What the chat template is handed besides the messages, as JSON — upstream's --chat-template-kwargs verbatim. This is where a reasoning model's switch lives: { \"enable_thinking\": false } turns Qwen 3.5's thinking off. A model card naming --chat-template-kwargs is naming this box.",
+          "requiresReload": false,
+          "cliFlag": "--chat-template-kwargs"
         }
       ]
     },
@@ -1208,6 +1219,30 @@
           "help": "Break segments at word rather than token boundaries.",
           "requiresReload": false,
           "cliFlag": "-sow"
+        },
+        {
+          "key": "single_segment",
+          "group": "segments",
+          "type": "bool",
+          "default": false,
+          "tier": "EXPERT",
+          "label": "One segment only",
+          "help": "Return the whole window as a single segment instead of splitting it. What live dictation wants, where the window is already short and a split mid-phrase reads as a stutter.",
+          "requiresReload": false,
+          "cliFlag": "-sns"
+        },
+        {
+          "key": "step_ms",
+          "group": "segments",
+          "type": "int",
+          "default": 3000,
+          "min": 500,
+          "max": 30000,
+          "step": 500,
+          "tier": "ADVANCED",
+          "label": "Capture window",
+          "help": "How much audio the recorder hands over at a time. Read by this app rather than by whisper.cpp: shorter feels more live and costs more passes over overlapping audio.",
+          "requiresReload": false
         },
         {
           "key": "word_thold",
@@ -1483,7 +1518,12 @@
           "label": "Batch count",
           "help": "Sequential generations from one prompt.",
           "requiresReload": false,
-          "cliFlag": "-b"
+          "cliFlag": "-b",
+          "appliesTo": {
+            "output": [
+              "image"
+            ]
+          }
         },
         {
           "key": "width",
@@ -1610,20 +1650,23 @@
           "group": "model",
           "type": "enum",
           "values": [
-            "f32",
+            "as-is",
             "f16",
             "q8_0",
+            "q6_K",
+            "q5_K",
             "q5_1",
             "q5_0",
+            "q4_K",
             "q4_1",
             "q4_0",
-            "q3_k",
-            "q2_k"
+            "q3_K",
+            "q2_K"
           ],
-          "default": "f16",
-          "tier": "EXPERT",
+          "default": "as-is",
+          "tier": "ADVANCED",
           "label": "Weight type",
-          "help": "On-the-fly quantisation applied at load.",
+          "help": "Quantise the weights while loading. This is what makes an architecture published only as fp16 usable at all: 6 GB of safetensors reaches memory as roughly 2 GB at q4_0. The conversion happens on the way in, so it costs load time, and lower is coarser. Unmeasured on this device.",
           "requiresReload": true,
           "cliFlag": "--type"
         },
@@ -1651,6 +1694,510 @@
           "help": "Tiled VAE decode. Critical on mobile — a large memory reduction at high resolutions.",
           "requiresReload": false,
           "cliFlag": "--vae-tiling"
+        },
+        {
+          "key": "hires_fix",
+          "group": "postprocess",
+          "type": "bool",
+          "default": false,
+          "tier": "ADVANCED",
+          "label": "Hi-res stage",
+          "help": "Generate small, enlarge, then denoise again at the larger size. Different from the Upscale button, which runs over a finished picture and does not know what it was meant to be. On a clip this is the only coherent way to enlarge — the whole sequence is re-sampled together, so frames stay consistent.",
+          "requiresReload": false,
+          "cliFlag": "--hires-fix"
+        },
+        {
+          "key": "hires_upscaler",
+          "group": "postprocess",
+          "type": "enum",
+          "values": [
+            "latent",
+            "latent_bicubic",
+            "latent_nearest",
+            "latent_antialiased",
+            "lanczos",
+            "nearest",
+            "model"
+          ],
+          "default": "latent",
+          "tier": "EXPERT",
+          "label": "Enlarge with",
+          "help": "How the picture is enlarged before the second pass. The latent modes are cheapest and keep the model's own idea of the image; `model` uses the attached ESRGAN instead, and falls back to latent when none is attached.",
+          "requiresReload": false,
+          "dependsOn": {
+            "key": "hires_fix",
+            "equals": true
+          },
+          "cliFlag": "--hires-upscaler"
+        },
+        {
+          "key": "hires_scale",
+          "group": "postprocess",
+          "type": "float",
+          "default": 1.5,
+          "min": 1.0,
+          "max": 4.0,
+          "step": 0.25,
+          "tier": "ADVANCED",
+          "label": "Hi-res scale",
+          "help": "How much larger the second pass runs. Cost grows with the square of this, and on a clip with the frame count on top.",
+          "requiresReload": false,
+          "dependsOn": {
+            "key": "hires_fix",
+            "equals": true
+          },
+          "cliFlag": "--hires-scale"
+        },
+        {
+          "key": "hires_steps",
+          "group": "postprocess",
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 60,
+          "step": 1,
+          "tier": "EXPERT",
+          "label": "Hi-res steps",
+          "help": "Steps for the second pass. 0 uses the same count as the first.",
+          "requiresReload": false,
+          "dependsOn": {
+            "key": "hires_fix",
+            "equals": true
+          },
+          "cliFlag": "--hires-steps"
+        },
+        {
+          "key": "hires_denoise",
+          "group": "postprocess",
+          "type": "float",
+          "default": 0.5,
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.05,
+          "tier": "ADVANCED",
+          "label": "Hi-res denoise",
+          "help": "How far the second pass travels from the enlarged image. Low keeps the composition and sharpens; high reinvents detail and can change the picture.",
+          "requiresReload": false,
+          "dependsOn": {
+            "key": "hires_fix",
+            "equals": true
+          },
+          "cliFlag": "--hires-denoising-strength"
+        },
+        {
+          "key": "video_frames",
+          "group": "video",
+          "type": "int",
+          "default": 16,
+          "min": 1,
+          "max": 129,
+          "step": 1,
+          "tier": "BASIC",
+          "label": "Frames",
+          "help": "How many frames to make. Cost is close to linear in this and so is memory — a clip is every frame held at once before any of them reach disk.",
+          "requiresReload": false,
+          "cliFlag": "--video-frames",
+          "appliesTo": {
+            "output": [
+              "video"
+            ]
+          }
+        },
+        {
+          "key": "fps",
+          "group": "video",
+          "type": "int",
+          "default": 16,
+          "min": 1,
+          "max": 60,
+          "step": 1,
+          "tier": "BASIC",
+          "label": "Frames per second",
+          "help": "Playback rate, and for some architectures a conditioning signal rather than only a label — it changes how much motion the model puts between frames.",
+          "requiresReload": false,
+          "cliFlag": "--fps",
+          "appliesTo": {
+            "output": [
+              "video"
+            ]
+          }
+        },
+        {
+          "key": "vace_strength",
+          "group": "video",
+          "type": "float",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 2.0,
+          "step": 0.05,
+          "tier": "ADVANCED",
+          "label": "VACE strength",
+          "help": "How strongly the control frames hold the clip. Inert without them.",
+          "requiresReload": false,
+          "cliFlag": "--vace-strength",
+          "dependsOn": {
+            "key": "control_net",
+            "notEquals": ""
+          },
+          "appliesTo": {
+            "output": [
+              "video"
+            ]
+          }
+        },
+        {
+          "key": "moe_boundary",
+          "group": "video",
+          "type": "float",
+          "default": 0.875,
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.005,
+          "tier": "EXPERT",
+          "label": "Expert handover",
+          "help": "Where Wan 2.2 stops using its high-noise denoiser and starts using the low-noise one. Only that architecture has two.",
+          "requiresReload": false,
+          "cliFlag": "--moe-boundary",
+          "appliesTo": {
+            "output": [
+              "video"
+            ]
+          }
+        },
+        {
+          "key": "high_noise_steps",
+          "group": "video",
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 60,
+          "step": 1,
+          "tier": "EXPERT",
+          "label": "High-noise steps",
+          "help": "Steps for the high-noise expert. 0 gives it the same count as the other one, which is what a single-denoiser architecture wants and what most people should leave it at.",
+          "requiresReload": false,
+          "cliFlag": "--high-noise-steps",
+          "appliesTo": {
+            "output": [
+              "video"
+            ]
+          }
+        },
+        {
+          "key": "max_vram",
+          "group": "model",
+          "type": "string",
+          "default": "",
+          "tier": "EXPERT",
+          "label": "Memory budget",
+          "help": "A ceiling in GiB, e.g. 4. Above it, weights stay on disk and are fetched as needed rather than the load failing. Blank means no ceiling; -1 lets the runtime pick one. This is the setting for a model larger than the phone.",
+          "requiresReload": true,
+          "cliFlag": "--max-vram"
+        },
+        {
+          "key": "stream_layers",
+          "group": "model",
+          "type": "bool",
+          "default": false,
+          "tier": "EXPERT",
+          "label": "Stream layers",
+          "help": "Page layers in and out against the memory budget, keeping the ones about to be used. No effect unless a budget is set. Trades speed for fitting at all.",
+          "requiresReload": true,
+          "dependsOn": {
+            "key": "max_vram",
+            "notEquals": ""
+          },
+          "cliFlag": "--stream-layers"
+        },
+        {
+          "key": "eager_load",
+          "group": "model",
+          "type": "bool",
+          "default": false,
+          "tier": "EXPERT",
+          "label": "Load everything up front",
+          "help": "Pull all weights into memory while loading instead of on first use. Slower to start, steadier afterwards — the opposite trade to streaming.",
+          "requiresReload": true,
+          "cliFlag": "--eager-load"
+        },
+        {
+          "key": "auto_fit",
+          "group": "model",
+          "type": "bool",
+          "default": false,
+          "tier": "EXPERT",
+          "label": "Fit automatically",
+          "help": "Let the runtime choose the memory budget and the split rather than setting one.",
+          "requiresReload": true,
+          "cliFlag": "--auto-fit"
+        },
+        {
+          "key": "tensor_type_rules",
+          "group": "model",
+          "type": "string",
+          "default": "",
+          "tier": "EXPERT",
+          "label": "Per-tensor weight type",
+          "help": "Precision by tensor-name pattern, e.g. ^vae\\.=f16,model\\.=q8_0 — what Weight type cannot say. Worth it because the decoder is where quantisation shows as blotching, and it is a small part of the size.",
+          "requiresReload": true,
+          "cliFlag": "--tensor-type-rules"
+        },
+        {
+          "key": "enable_mmap",
+          "group": "model",
+          "type": "bool",
+          "default": true,
+          "tier": "EXPERT",
+          "label": "Memory-map weights",
+          "help": "Read weights straight from the file rather than copying them in. On by default and rarely worth changing.",
+          "requiresReload": true,
+          "cliFlag": "--mmap"
+        },
+        {
+          "key": "flash_attn",
+          "group": "model",
+          "type": "bool",
+          "default": true,
+          "tier": "ADVANCED",
+          "label": "Flash attention",
+          "help": "Attention without building the N-by-N matrix. Saves memory as much as time, which is what binds here. On by default and not yet measured on a phone.",
+          "requiresReload": true,
+          "cliFlag": "--flash-attn"
+        },
+        {
+          "key": "diffusion_flash_attn",
+          "group": "model",
+          "type": "bool",
+          "default": false,
+          "tier": "EXPERT",
+          "label": "Flash attention (denoiser only)",
+          "help": "The same, restricted to the denoiser. Upstream's video examples all pass this one.",
+          "requiresReload": true,
+          "cliFlag": "--diffusion-fa"
+        },
+        {
+          "key": "diffusion_conv_direct",
+          "group": "model",
+          "type": "bool",
+          "default": false,
+          "tier": "EXPERT",
+          "label": "Direct convolution (denoiser)",
+          "help": "Convolve without the im2col expansion. Less memory, and a different speed on every device.",
+          "requiresReload": true,
+          "cliFlag": "--diffusion-conv-direct"
+        },
+        {
+          "key": "vae_conv_direct",
+          "group": "decoder",
+          "type": "bool",
+          "default": false,
+          "tier": "EXPERT",
+          "label": "Direct convolution (decoder)",
+          "help": "The same for the decode pass, where the tensors are largest.",
+          "requiresReload": true,
+          "cliFlag": "--vae-conv-direct"
+        },
+        {
+          "key": "force_sdxl_vae_conv_scale",
+          "group": "decoder",
+          "type": "bool",
+          "default": false,
+          "tier": "EXPERT",
+          "label": "Force SDXL decoder scaling",
+          "help": "A workaround for SDXL decoders that overflow in fp16.",
+          "requiresReload": true,
+          "cliFlag": "--force-sdxl-vae-conv-scale"
+        },
+        {
+          "key": "vae_format",
+          "group": "decoder",
+          "type": "enum",
+          "values": [
+            "auto",
+            "flux",
+            "sd3",
+            "flux2",
+            "wan"
+          ],
+          "default": "auto",
+          "tier": "EXPERT",
+          "label": "Decoder layout",
+          "help": "Which latent layout the attached decoder is. Auto reads it from the file and is right nearly always; set it when a decoder loads and the picture comes out as noise.",
+          "requiresReload": true,
+          "cliFlag": "--vae-format"
+        },
+        {
+          "key": "prediction",
+          "group": "sampling",
+          "type": "enum",
+          "values": [
+            "eps",
+            "v",
+            "edm_v",
+            "sd3_flow",
+            "flux_flow",
+            "flow"
+          ],
+          "default": "eps",
+          "tier": "EXPERT",
+          "label": "Prediction type",
+          "help": "What the denoiser is trained to predict. Read from the checkpoint; override only for a fine-tune that mislabels itself.",
+          "requiresReload": true,
+          "cliFlag": "--prediction"
+        },
+        {
+          "key": "rng_type",
+          "group": "sampling",
+          "type": "enum",
+          "values": [
+            "std_default",
+            "cuda",
+            "cpu"
+          ],
+          "default": "cuda",
+          "tier": "EXPERT",
+          "label": "Noise source",
+          "help": "Which generator draws the initial noise. This decides what a seed means — the same seed gives different pictures under different sources, and 'cuda' is what reproduces a seed shared from a desktop UI.",
+          "requiresReload": true,
+          "cliFlag": "--rng"
+        },
+        {
+          "key": "sampler_rng_type",
+          "group": "sampling",
+          "type": "enum",
+          "values": [
+            "std_default",
+            "cuda",
+            "cpu"
+          ],
+          "default": "cuda",
+          "tier": "EXPERT",
+          "label": "Sampler noise source",
+          "help": "The same, for the noise added between steps by the ancestral and SDE samplers. Only those samplers read it.",
+          "requiresReload": true,
+          "cliFlag": "--sampler-rng"
+        },
+        {
+          "key": "lora_apply_mode",
+          "group": "lora",
+          "type": "enum",
+          "values": [
+            "auto",
+            "immediately",
+            "at_runtime"
+          ],
+          "default": "auto",
+          "tier": "EXPERT",
+          "label": "How LoRAs are applied",
+          "help": "Folded into the weights at load, or added during the run. Folding is faster per step; applying at runtime lets a strength change without a reload.",
+          "requiresReload": true,
+          "cliFlag": "--lora-apply-mode"
+        },
+        {
+          "key": "uncond_diffusion_model",
+          "group": "model",
+          "type": "path",
+          "default": "",
+          "tier": "ADVANCED",
+          "label": "Unconditional denoiser",
+          "help": "A second denoiser used for the un-prompted branch of guidance. Ideogram 4 ships one the same size as the model and cannot run without it.",
+          "requiresReload": true,
+          "cliFlag": "--uncond-diffusion-model"
+        },
+        {
+          "key": "high_noise_diffusion_model",
+          "group": "model",
+          "type": "path",
+          "default": "",
+          "tier": "ADVANCED",
+          "label": "High-noise denoiser",
+          "help": "Wan 2.2 splits itself by timestep: one set of weights for the noisy end of the schedule and another for the rest. Both are required, and each is a full denoiser.",
+          "requiresReload": true,
+          "cliFlag": "--high-noise-diffusion-model",
+          "appliesTo": {
+            "output": [
+              "video"
+            ]
+          }
+        },
+        {
+          "key": "motion_module",
+          "group": "model",
+          "type": "path",
+          "default": "",
+          "tier": "ADVANCED",
+          "label": "Motion module",
+          "help": "AnimateDiff's temporal layers, inserted between an SD 1.5 UNet's blocks. What makes frames relate to one another instead of being unrelated pictures of the same prompt.",
+          "requiresReload": true,
+          "cliFlag": "--motion-module",
+          "appliesTo": {
+            "arch": [
+              "sd1",
+              "sd2"
+            ],
+            "output": [
+              "video"
+            ]
+          }
+        },
+        {
+          "key": "audio_vae",
+          "group": "decoder",
+          "type": "path",
+          "default": "",
+          "tier": "ADVANCED",
+          "label": "Audio decoder",
+          "help": "LTX-AV's audio track has its own latent space and its own decoder.",
+          "requiresReload": true,
+          "cliFlag": "--audio-vae",
+          "appliesTo": {
+            "output": [
+              "video"
+            ]
+          }
+        },
+        {
+          "key": "llm_vision",
+          "group": "encoder",
+          "type": "path",
+          "default": "",
+          "tier": "ADVANCED",
+          "label": "LLM vision tower",
+          "help": "The vision half of a language-model text encoder — usually an mmproj beside it. Not the CLIP-vision an IP-Adapter reads: this is what lets an edit model see the picture it is being asked about.",
+          "requiresReload": true,
+          "cliFlag": "--llm-vision"
+        },
+        {
+          "key": "photo_maker",
+          "group": "ipadapter",
+          "type": "path",
+          "default": "",
+          "tier": "ADVANCED",
+          "label": "PhotoMaker",
+          "help": "Hold one person's face across generations, from a few photographs of them.",
+          "requiresReload": true,
+          "cliFlag": "--photo-maker",
+          "appliesTo": {
+            "output": [
+              "image"
+            ]
+          }
+        },
+        {
+          "key": "pulid",
+          "group": "ipadapter",
+          "type": "path",
+          "default": "",
+          "tier": "ADVANCED",
+          "label": "PuLID",
+          "help": "The same job as PhotoMaker by another method. They do not combine — pick one.",
+          "requiresReload": true,
+          "cliFlag": "--pulid",
+          "appliesTo": {
+            "output": [
+              "image"
+            ]
+          }
         },
         {
           "key": "clip_l",
@@ -1786,7 +2333,28 @@
           "label": "ControlNet strength",
           "help": "How strongly the control image constrains the result.",
           "requiresReload": false,
-          "cliFlag": "--control-strength"
+          "cliFlag": "--control-strength",
+          "dependsOn": {
+            "key": "control_net",
+            "notEquals": ""
+          },
+          "appliesTo": {
+            "arch": [
+              "sd1",
+              "sd1_inpaint",
+              "sd1_pix2pix",
+              "sd1_tiny_unet",
+              "sd2",
+              "sd2_inpaint",
+              "sd2_tiny_unet",
+              "sdxl",
+              "sdxl_inpaint",
+              "sdxl_pix2pix",
+              "sdxl_ssd1b",
+              "sdxl_vega",
+              "svd"
+            ]
+          }
         },
         {
           "key": "ip_adapter",
@@ -1808,6 +2376,9 @@
               "sdxl_pix2pix",
               "sdxl_ssd1b",
               "sdxl_vega"
+            ],
+            "output": [
+              "image"
             ]
           }
         },
@@ -1836,6 +2407,9 @@
               "sdxl_pix2pix",
               "sdxl_ssd1b",
               "sdxl_vega"
+            ],
+            "output": [
+              "image"
             ]
           }
         },
@@ -1860,6 +2434,9 @@
               "sdxl_pix2pix",
               "sdxl_ssd1b",
               "sdxl_vega"
+            ],
+            "output": [
+              "image"
             ]
           }
         },

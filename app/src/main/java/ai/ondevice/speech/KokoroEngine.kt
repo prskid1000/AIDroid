@@ -394,6 +394,18 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
     fun looksInstalled(directory: File): Boolean =
         findModel(directory) != null && voicePacks(directory).isNotEmpty()
 
+    /**
+     * The graph is here and not one speaker vector is.
+     *
+     * Half-installed, which [looksInstalled] cannot distinguish from absent
+     * because it needs both — and the two want opposite advice. This state was
+     * reachable for as long as the resolver could not classify the packs in
+     * `voices/` at all: the download completed, reported success, and left a
+     * folder that cannot speak.
+     */
+    fun graphOnly(directory: File): Boolean =
+        findModel(directory) != null && voicePacks(directory).isEmpty()
+
     /** The style packs in [directory], identified by their exact byte length. */
     fun voicePacks(directory: File): List<File> =
         directory.walkTopDown().filter { it.isFile && it.length() == PACK_BYTES }.toList()

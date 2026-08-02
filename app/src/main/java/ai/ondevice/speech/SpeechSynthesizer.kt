@@ -53,10 +53,40 @@ class SpeechSynthesizer(
 
     fun kokoroLooksInstalled(directory: File): Boolean = kokoro.looksInstalled(directory)
 
-    /** Which engine, if any, can run the model in [directory]. */
+    /**
+     * Whether Kokoro's graph is on the device and its speaker vectors are not.
+     *
+     * The distinction the error message needs: `looksInstalled` answers "can
+     * this run", and both halves being required makes a half-installed model
+     * indistinguishable from an absent one. Telling someone to download a model
+     * they already have is the least useful thing the screen can say.
+     */
+    fun kokoroGraphWithoutVoices(directories: List<File>): Boolean =
+        directories.any { kokoro.graphOnly(it) }
+
+    /**
+     * Which engine the model in [directory] *belongs to*, complete or not.
+     *
+     * Deliberately a weaker question than "can this run". It used to be the
+     * stronger one, and the consequence was that a Kokoro folder missing its
+     * voice packs belonged to no engine at all — so it vanished from the
+     * engine's model list, and switching engines appeared to do nothing to the
+     * picker. A half-installed model is still that engine's model; whether it
+     * is ready is [kokoroReady] and [omniVoiceReady]'s business, and the error
+     * message's.
+     */
     fun providerFor(directory: File): SynthProvider? = when {
         omniVoice.looksInstalled(directory) -> SynthProvider.OMNIVOICE
         kokoro.looksInstalled(directory) -> SynthProvider.KOKORO
+        // Half-installed Kokoro: a graph and none of its voices.
+        //
+        // Guarded against claiming a half-installed *OmniVoice*, which
+        // `graphOnly` alone would — it asks only for an `.onnx` and no
+        // 522,240-byte packs, and an OmniVoice folder missing one of its four
+        // graphs answers yes to both halves of that. The result was the two
+        // engines' models appearing under each other.
+        kokoro.graphOnly(directory) && !omniVoice.partlyInstalled(directory) ->
+            SynthProvider.KOKORO
         else -> null
     }
 

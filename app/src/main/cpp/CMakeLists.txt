@@ -170,55 +170,45 @@ set(SD_WEBM OFF CACHE BOOL "" FORCE)
 add_subdirectory("${VENDOR_DIR}/stable-diffusion.cpp" "${CMAKE_CURRENT_BINARY_DIR}/sd.cpp" EXCLUDE_FROM_ALL)
 
 # ---------------------------------------------------------------------------
-# Only the tokenizer vocabularies a phone can reach.
+# Every tokenizer vocabulary upstream ships, which is all twelve of them.
 #
-# sd.cpp compiles in the vocabulary of every text encoder it supports, as
-# source arrays: UMT5, Gemma, Gemma 2, GPT-OSS, Mistral, Qwen 2, T5 and CLIP.
-# That is 232 MB of headers and it landed as 49 MB of .rodata in
-# libondevice_sd.so — on its own, most of the shipped APK, and far more than
-# ggml and sd.cpp's own code put together. --gc-sections cannot touch it
-# because each vocabulary is reachable from its tokenizer and every tokenizer
-# is reachable from the model factory.
+# `sd_vocab.cpp` used to be swapped in here to stub nine of them out. sd.cpp
+# compiles each text encoder's vocabulary in as a source array — 232 MB of
+# headers, about 47 MB of .rodata in libondevice_sd.so, and --gc-sections
+# cannot reach any of it, because every vocabulary is reachable from its
+# tokenizer and every tokenizer from the model factory. It looked like most of
+# the APK.
 #
-# The ones dropped belong to encoders that only appear beside 12–20B diffusion
-# models — Wan, Chroma, Qwen-Image. Their *weights* are tens of gigabytes; the
-# device runs out of memory long before it runs out of tokenizer. CLIP is kept
-# because it is what SD 1.x, SD 2 and SDXL use, and T5 because SD 3 pairs it
-# with CLIP and is the one such model that is nearly mobile-sized.
+# It was not. The measurement behind the cut was taken against a debug APK,
+# which carries a second full copy of the native code for x86_64 and no
+# minification; the shipped artifact is arm64 alone. Measured on 2026-08-02,
+# `assemblePlayRelease` is 53.6 MB with the stubs and 96.5 MB without, against
+# a 150 MB Play ceiling. The saving spent nine vocabularies on a third of a
+# limit that was never close.
 #
-# Qwen 2 was dropped under that reasoning and has been put back, because the
-# reasoning stopped being true rather than because it was wrong. FLUX.2 Klein
-# is 1.4 GB at Q4 and reads its prompt with a Qwen3, which tokenises as Qwen 2
-# does; it loaded, allocated four gigabytes, and then had no way to turn the
-# prompt into tokens. Its header is 8 MB against the 232 MB of all twelve, so
-# the saving that motivated the cut is almost entirely intact.
-#
-# Done by swapping one file out of the target rather than by patching the
-# checkout: native/ is fetched by tools/fetch-native.sh and gitignored, so an
-# edit in there would vanish on the next fetch.
+# What it cost is the part worth remembering: `load_umt5_tokenizer_json` and
+# the Gemma pair returned an empty string, sd.cpp built a tokenizer with no
+# merges out of it, and a model whose weights had loaded correctly encoded its
+# prompt to nonsense. Wan, LTX-AV, Lens, PiD and Ernie Image were not
+# unsupported — they were supported and silently wrong. A stub that returns
+# "nothing" where the caller expects a vocabulary is the same shape of bug as a
+# LoRA that matches no tensor, and it cost more than 47 MB is worth.
 # ---------------------------------------------------------------------------
 
-set(SD_UPSTREAM_VOCAB "${VENDOR_DIR}/stable-diffusion.cpp/src/tokenizers/vocab/vocab.cpp")
-
-get_target_property(SD_SOURCES stable-diffusion SOURCES)
-if (NOT SD_UPSTREAM_VOCAB IN_LIST SD_SOURCES)
-    # A silent miss here costs 49 MB and nothing says so: both files would
-    # compile, the linker would pull upstream's out of the archive first
-    # because it resolves the symbols, and ours would simply never be
-    # extracted. So it is an error rather than a fallback.
-    message(FATAL_ERROR
-        "stable-diffusion.cpp no longer lists ${SD_UPSTREAM_VOCAB} — its source "
-        "layout moved, and sd_vocab.cpp needs to follow it.")
-endif()
-list(REMOVE_ITEM SD_SOURCES "${SD_UPSTREAM_VOCAB}")
-list(APPEND SD_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/sd_vocab.cpp")
-set_target_properties(stable-diffusion PROPERTIES SOURCES "${SD_SOURCES}")
 target_include_directories(stable-diffusion PRIVATE "${VENDOR_DIR}/stable-diffusion.cpp/src")
 
 add_library(ondevice_sd SHARED sd_jni.cpp jni_util.cpp)
 
 target_include_directories(ondevice_sd PRIVATE
     "${VENDOR_DIR}/stable-diffusion.cpp/include"
+    # stb_image_write, for putting video frames on disk as they arrive.
+    #
+    # A five-second 480p clip is ~147 MB of raw RGB, and upstream hands back
+    # every frame at once. Returning that over JNI would mean the frames, a
+    # Java byte[] copy of the frames, and whatever the screen decodes them into
+    # — three copies of something already too big for one. So each frame is
+    # encoded and written here, and Kotlin is given a manifest of paths.
+    "${VENDOR_DIR}/stable-diffusion.cpp/thirdparty"
     "${VENDOR_DIR}/llama.cpp/vendor"
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )

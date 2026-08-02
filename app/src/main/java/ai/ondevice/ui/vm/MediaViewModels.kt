@@ -270,8 +270,9 @@ class ImageViewModel @Inject constructor(
                 // context skips the load entirely, and used to leave the card
                 // saying nothing about a context that was holding four files.
                 _state.value = _state.value.copy(
-                    residentComponents = diffusion.residentComponents
-                        .map { (role, file) -> "${role.label} · $file" },
+                    residentComponents = residentLines(),
+                    residentSize = residentSize(),
+                    unloadReason = diffusion.lastUnloadReason,
                     runStage = null,
                 )
                 if (!diffusion.isCurrent(model.id)) {
@@ -309,8 +310,9 @@ class ImageViewModel @Inject constructor(
                         // not the sheet's intention. They differ whenever a
                         // component is switched off, and used to differ in
                         // silence.
-                        residentComponents = diffusion.residentComponents
-                            .map { (role, file) -> "${role.label} · $file" },
+                        residentComponents = residentLines(),
+                        residentSize = residentSize(),
+                        unloadReason = diffusion.lastUnloadReason,
                     )
                     // The loader has now read the tensors and said what this
                     // is. Nothing before this point could know — most GGUF
@@ -447,6 +449,16 @@ class ImageViewModel @Inject constructor(
                                 errorHint = event.suggestion,
                             )
                         }
+                        // The image screen never asks for a clip, so this
+                        // arriving would mean the engine answered a different
+                        // question from the one asked. Not silently ignored:
+                        // an unreachable branch that is reached is worth a line
+                        // in the log rather than a shrug.
+                        is ai.ondevice.engine.DiffusionEvent.ClipCompleted ->
+                            android.util.Log.w(
+                                "ImageViewModel",
+                                "a video clip arrived on the image path; ignoring ${event.clip.frames.size} frames",
+                            )
                     }
                 }
             } finally {
@@ -892,6 +904,19 @@ class ImageViewModel @Inject constructor(
         )
     }
 
+    /**
+     * What is in memory, checkpoint first.
+     *
+     * The checkpoint leads because it is nearly all of the cost, and because
+     * its absence is what made this card vanish for a self-contained model.
+     */
+    private fun residentLines(): List<String> = listOfNotNull(diffusion.residentModel) +
+        diffusion.residentComponents.map { (role, file) -> "${role.label} · $file" }
+
+    private fun residentSize(): String? = diffusion.residentBytes
+        .takeIf { it > 0L }
+        ?.let { "≈${String.format("%.2f", it / 1_000_000_000.0)} GB of weights" }
+
     private companion object {
         const val STEP_MILLIS = 3100L // the canvas' 3.1 s/it on CPU
         const val SAFE_PIXEL_ENVELOPE = 768L * 768L
@@ -1021,8 +1046,20 @@ data class ImageState(
     val loadingWhat: List<String> = emptyList(),
     /** Where the loader has got to, in its own words. */
     val loadingStage: String? = null,
-    /** What the loaded context is actually holding, once it is loaded. */
+    /**
+     * What the loaded context is actually holding, once it is loaded — the
+     * checkpoint first, then each component, each with its size on disk.
+     *
+     * The checkpoint used to be missing from this, so a self-contained model
+     * with nothing attached produced an empty list and the card that reads it
+     * never drew. The model most likely to be run was the one the screen said
+     * nothing about.
+     */
     val residentComponents: List<String> = emptyList(),
+    /** Roughly what the above is costing, already formatted, or null when nothing is loaded. */
+    val residentSize: String? = null,
+    /** Why the app dropped the context on the user's behalf, when it did. */
+    val unloadReason: String? = null,
     /** What the runtime says it is doing right now, mid-run. */
     val runStage: String? = null,
     /** LoRAs that were attached to the last run and did nothing to it. */
@@ -1232,6 +1269,9 @@ class VoiceViewModel @Inject constructor(
             ttsModel = preferred ?: _state.value.ttsModel ?: ttsModels.firstOrNull(),
             systemEngineAvailable = system.isNotEmpty(),
             kokoroAvailable = synthesizer.kokoroReady,
+            // Computed here because this is where the scanned folders are, and
+            // recorded because the error message is written elsewhere.
+            kokoroVoicesMissing = synthesizer.kokoroGraphWithoutVoices(directories),
             omniVoiceAvailable = synthesizer.omniVoiceReady,
             cloningAvailable = synthesizer.omniVoiceCloningReady,
             // Default to something that can actually speak right now.
@@ -1252,8 +1292,21 @@ class VoiceViewModel @Inject constructor(
                             (ai.ondevice.core.StarterModels.installHint(
                                 ai.ondevice.core.StarterModels.OMNIVOICE_REPO,
                             ) ?: ai.ondevice.core.StarterModels.OMNIVOICE_REPO) + "."
+                    // Two different problems wore one sentence.
+                    //
+                    // Kokoro needs a graph *and* its speaker vectors, and
+                    // `looksInstalled` is false when either is missing. Saying
+                    // "not installed" for the second case is telling someone to
+                    // download a folder they are looking at — the graph is
+                    // there, the voices are not, and only one of those is worth
+                    // acting on.
                     ai.ondevice.speech.SynthProvider.KOKORO ->
-                        "Kokoro is not installed. Models → Add a model, and search for Kokoro."
+                        if (_state.value.kokoroVoicesMissing) {
+                            "Kokoro's weights are installed but none of its voice packs are. " +
+                                "Models → the Kokoro row → Components, and add the voices."
+                        } else {
+                            "Kokoro is not installed. Models → Add a model, and search for Kokoro."
+                        }
                     else -> "This device has no system speech engine."
                 },
             )
@@ -2013,6 +2066,14 @@ data class VoiceState(
     val autoPlay: Boolean = false,
     val speakError: String? = null,
     val kokoroAvailable: Boolean = false,
+    /**
+     * Kokoro's graph is installed and none of its speaker vectors are.
+     *
+     * Half-installed reads as absent to every other check, and the two want
+     * opposite advice: one says download the model, the other says the model is
+     * already here and its voices are not.
+     */
+    val kokoroVoicesMissing: Boolean = false,
     val omniVoiceAvailable: Boolean = false,
     val systemEngineAvailable: Boolean = false,
     val loading: Boolean = false,

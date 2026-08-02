@@ -66,6 +66,26 @@ enum class ParamType {
     @SerialName("enum") ENUM,
     @SerialName("string") STRING,
     @SerialName("text") TEXT,
+
+    /**
+     * A long blob the runtime parses — a Jinja chat template, a GBNF grammar.
+     *
+     * Its own type rather than a longer [TEXT] because three things about it
+     * differ, and all three follow from what it holds rather than from which
+     * key it is. It is hundreds of lines, so it belongs behind a reveal instead
+     * of an always-open box that pushes the rest of the screen away. Its
+     * default comes from the loaded model rather than from the manifest, so
+     * "reset" means "give me the model's own back" and cannot be rendered as
+     * `reset to <value>` — printing a five-thousand-character template into a
+     * link is not a link. And an edit is committed deliberately, because a
+     * half-typed template is a broken one and every keystroke would apply it.
+     *
+     * The chat settings sheet already treated the chat template this way and
+     * the parameter screen did not, which is how the same setting came to have
+     * two different affordances. This is that behaviour, moved to where the
+     * type system can hand it to every parameter shaped like it.
+     */
+    @SerialName("code") CODE,
     @SerialName("string[]") STRING_ARRAY,
     @SerialName("int[]") INT_ARRAY,
     @SerialName("map") MAP,
@@ -95,6 +115,21 @@ data class Dependency(
 data class AppliesTo(
     val modality: List<String>? = null,
     val arch: List<String>? = null,
+    /**
+     * `image`, `video`, or both — which kind of output this setting reaches.
+     *
+     * Diffusion's two screens share one runtime and one parameter set, so
+     * `modality` cannot separate them: a Wan checkpoint and an SDXL one are
+     * both `diffusion`. Without this, `ip_adapter_strength` and `batch_count`
+     * were offered on a video model that has no field for either, and
+     * `video_frames` needed a hand-typed list of every video architecture to
+     * keep itself off a still.
+     *
+     * Answered from [ai.ondevice.core.DiffusionFamily.isVideo], which is
+     * derived from upstream's own branch — not from a list kept here that
+     * stops being true the week an architecture is added.
+     */
+    val output: List<String>? = null,
 )
 
 internal fun renderJson(element: JsonElement): String = when (element) {

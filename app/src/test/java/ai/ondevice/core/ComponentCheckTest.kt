@@ -108,4 +108,40 @@ class ComponentCheckTest {
         assertTrue("$bare", bare.any { it.contains("VAE") })
         assertTrue("$bare", bare.any { it.contains("CLIP-G") })
     }
+
+    /**
+     * The UNet question, asked in the runtime's own spelling.
+     *
+     * These went through a private list of exact strings — `sd1`, `sd2`, `sdxl`
+     * — and sd.cpp does not print any of them but the third. `SD1.x` missed,
+     * and SD 1.5 is the architecture with more ControlNets written for it than
+     * every other one here put together.
+     */
+    @Test
+    fun `SD 1_x takes a ControlNet and an IP-Adapter, whatever the version suffix`() {
+        listOf("SD1.x", "SD 1.x", "SD2.x", "SDXL", "SVD").forEach { architecture ->
+            val complaints = ComponentCheck.forDiffusion(
+                available = listOf(
+                    attachment(AttachmentRole.CONTROLNET),
+                    attachment(AttachmentRole.IP_ADAPTER),
+                    attachment(AttachmentRole.CLIP_VISION),
+                ),
+                architecture = architecture,
+                bareDenoiser = true,
+            ).filter { it.state == MissingComponent.State.WONT_ATTACH }
+            assertEquals("$architecture is a UNet", emptyList<MissingComponent>(), complaints)
+        }
+    }
+
+    @Test
+    fun `a transformer is still told that neither one will attach`() {
+        listOf("SD3.x", "Flux", "Flux.2 klein", "Z-Image", "Chroma Radiance").forEach { architecture ->
+            val complaints = ComponentCheck.forDiffusion(
+                available = listOf(attachment(AttachmentRole.CONTROLNET)),
+                architecture = architecture,
+                bareDenoiser = true,
+            ).filter { it.state == MissingComponent.State.WONT_ATTACH }
+            assertTrue("$architecture has no UNet to attach to", complaints.isNotEmpty())
+        }
+    }
 }

@@ -268,6 +268,54 @@ fun AddModelScreen(
                     }
                 }
 
+                // Type and role, stated rather than guessed — and asked first.
+                //
+                // These two used to sit under the file list and the companions,
+                // which is the wrong way round: they decide what everything
+                // below them means. h94/IP-Adapter is the case that makes it
+                // plain — twelve files, and which one is right depends entirely
+                // on the slot you mean to fill. Choosing a file before saying
+                // what you are choosing it for is choosing in the dark.
+                SectionKicker("What this is", Modifier.padding(top = 20.dp, bottom = 8.dp))
+                NHelp(
+                    "The resolver read this off the repo. Both are editable because it is " +
+                        "reading someone else's naming, and it is sometimes wrong — and both " +
+                        "change what is offered below.",
+                    Modifier.padding(bottom = 8.dp),
+                )
+
+                NHelp("Type · which runtime loads it", Modifier.padding(bottom = 4.dp))
+                // UNKNOWN is what the resolver said when it could not tell. It is
+                // not something a person would ever mean to choose.
+                val modalities = Modality.entries.filterNot { it == Modality.UNKNOWN }
+                NDropdown(
+                    options = modalities.map { it.label },
+                    selected = state.selectedModality?.label,
+                    onSelect = { label ->
+                        modalities.firstOrNull { it.label == label }?.let(viewModel::setModality)
+                    },
+                    placeholder = "Choose what this model is…",
+                )
+
+                NHelp(
+                    "Role · whether it runs on its own or fills a slot on something else",
+                    Modifier.padding(top = 10.dp, bottom = 4.dp),
+                )
+                val baseLabel = "Base model — nothing hangs off it"
+                val roleLabels = listOf(baseLabel) + AttachmentRole.entries.map { it.label }
+                NDropdown(
+                    options = roleLabels,
+                    selected = when {
+                        !state.roleAnswered -> null
+                        state.selectedRole == null -> baseLabel
+                        else -> state.selectedRole?.label
+                    },
+                    onSelect = { label ->
+                        viewModel.setRole(AttachmentRole.entries.firstOrNull { it.label == label })
+                    },
+                    placeholder = "Base model, or which add-on slot…",
+                )
+
                 // "Quant variants" is only true when they are quantisations of
                 // one model. h94/IP-Adapter holds twelve files that are twelve
                 // different adapters — SD 1.5 against SDXL, plain against plus
@@ -470,38 +518,6 @@ fun AddModelScreen(
                         Modifier.padding(top = 4.dp),
                     )
                 }
-
-                // Type and role, stated rather than guessed.
-                SectionKicker("What this is", Modifier.padding(top = 20.dp, bottom = 8.dp))
-
-                NHelp("Type", Modifier.padding(bottom = 4.dp))
-                // UNKNOWN is what the resolver said when it could not tell. It is
-                // not something a person would ever mean to choose.
-                val modalities = Modality.entries.filterNot { it == Modality.UNKNOWN }
-                NDropdown(
-                    options = modalities.map { it.label },
-                    selected = state.selectedModality?.label,
-                    onSelect = { label ->
-                        modalities.firstOrNull { it.label == label }?.let(viewModel::setModality)
-                    },
-                    placeholder = "Choose what this model is…",
-                )
-
-                NHelp("Role", Modifier.padding(top = 10.dp, bottom = 4.dp))
-                val baseLabel = "Base model — nothing hangs off it"
-                val roleLabels = listOf(baseLabel) + AttachmentRole.entries.map { it.label }
-                NDropdown(
-                    options = roleLabels,
-                    selected = when {
-                        !state.roleAnswered -> null
-                        state.selectedRole == null -> baseLabel
-                        else -> state.selectedRole?.label
-                    },
-                    onSelect = { label ->
-                        viewModel.setRole(AttachmentRole.entries.firstOrNull { it.label == label })
-                    },
-                    placeholder = "Base model, or which add-on slot…",
-                )
 
                 val selectedQuant = resolved.quants.firstOrNull { it.name == state.selectedQuant }
                 val runnable = state.verdict?.verdict?.runnable == true

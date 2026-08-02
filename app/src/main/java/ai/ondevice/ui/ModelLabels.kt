@@ -34,9 +34,12 @@ fun List<ModelEntity>.pickerLabels(): List<String> {
             Labels.Item(
                 // A name typed by hand is the answer, not a starting point.
                 name = model.label,
+                // The quant is not a tie-breaker, it is part of what this is:
+                // it appears in the model's own id, and two installs of one
+                // repo at different precisions are two different things to run.
+                always = listOf(model.quant),
                 qualifiers = listOf(
                     model.attachmentRole?.label,
-                    model.quant,
                     model.architecture,
                     fileLabels[model.localPath],
                 ),
