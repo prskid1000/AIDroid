@@ -576,9 +576,9 @@ private fun VideoSettingsSheet(
             // Where the Image screen keeps it too: the sheet is for what this
             // run is made of, and the full set is one step further in.
             NButton(
-                "All parameters",
+                "All Parameters",
                 onClick = onOpenAdvanced,
-                style = NButtonStyle.Ghost,
+                style = NButtonStyle.Secondary,
                 block = true,
                 modifier = Modifier.padding(top = 12.dp),
             )

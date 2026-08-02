@@ -318,7 +318,7 @@ fun ChatSettingsSheet(
                     NButton(
                         "All Parameters",
                         onClick = { onOpenParameters() },
-                        style = NButtonStyle.Primary,
+                        style = NButtonStyle.Secondary,
                         block = true,
                         modifier = Modifier.padding(top = 12.dp),
                     )
