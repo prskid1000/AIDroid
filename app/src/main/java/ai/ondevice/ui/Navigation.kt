@@ -82,13 +82,15 @@ object Routes {
  * Three things this device makes, then the two that describe it: what it has
  * made, and what it can make things with.
  *
- * Video is deliberately not here. It shares the diffusion runtime, the
- * checkpoints and the loaded context with Image, so it sits behind Image where
- * those models already live — and the sixth slot is being held for Workflow.
+ * Video is deliberately not its own entry. It shares the diffusion runtime, the
+ * checkpoints and the loaded context with stills, so the two are modes of one
+ * tab — switched in the toolbar the way Voice switches Transcribe and Speak —
+ * and "Visuals" is the tab because "Image" named only half of what is behind
+ * it. The sixth slot is being held for Workflow.
  */
 val BottomDestinations = listOf(
     NavDestination("Chat", NIcons.Chat, Routes.CHAT),
-    NavDestination("Image", NIcons.Image, Routes.IMAGE),
+    NavDestination("Visuals", NIcons.Image, Routes.IMAGE),
     NavDestination("Voice", NIcons.Voice, Routes.VOICE),
     NavDestination("Library", NIcons.Library, Routes.LIBRARY),
     NavDestination("Settings", NIcons.Settings, Routes.SETTINGS),
@@ -143,6 +145,8 @@ fun OnDeviceApp(
         }
         composable(Routes.VIDEO) {
             VideoScreen(
+                currentRoute = currentRoute,
+                onNavigate = { navController.navigateToRoot(it) },
                 onBack = { navController.popBackStack() },
                 onAddModel = { navController.navigate(Routes.ADD_MODEL) },
                 onOpenAdvanced = {

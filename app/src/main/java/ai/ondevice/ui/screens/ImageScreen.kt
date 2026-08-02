@@ -104,9 +104,12 @@ fun ImageScreen(
             // The same pair Chat and Voice carry.
             RootToolbar("Image") {
                 ToolbarAction(NIcons.Plus, "New image", viewModel::reset)
-                // Video sits behind this rather than in the tab bar: same
-                // runtime, same checkpoints, same loaded context.
-                ToolbarAction(NIcons.Video, "Video", onOpenVideo)
+                // Stills and clips are two modes of one thing — same runtime,
+                // same checkpoints, same loaded context — so they switch here
+                // the way Voice switches Transcribe and Speak, and the tab bar
+                // stays put for both.
+                ToolbarToggle(NIcons.Image, "Stills", selected = true, onClick = {})
+                ToolbarToggle(NIcons.Video, "Video", selected = false, onClick = onOpenVideo)
                 ToolbarAction(NIcons.Settings, "Image settings", { settingsOpen = true })
             }
         },

@@ -30,6 +30,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import ai.ondevice.core.Fmt
+import ai.ondevice.ui.BottomDestinations
+import ai.ondevice.ui.components.NBottomBar
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NCard
@@ -43,7 +45,8 @@ import ai.ondevice.ui.components.NTag
 import ai.ondevice.ui.components.NTagStyle
 import ai.ondevice.ui.components.NTextArea
 import ai.ondevice.ui.components.PhoneScaffold
-import ai.ondevice.ui.components.PushToolbar
+import ai.ondevice.ui.components.RootToolbar
+import ai.ondevice.ui.components.ToolbarToggle
 import ai.ondevice.ui.components.SectionKicker
 import ai.ondevice.ui.components.ToolbarAction
 import ai.ondevice.ui.components.nClickableFlat
@@ -68,6 +71,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
  */
 @Composable
 fun VideoScreen(
+    currentRoute: String?,
+    onNavigate: (String) -> Unit,
     onBack: () -> Unit,
     onAddModel: () -> Unit,
     onOpenAdvanced: () -> Unit,
@@ -85,19 +90,18 @@ fun VideoScreen(
 
     PhoneScaffold(
         toolbar = {
-            PushToolbar(
-                title = "Video",
-                onBack = onBack,
-                subtitle = state.model?.label,
-            ) {
-                // The sibling, stated as a switch rather than left to the back
-                // arrow. Image and Video are the same runtime and the same
-                // loaded model shown two ways, and moving between them is a
-                // thing people do repeatedly rather than once.
-                ToolbarAction(NIcons.Image, "Stills instead", onBack)
+            // The same shape Voice uses for Transcribe and Speak: two modes of
+            // one thing, switched in the toolbar, with the tab bar left alone.
+            // Video was a push, so opening it hid the bottom bar — which said
+            // "you have left the app's main screens" about a screen that runs
+            // the same runtime on the same model as the one before it.
+            RootToolbar("Video") {
+                ToolbarToggle(NIcons.Image, "Stills", selected = false, onClick = onBack)
+                ToolbarToggle(NIcons.Video, "Video", selected = true, onClick = {})
                 ToolbarAction(NIcons.Settings, "Video settings", { settingsOpen = true })
             }
         },
+        bottomBar = { NBottomBar(BottomDestinations, currentRoute) { onNavigate(it.route) } },
         contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 18.dp),
     ) {
         Column(Modifier.verticalScroll(rememberScrollState())) {
