@@ -164,6 +164,20 @@ fun ImageScreen(
                 }
             }
 
+            // A LoRA can fail without failing: it loads, costs its time and
+            // matches nothing, and the picture looks like one where it worked.
+            state.loraOutcome.forEach { note ->
+                NCard(Modifier.padding(top = 10.dp), ring = NocturneColors.Accent800) {
+                    Text("LoRA had no effect", style = NocturneType.CardTitleSm,
+                        color = NocturneColors.Accent200)
+                    Text(
+                        note,
+                        style = NocturneType.CardBody,
+                        color = NocturneColors.Text.copy(alpha = 0.8f),
+                    )
+                }
+            }
+
             // §1.2 — a model that cannot run says why, in the runtime's own
             // words, instead of leaving a blank frame.
             state.error?.let { message ->

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <mutex>
@@ -131,6 +132,65 @@ constexpr int PHASE_SAMPLING  = 1;
 constexpr int PHASE_DECODING  = 2;
 
 /**
+ * How much of each LoRA actually landed.
+ *
+ * A LoRA trained against another architecture is not refused — sd.cpp matches
+ * its tensors by name, finds none, says so and carries on. The run takes the
+ * same time and produces a picture the LoRA had no part in, which is
+ * indistinguishable from it having worked unless you know what it should have
+ * looked like.
+ *
+ * Upstream reports the tally itself, in one of two forms depending on whether
+ * anything matched, and the *worse* case is the quieter one: when nothing is
+ * even recognised as a LoRA tensor, applied and compatible are both zero, they
+ * compare equal, and it reports at INFO. So both spellings are caught here,
+ * because a silent nothing is exactly the case worth reporting.
+ */
+std::mutex  g_lora_mutex;
+std::string g_lora_report;
+
+void note_lora(const std::string & line) {
+    const auto marker = line.find(" LoRA tensors have been applied");
+    if (marker == std::string::npos) return;
+    const auto open = line.find('(');
+    const auto slash = line.find('/', open);
+    const auto close = line.find(')', slash);
+    if (open == std::string::npos || slash == std::string::npos || close == std::string::npos) return;
+
+    const auto applied = line.substr(open + 1, slash - open - 1);
+    const auto total   = line.substr(slash + 1, close - slash - 1);
+    std::string file;
+    const auto path = line.find("lora_file_path = ");
+    if (path != std::string::npos) {
+        file = line.substr(path + 17);
+        const auto slash_at = file.find_last_of('/');
+        if (slash_at != std::string::npos) file = file.substr(slash_at + 1);
+    }
+
+    const auto trim = [](std::string s) {
+        while (!s.empty() && s.front() == ' ') s.erase(s.begin());
+        while (!s.empty() && s.back() == ' ') s.pop_back();
+        return s;
+    };
+
+    json entry;
+    entry["file"]    = trim(file);
+    entry["applied"] = std::strtol(trim(applied).c_str(), nullptr, 10);
+    entry["total"]   = std::strtol(trim(total).c_str(), nullptr, 10);
+
+    std::lock_guard<std::mutex> lock(g_lora_mutex);
+    json all = g_lora_report.empty() ? json::array() : json::parse(g_lora_report, nullptr, false);
+    if (!all.is_array()) all = json::array();
+    // Upstream calls its own reporter twice per LoRA — once to size the buffer
+    // and once to build the graph — and says so in a comment. One entry each.
+    for (const auto & seen : all) {
+        if (seen.value("file", std::string()) == entry["file"]) return;
+    }
+    all.push_back(entry);
+    g_lora_report = dump_json(all);
+}
+
+/**
  * Which part of a run is happening, taken from what the runtime says it is
  * doing rather than inferred from the shape of a callback.
  *
@@ -192,6 +252,7 @@ void note_stage(const char * text) {
         g_stage = line;
     }
     note_phase(line);
+    note_lora(line);
 }
 
 void note_version(const char * text) {
@@ -422,6 +483,13 @@ JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeDetectedVersion(JNIEnv * env, jobject) {
     std::lock_guard<std::mutex> lock(g_version_mutex);
     return jni_from_string(env, g_version);
+}
+
+/** Applied/total per LoRA, as sd.cpp counted them during the last run. */
+JNIEXPORT jstring JNICALL
+Java_ai_ondevice_engine_SdBridge_nativeLoraReport(JNIEnv * env, jobject) {
+    std::lock_guard<std::mutex> lock(g_lora_mutex);
+    return jni_from_string(env, g_lora_report.empty() ? "[]" : g_lora_report);
 }
 
 JNIEXPORT jstring JNICALL
@@ -715,6 +783,7 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
     e->step.store(0);
     e->phase.store(PHASE_PREPARING);
     e->sampling_started.store(false);
+    { std::lock_guard<std::mutex> lock(g_lora_mutex); g_lora_report.clear(); }
     {
         std::lock_guard<std::mutex> preview_lock(e->preview_mutex);
         e->preview_rgb.clear();

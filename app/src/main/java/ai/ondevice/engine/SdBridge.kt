@@ -34,6 +34,17 @@ object SdBridge {
      */
     external fun nativeLoadStage(): String
 
+    /**
+     * How many of each LoRA's tensors the last run actually applied, as
+     * `[{"file","applied","total"}]`.
+     *
+     * A LoRA for the wrong architecture is not refused. sd.cpp matches tensors
+     * by name, finds none that fit, and generates a picture the LoRA had no
+     * part in — same duration, same everything, no sign on screen. This is the
+     * count it keeps while doing that.
+     */
+    external fun nativeLoraReport(): String
+
     external fun nativeLoad(
         modelPath: String,
         vaePath: String,

@@ -94,7 +94,16 @@ class DiffusionEngine(
             )
             check(newHandle != 0L) { "The runtime returned no handle for $modelPath." }
             handle = newHandle
-            residentComponents = AttachmentRole.entries.mapNotNull { role ->
+            // Only the roles just handed to the loader.
+            //
+            // This used to walk every role there is, which meant a stored
+            // upscaler or LoRA appeared in the list of what the context was
+            // holding. Neither is a load-time part — `sd_ctx_params_t` has no
+            // field for either, and sd.cpp applies a LoRA at generate time and
+            // runs an upscaler in a context of its own — so the screen was
+            // naming two files as resident that the loader had never been told
+            // about.
+            residentComponents = LOAD_TIME_ROLES.mapNotNull { role ->
                 pathFor(role).takeIf { it.isNotBlank() }?.let { role to File(it).name }
             }
             android.util.Log.i(
@@ -146,6 +155,26 @@ class DiffusionEngine(
     @Volatile
     var residentComponents: List<Pair<AttachmentRole, String>> = emptyList()
         private set
+
+    /**
+     * How much of each LoRA the last run applied, straight from sd.cpp's tally.
+     *
+     * Counting is upstream's, not the app's. A gate written here would need a
+     * table of which LoRA suits which architecture, kept by hand and wrong the
+     * week a new one ships; the runtime has already matched every tensor by
+     * name and knows the answer exactly.
+     */
+    private fun loraReport(): List<LoraApplication> = runCatching {
+        (json.parseToJsonElement(SdBridge.nativeLoraReport()) as kotlinx.serialization.json.JsonArray)
+            .map { it.jsonObject }
+            .map {
+                LoraApplication(
+                    file = it["file"]?.jsonPrimitive?.content.orEmpty(),
+                    applied = it["applied"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0,
+                    total = it["total"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0,
+                )
+            }
+    }.getOrDefault(emptyList())
 
     /** The loader's own account of where it has got to, or null between loads. */
     val loadStage: String?
@@ -260,7 +289,10 @@ class DiffusionEngine(
                         "generated ${image.summary()} in " +
                             "${(System.currentTimeMillis() - started) / 1000f}s",
                     )
-                    send(DiffusionEvent.Completed(image))
+                    loraReport().forEach {
+                        android.util.Log.i(TAG, "lora ${it.file}: ${it.applied}/${it.total} applied")
+                    }
+                    send(DiffusionEvent.Completed(image, loraReport()))
                 }
             } catch (t: Throwable) {
                 android.util.Log.e(TAG, "generation failed", t)
@@ -404,6 +436,19 @@ class DiffusionEngine(
     private companion object {
         const val TAG = "DiffusionEngine"
 
+        /** The roles `nativeLoad` has a field for, in the order it takes them. */
+        val LOAD_TIME_ROLES = listOf(
+            AttachmentRole.VAE,
+            AttachmentRole.CONTROLNET,
+            AttachmentRole.CLIP_L,
+            AttachmentRole.CLIP_G,
+            AttachmentRole.T5XXL,
+            AttachmentRole.IP_ADAPTER,
+            AttachmentRole.EMBEDDING,
+            AttachmentRole.CLIP_VISION,
+            AttachmentRole.LLM_ENCODER,
+        )
+
         /** Fast enough to look live, slow enough not to spin a core polling. */
         const val POLL_MILLIS = 250L
 
@@ -462,6 +507,18 @@ enum class DiffusionPhase(val label: String) {
     DECODING("decoding"),
 }
 
+/**
+ * One LoRA and how much of it landed, counted by the runtime.
+ *
+ * `applied == 0` is the case worth saying out loud: the file loaded, cost its
+ * time, and changed nothing, because its tensor names belong to a different
+ * architecture. sd.cpp reports that and continues, so without this the picture
+ * is identical to one where the LoRA worked.
+ */
+data class LoraApplication(val file: String, val applied: Int, val total: Int) {
+    val landed: Boolean get() = applied > 0
+}
+
 sealed interface DiffusionEvent {
     data class Progress(
         val step: Int,
@@ -472,7 +529,11 @@ sealed interface DiffusionEvent {
         val stage: String? = null,
     ) : DiffusionEvent
     data class Preview(val image: DiffusionImage) : DiffusionEvent
-    data class Completed(val image: DiffusionImage) : DiffusionEvent
+    data class Completed(
+        val image: DiffusionImage,
+        /** What each attached LoRA managed to change, or empty when none was attached. */
+        val loras: List<LoraApplication> = emptyList(),
+    ) : DiffusionEvent
     data class Failed(val message: String, val suggestion: String?) : DiffusionEvent
 
 }

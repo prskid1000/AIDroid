@@ -393,6 +393,16 @@ class ImageViewModel @Inject constructor(
                             _state.value = _state.value.copy(previewBitmap = event.image.toBitmap())
                         }
                         is ai.ondevice.engine.DiffusionEvent.Completed -> {
+                            // A LoRA that matched nothing is the one outcome the
+                            // picture cannot show you.
+                            _state.value = _state.value.copy(
+                                loraOutcome = event.loras.filterNot { it.landed }.map {
+                                    "${it.file.substringBeforeLast('.')} changed nothing — " +
+                                        "none of its ${it.total.takeIf { n -> n > 0 } ?: 0} " +
+                                        "tensors match this model, so it was trained for a " +
+                                        "different architecture"
+                                },
+                            )
                             val file = withContext(Dispatchers.IO) {
                                 val target = java.io.File(storage.galleryDir(), "$seed.png")
                                 target.writeBytes(event.image.toPng(params.toJsonString()))
@@ -1015,6 +1025,8 @@ data class ImageState(
     val residentComponents: List<String> = emptyList(),
     /** What the runtime says it is doing right now, mid-run. */
     val runStage: String? = null,
+    /** LoRAs that were attached to the last run and did nothing to it. */
+    val loraOutcome: List<String> = emptyList(),
 ) {
     /**
      * Whether a picture slot has anywhere to send a picture.
