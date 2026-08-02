@@ -162,52 +162,6 @@ fun VideoScreen(
                 }
             }
 
-            // — the model —
-
-            SectionKicker("Model", Modifier.padding(top = 18.dp, bottom = 6.dp))
-            if (state.models.isEmpty()) {
-                NCard {
-                    Text("No diffusion model installed", style = NocturneType.CardTitleSm)
-                    NHelp(
-                        "Wan, Hunyuan and LTX-AV generate video directly. An SD 1.5 checkpoint " +
-                            "does too, once a motion module is attached to it.",
-                        Modifier.padding(top = 4.dp),
-                    )
-                    NButton(
-                        "Add a model",
-                        onClick = onAddModel,
-                        style = NButtonStyle.Secondary,
-                        block = true,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                }
-            } else {
-                NDropdown(
-                    options = state.models.map { it.label },
-                    selected = state.model?.label,
-                    onSelect = { label ->
-                        state.models.firstOrNull { it.label == label }?.let(viewModel::selectModel)
-                    },
-                    placeholder = "Choose a model…",
-                )
-                // Whether it can make video at all is the loader's answer, and
-                // nothing before the first load can know it — for SD 1.x it
-                // depends on whether a motion module was attached.
-                state.recognisedAs?.let {
-                    Row(
-                        Modifier.padding(top = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        NTag(it, style = NTagStyle.Outline)
-                        NTag(
-                            if (state.supportsVideo) "makes video" else "stills only",
-                            style = if (state.supportsVideo) NTagStyle.Neutral else NTagStyle.Outline,
-                        )
-                    }
-                }
-            }
-
             // — the prompt —
 
             SectionKicker("Prompt", Modifier.padding(top = 18.dp, bottom = 6.dp))
@@ -344,6 +298,7 @@ fun VideoScreen(
             state = state,
             viewModel = viewModel,
             onOpenAdvanced = { settingsOpen = false; onOpenAdvanced() },
+            onAddModel = { settingsOpen = false; onAddModel() },
             onClose = { settingsOpen = false },
         )
     }
@@ -521,6 +476,7 @@ private fun VideoSettingsSheet(
     state: VideoState,
     viewModel: VideoViewModel,
     onOpenAdvanced: () -> Unit,
+    onAddModel: () -> Unit,
     onClose: () -> Unit,
 ) {
     ai.ondevice.ui.components.NBottomSheet(onDismiss = onClose, title = "Video settings") {
@@ -533,7 +489,57 @@ private fun VideoSettingsSheet(
             // screen, the way the Image screen keeps them: the screen itself is
             // the prompt, the two end frames and the result, and these are what
             // the run is made of rather than what it is.
-            SectionKicker("Sampling", Modifier.padding(bottom = 6.dp))
+            // The model, here rather than on the screen behind — the same place
+            // the Image screen keeps it. What the screen itself is is a prompt,
+            // two end frames and a result; which checkpoint makes them is a
+            // setting about the run, and it was taking the top third of the
+            // screen to say so.
+            SectionKicker("Model", Modifier.padding(bottom = 6.dp))
+            if (state.models.isEmpty()) {
+                NCard {
+                    Text("No video model installed", style = NocturneType.CardTitleSm)
+                    NHelp(
+                        "Wan, Hunyuan and LTX-AV generate video directly. An SD 1.5 checkpoint " +
+                            "does too, once a motion module is attached to it. Checkpoints that " +
+                            "only make stills are not listed here.",
+                        Modifier.padding(top = 4.dp),
+                    )
+                    NButton(
+                        "Add a model",
+                        onClick = onAddModel,
+                        style = NButtonStyle.Secondary,
+                        block = true,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            } else {
+                NDropdown(
+                    options = state.models.map { it.label },
+                    selected = state.model?.label,
+                    onSelect = { label ->
+                        state.models.firstOrNull { it.label == label }?.let(viewModel::selectModel)
+                    },
+                    placeholder = "Choose a model…",
+                )
+                // Whether it can make video at all is the loader's answer, and
+                // nothing before the first load can know it — for SD 1.x it
+                // depends on whether a motion module was attached.
+                state.recognisedAs?.let {
+                    Row(
+                        Modifier.padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        NTag(it, style = NTagStyle.Outline)
+                        NTag(
+                            if (state.supportsVideo) "makes video" else "stills only",
+                            style = if (state.supportsVideo) NTagStyle.Neutral else NTagStyle.Outline,
+                        )
+                    }
+                }
+            }
+
+            SectionKicker("Sampling", Modifier.padding(top = 18.dp, bottom = 6.dp))
             LabelledSlider(
                 label = "Size",
                 value = "${state.width}²",

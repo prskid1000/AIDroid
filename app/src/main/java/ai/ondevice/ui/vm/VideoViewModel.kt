@@ -60,7 +60,30 @@ class VideoViewModel @Inject constructor(
         }
         viewModelScope.launch {
             db.models().observeInstalledByModality(Modality.DIFFUSION).collect { all ->
+                // Stills and clips share a runtime and a modality, so the same
+                // query answers for both and this list used to offer every
+                // checkpoint on the device — a Flux that cannot make a frame
+                // sat in the clip picker beside the Wan that can, and the only
+                // way to find out which was which was to load one.
+                //
+                // `isVideo` is upstream's `sd_version_supports_video_generation`
+                // by name. It answers null for a name the table does not know,
+                // and null stays: hiding a model because nobody recognised its
+                // name is hiding it for a reason the user cannot act on.
+                //
+                // The exception is SD 1.x, which is a still model until a
+                // motion module is attached and a video model afterwards. So a
+                // known-still checkpoint is kept when there is a motion module
+                // installed for it to use.
+                val hasMotionModule = all.any {
+                    it.attachmentRole == ai.ondevice.core.AttachmentRole.MOTION_MODULE
+                }
                 val models = all.filter { it.attachmentRole == null }
+                    .filter { model ->
+                        ai.ondevice.core.DiffusionFamily.isVideo(
+                            model.architecture ?: model.label,
+                        ) != false || hasMotionModule
+                    }
                 val chosen = _state.value.model?.let { current ->
                     models.firstOrNull { it.id == current.id }
                 } ?: models.firstOrNull()

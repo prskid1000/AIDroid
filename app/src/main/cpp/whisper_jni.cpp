@@ -160,6 +160,7 @@ const std::map<std::string, row> & table() {
         { "offset_t",         { [](od_whisper & e, const json & v) { e.offset_ms = as_int(v, e.offset_ms); } } },
         { "duration",         { [](od_whisper & e, const json & v) { e.duration_ms = as_int(v, e.duration_ms); } } },
         { "split_on_word",    { [](od_whisper & e, const json & v) { e.split_on_word = as_bool(v, false); } } },
+        { "token_timestamps", { [](od_whisper & e, const json & v) { e.token_timestamps = as_bool(v, e.token_timestamps); } } },
         { "word_thold",       { [](od_whisper & e, const json & v) { e.word_thold = as_float(v, e.word_thold); } } },
         { "entropy_thold",    { [](od_whisper & e, const json & v) { e.entropy_thold = as_float(v, e.entropy_thold); } } },
         { "logprob_thold",    { [](od_whisper & e, const json & v) { e.logprob_thold = as_float(v, e.logprob_thold); } } },
@@ -192,6 +193,7 @@ const std::map<std::string, json (*)(const od_whisper &)> & default_table() {
         { "offset_t",         [](const od_whisper & e) { return json(e.offset_ms); } },
         { "duration",         [](const od_whisper & e) { return json(e.duration_ms); } },
         { "split_on_word",    [](const od_whisper & e) { return json(e.split_on_word); } },
+        { "token_timestamps", [](const od_whisper & e) { return json(e.token_timestamps); } },
         { "word_thold",       [](const od_whisper & e) { return json(e.word_thold); } },
         { "entropy_thold",    [](const od_whisper & e) { return json(e.entropy_thold); } },
         { "logprob_thold",    [](const od_whisper & e) { return json(e.logprob_thold); } },
@@ -229,7 +231,11 @@ whisper_full_params build_params(od_whisper & e) {
     p.offset_ms        = e.offset_ms;
     p.duration_ms      = e.duration_ms;
     p.split_on_word    = e.split_on_word;
-    p.token_timestamps = e.token_timestamps;
+    // Upstream's own rule, from its CLI: splitting at a character count needs
+    // per-token times to split on, so `max_len` turns this on whatever the
+    // setting says. Leaving it to the setting alone would make `max_len` a dial
+    // that silently does nothing.
+    p.token_timestamps = e.token_timestamps || e.max_len > 0;
     p.thold_pt         = e.word_thold;
     p.entropy_thold    = e.entropy_thold;
     p.logprob_thold    = e.logprob_thold;

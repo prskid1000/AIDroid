@@ -134,8 +134,25 @@ class ImageViewModel @Inject constructor(
             ?: if (model?.format == ai.ondevice.core.ModelFormat.GGUF) true else null
 
     /** The diffusion entries that can be the *base* model, which is not the same set as the diffusion entries. */
+    /**
+     * The checkpoints this screen can actually run, not every diffusion file.
+     *
+     * Stills and clips share a runtime and a modality, so one query answers for
+     * both and each screen used to offer the other's models — a Wan checkpoint
+     * that makes only frames sat in the still picker, and the only way to find
+     * out was to load 4 GB and be told.
+     *
+     * `isVideo` is upstream's `sd_version_supports_video_generation` by name,
+     * and answers null for a name the table does not know. Null stays: hiding a
+     * model because nobody recognised its name is hiding it for a reason the
+     * user cannot act on.
+     */
     private fun baseModelsOnly(models: List<ModelEntity>): List<ModelEntity> =
-        models.filter { it.attachmentRole == null }
+        models
+            .filter { it.attachmentRole == null }
+            .filter {
+                ai.ondevice.core.DiffusionFamily.isVideo(it.architecture ?: it.label) != true
+            }
 
     /** With more than one diffusion model installed, which one runs is the user's choice — not whichever the database happened to return first. */
     fun selectModel(model: ModelEntity) {
@@ -1335,12 +1352,25 @@ class VoiceViewModel @Inject constructor(
         val system = synthesizer.systemVoices()
         val kokoro = synthesizer.kokoroVoices()
         val omni = synthesizer.omniVoiceVoices()
-        val all = kokoro + omni + system
+        // Only the chosen model's own voices, plus the system engine's.
+        //
+        // This was every engine's catalogue at once, so choosing Kokoro still
+        // listed OmniVoice underneath it and choosing OmniVoice still listed
+        // Kokoro's fifty — two model files leaking into each other's picker,
+        // where the only signal about which voice belonged to which was the
+        // name. The system engine stays regardless because it is Android's,
+        // not a file anybody downloaded, so no choice here can exclude it.
+        val chosen = preferred ?: _state.value.ttsModel ?: ttsModels.firstOrNull()
+        val chosenProvider = chosen?.let { providers[it.id] }
+        val installed = (kokoro + omni).filter {
+            chosenProvider == null || it.provider == chosenProvider
+        }
+        val all = installed + system
         _state.value = _state.value.copy(
             voices = all,
             ttsModels = ttsModels,
             ttsModelProviders = providers,
-            ttsModel = preferred ?: _state.value.ttsModel ?: ttsModels.firstOrNull(),
+            ttsModel = chosen,
             systemEngineAvailable = system.isNotEmpty(),
             kokoroAvailable = synthesizer.kokoroReady,
             // Computed here because this is where the scanned folders are, and
@@ -1355,9 +1385,27 @@ class VoiceViewModel @Inject constructor(
         )
     }
 
-    /** Switch engine explicitly. */
+    /**
+     * Switch engine explicitly.
+     *
+     * Asked of the whole catalogue rather than of `voices`, which now holds
+     * only the chosen engine's — searching the filtered list for the engine you
+     * are trying to switch *to* finds nothing every time, and reports the one
+     * you asked for as not installed.
+     *
+     * Choosing an engine is choosing a model file, so the model moves with it.
+     * The system engine has no file and keeps whichever is already chosen.
+     */
     fun selectProvider(provider: ai.ondevice.speech.SynthProvider) {
-        val first = _state.value.voices.firstOrNull { it.provider == provider && it.available }
+        // The one already chosen when it belongs to this engine, so switching
+        // away and back with two Kokoro files installed returns to the one you
+        // picked rather than to whichever the database listed first.
+        val current = _state.value.ttsModel
+            ?.takeIf { _state.value.ttsModelProviders[it.id] == provider }
+        val model = current ?: _state.value.ttsModels.firstOrNull {
+            _state.value.ttsModelProviders[it.id] == provider
+        }
+        val first = allVoicesFor(provider).firstOrNull { it.available }
         if (first == null) {
             _state.value = _state.value.copy(
                 speakError = when (provider) {
@@ -1387,6 +1435,21 @@ class VoiceViewModel @Inject constructor(
             return
         }
         _state.value = _state.value.copy(voice = first.id, speakError = null)
+        // The voice list follows the engine, so it has to be rebuilt for the
+        // one just chosen — otherwise the picker keeps showing the old engine's.
+        if (model != null) {
+            viewModelScope.launch { loadVoices(preferred = model) }
+        }
+    }
+
+    /** Every voice an engine offers, whatever the picker is currently showing. */
+    private fun allVoicesFor(
+        provider: ai.ondevice.speech.SynthProvider,
+    ): List<ai.ondevice.speech.SynthVoice> = when (provider) {
+        ai.ondevice.speech.SynthProvider.KOKORO -> synthesizer.kokoroVoices()
+        ai.ondevice.speech.SynthProvider.OMNIVOICE -> synthesizer.omniVoiceVoices()
+        ai.ondevice.speech.SynthProvider.SYSTEM ->
+            _state.value.voices.filter { it.provider == provider }
     }
 
     /**

@@ -21,7 +21,7 @@
     "Defaults, ranges and steps below are the description of last resort. Where a runtime",
     "reports its own live default, that value wins — see ParamRepository.specsFor."
   ],
-  "manifestVersion": 18,
+  "manifestVersion": 19,
   "runtimes": {
     "llama.cpp": {
       "params": [
@@ -1064,9 +1064,20 @@
           "step": 5,
           "tier": "EXPERT",
           "label": "Max segment length",
-          "help": "Maximum characters per segment. 0 is unlimited.",
+          "help": "Maximum characters per segment. 0 is unlimited. Anything above 0 turns per-token timings on whatever the setting below says, because a character limit needs somewhere to split.",
           "requiresReload": false,
           "cliFlag": "-ml"
+        },
+        {
+          "key": "token_timestamps",
+          "group": "segments",
+          "type": "bool",
+          "default": false,
+          "tier": "EXPERT",
+          "label": "Per-token timings",
+          "help": "Time every token rather than every segment. Costs a little decode time and is what a character limit or a word-boundary split needs in order to have somewhere to break, so those turn it on for you.",
+          "requiresReload": false,
+          "cliFlag": "-otxt"
         },
         {
           "key": "split_on_word",
