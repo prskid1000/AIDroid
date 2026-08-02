@@ -107,6 +107,35 @@ class VideoViewModel @Inject constructor(
         viewModelScope.launch { db.models().touch(model.id, System.currentTimeMillis()) }
     }
 
+    /**
+     * Start over, keeping the model and its settings.
+     *
+     * The prompt, the two end frames and the last clip go; the model, its
+     * components and the sampling settings stay, because those are the setup
+     * rather than the attempt. The clip's *files* are left alone — it is in the
+     * library by now, and this button is not a delete.
+     */
+    fun reset() {
+        cancel()
+        stopPlayback()
+        _state.value = _state.value.copy(
+            prompt = "",
+            negativePrompt = "",
+            firstFrameUri = null,
+            lastFrameUri = null,
+            controlImageUri = null,
+            clip = null,
+            frameIndex = 0,
+            usedSeed = null,
+            error = null,
+            errorHint = null,
+            step = 0,
+            progressSteps = 0,
+            previewBitmap = null,
+            loraOutcome = emptyList(),
+        )
+    }
+
     /** Give the weights back now — see the note on the image screen's copy. */
     fun unloadModel() {
         diffusion.unload("you asked for the memory back")

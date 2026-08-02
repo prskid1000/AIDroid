@@ -96,6 +96,9 @@ fun VideoScreen(
             // "you have left the app's main screens" about a screen that runs
             // the same runtime on the same model as the one before it.
             RootToolbar("Video") {
+                // The same pair Chat, Image and Voice carry. It was missing
+                // here, so Video was the one screen with no way to start over.
+                ToolbarAction(NIcons.Plus, "New clip", viewModel::reset)
                 ToolbarToggle(NIcons.Image, "Stills", selected = false, onClick = onBack)
                 ToolbarToggle(NIcons.Video, "Video", selected = true, onClick = {})
                 ToolbarAction(NIcons.Settings, "Video settings", { settingsOpen = true })
