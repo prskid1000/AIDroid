@@ -20,7 +20,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import ai.ondevice.core.Tier
 import ai.ondevice.engine.RuntimeRegistry
 import ai.ondevice.params.ParamRow
 import ai.ondevice.params.ParamType
@@ -30,7 +29,6 @@ import ai.ondevice.ui.components.NCard
 import ai.ondevice.ui.components.NCardKicker
 import ai.ondevice.ui.components.NHelp
 import ai.ondevice.ui.components.NInput
-import ai.ondevice.ui.components.NPills
 import ai.ondevice.ui.components.NTextArea
 import ai.ondevice.ui.components.PhoneScaffold
 import ai.ondevice.ui.components.PushToolbar
@@ -48,26 +46,14 @@ import ai.ondevice.ui.vm.ParamsViewModel
 fun AllParametersScreen(
     onBack: () -> Unit,
     onOpenSamplerChain: () -> Unit,
-    initialTier: Tier = Tier.BASIC,
     initialRuntime: String = RuntimeRegistry.LLAMA,
     // Activity-scoped: the sampler-chain screen edits the same parameter set, so
     // the two must see one instance rather than each loading its own copy.
     viewModel: ParamsViewModel = activityParamsViewModel(),
 ) {
-    // Order matters: the runtime swap reloads the spec list, so the tier has to
-    // be applied after it or the first recompute filters the old set.
     LaunchedEffect(initialRuntime) { viewModel.setRuntime(initialRuntime) }
-    LaunchedEffect(initialRuntime, initialTier) { viewModel.setTier(initialTier) }
 
     val state by viewModel.state.collectAsStateWithLifecycle()
-
-    val tiers = listOf("Basic", "Advanced", "Expert", "All")
-    val tierIndex = when {
-        state.showAll -> 3
-        state.tier == Tier.BASIC -> 0
-        state.tier == Tier.ADVANCED -> 1
-        else -> 2
-    }
 
     PhoneScaffold(
         toolbar = {
@@ -87,29 +73,17 @@ fun AllParametersScreen(
         },
         contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 20.dp),
     ) {
-        Column(
-            Modifier.padding(bottom = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            NInput(
-                value = state.query,
-                onValueChange = viewModel::setQuery,
-                placeholder = "Search ${state.totalCount} parameters",
-                minHeight = 40.dp,
-            )
-            NPills(
-                options = tiers,
-                selectedIndex = tierIndex,
-                onSelect = { index ->
-                    when (index) {
-                        0 -> { viewModel.setShowAll(false); viewModel.setTier(Tier.BASIC) }
-                        1 -> { viewModel.setShowAll(false); viewModel.setTier(Tier.ADVANCED) }
-                        2 -> { viewModel.setShowAll(false); viewModel.setTier(Tier.EXPERT) }
-                        else -> viewModel.setShowAll(true)
-                    }
-                },
-            )
-        }
+        // One list, in full. There used to be Basic / Advanced / Expert / All
+        // pills over it, which is four ways of looking at one thing and a
+        // fourth that made the other three redundant. Search narrows it when
+        // it needs narrowing.
+        NInput(
+            value = state.query,
+            onValueChange = viewModel::setQuery,
+            placeholder = "Search ${state.totalCount} parameters",
+            minHeight = 40.dp,
+            modifier = Modifier.padding(bottom = 10.dp),
+        )
 
         Column(Modifier.verticalScroll(rememberScrollState())) {
 

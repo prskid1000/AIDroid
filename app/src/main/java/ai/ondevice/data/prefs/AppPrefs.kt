@@ -6,7 +6,6 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import ai.ondevice.core.Tier
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -23,7 +22,6 @@ class AppPrefs(private val context: Context) {
         val maxRetries = intPreferencesKey("max_retries")
         val storageRoot = stringPreferencesKey("storage_root")
         val storageReserveMb = intPreferencesKey("storage_reserve_mb")
-        val defaultTier = stringPreferencesKey("default_tier")
         val blockPickle = booleanPreferencesKey("block_pickle")
         val lastConversationId = stringPreferencesKey("last_conversation_id")
         val exportFolder = stringPreferencesKey("export_folder")
@@ -42,9 +40,6 @@ class AppPrefs(private val context: Context) {
     val storageReserveMb: Flow<Int> = context.dataStore.data.map { it[Keys.storageReserveMb] ?: 1024 }
 
 
-    val defaultTier: Flow<Tier> = context.dataStore.data.map {
-        it[Keys.defaultTier]?.let { v -> runCatching { Tier.valueOf(v) }.getOrNull() } ?: Tier.BASIC
-    }
 
     /** Pickle files are blocked by default; expert override (SPEC §3.2). */
     val blockPickle: Flow<Boolean> = context.dataStore.data.map { it[Keys.blockPickle] ?: true }
@@ -69,7 +64,6 @@ class AppPrefs(private val context: Context) {
     suspend fun setMaxRetries(v: Int) = edit { it[Keys.maxRetries] = v }
     suspend fun setStorageRoot(v: String?) = edit { p -> if (v == null) p.remove(Keys.storageRoot) else p[Keys.storageRoot] = v }
     suspend fun setStorageReserveMb(v: Int) = edit { it[Keys.storageReserveMb] = v }
-    suspend fun setDefaultTier(v: Tier) = edit { it[Keys.defaultTier] = v.name }
     suspend fun setBlockPickle(v: Boolean) = edit { it[Keys.blockPickle] = v }
     suspend fun setToolsEnabled(v: Boolean) = edit { it[Keys.toolsEnabled] = v }
     suspend fun setEnabledToolProviders(v: Set<String>) = edit { it[Keys.enabledToolProviders] = v }

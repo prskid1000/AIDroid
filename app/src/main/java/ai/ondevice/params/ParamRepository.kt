@@ -114,30 +114,22 @@ class ParamRepository(
      * the loaded model is worth showing precisely *because* it does not: it
      * says what this model does not have, and what would bring it back.
      *
-     * The tier pills and the search box still filter, because those are the
-     * user's own filters rather than the app's.
+     * The search box still filters, because that is the user's own filter
+     * rather than the app's.
      */
     fun visible(
         specs: List<ParamSpec>,
         values: SparseParams,
-        tier: Tier?,
-        showAll: Boolean,
         loadedBuildTag: String?,
         modality: String?,
         architecture: String?,
         query: String = "",
     ): VisibleParams {
-        val afterTier = if (showAll || tier == null) {
+        val afterSearch = if (query.isBlank()) {
             specs
         } else {
-            specs.filter { it.tier.ordinal <= tier.ordinal }
-        }
-
-        val afterSearch = if (query.isBlank()) {
-            afterTier
-        } else {
             val q = query.trim().lowercase()
-            afterTier.filter {
+            specs.filter {
                 it.key.contains(q, true) || it.label.contains(q, true) || it.help.contains(q, true)
             }
         }

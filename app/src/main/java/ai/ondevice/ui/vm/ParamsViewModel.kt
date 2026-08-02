@@ -4,7 +4,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import ai.ondevice.core.Modality
 import ai.ondevice.core.SparseParams
-import ai.ondevice.core.Tier
 import ai.ondevice.data.db.OnDeviceDatabase
 import ai.ondevice.data.prefs.AppPrefs
 import ai.ondevice.engine.EngineManager
@@ -142,19 +141,8 @@ class ParamsViewModel @Inject constructor(
         else -> Modality.TEXT
     }
 
-    fun setTier(tier: Tier?) {
-        _state.value = _state.value.copy(tier = tier)
-        recompute()
-    }
-
     fun setQuery(query: String) {
         _state.value = _state.value.copy(query = query)
-        recompute()
-    }
-
-    /** Screen state, not a preference. */
-    fun setShowAll(showAll: Boolean) {
-        _state.value = _state.value.copy(showAll = showAll)
         recompute()
     }
 
@@ -324,8 +312,6 @@ class ParamsViewModel @Inject constructor(
             visible = repository.visible(
                 specs = s.allSpecs,
                 values = s.values,
-                tier = s.tier,
-                showAll = s.showAll,
                 loadedBuildTag = s.buildTag,
                 modality = s.modality,
                 architecture = s.architecture,
@@ -361,9 +347,7 @@ data class ParamsState(
     val allSpecs: List<ParamSpec> = emptyList(),
     val visible: VisibleParams = VisibleParams(emptyList(), 0, 0, 0),
     val values: SparseParams = SparseParams.EMPTY,
-    val tier: Tier? = Tier.BASIC,
     val query: String = "",
-    val showAll: Boolean = false,
     val modality: String = "text",
     val architecture: String? = null,
     val modelId: String? = null,
@@ -380,9 +364,6 @@ data class ParamsState(
     val lastReport: ParamReport? = null,
 ) {
     val totalCount: Int get() = allSpecs.size
-    val basicCount: Int get() = allSpecs.count { it.tier == Tier.BASIC }
-    val advancedCount: Int get() = allSpecs.count { it.tier == Tier.ADVANCED }
-    val expertCount: Int get() = allSpecs.count { it.tier == Tier.EXPERT }
     val needsReload: Boolean get() = pendingReloadKeys.isNotEmpty()
 
     /** Null while the box is empty; otherwise whether what is in it parses. */

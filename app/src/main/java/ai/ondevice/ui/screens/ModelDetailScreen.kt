@@ -63,7 +63,7 @@ import ai.ondevice.ui.vm.ModelDetailViewModel
 fun ModelDetailScreen(
     modelId: String,
     onBack: () -> Unit,
-    onOpenParameters: (ai.ondevice.core.Tier, String) -> Unit,
+    onOpenParameters: (String) -> Unit,
     viewModel: ModelDetailViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(modelId) { viewModel.bind(modelId) }
@@ -103,7 +103,7 @@ fun ModelDetailScreen(
                             NIcons.Settings,
                             "Parameters",
                             onClick = {
-                                onOpenParameters(ai.ondevice.core.Tier.EXPERT, state.paramRuntimeId)
+                                onOpenParameters(state.paramRuntimeId)
                             },
                             size = 34.dp,
                             iconSize = 15.dp,

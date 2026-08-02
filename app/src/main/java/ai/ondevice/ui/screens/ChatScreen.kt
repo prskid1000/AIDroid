@@ -72,7 +72,7 @@ import ai.ondevice.ui.vm.StreamingMessage
 fun ChatScreen(
     currentRoute: String?,
     onNavigate: (String) -> Unit,
-    onOpenParameters: (ai.ondevice.core.Tier) -> Unit,
+    onOpenParameters: () -> Unit,
     onOpenPromptInspector: () -> Unit,
     onOpenModels: () -> Unit,
     // Activity-scoped so the prompt inspector inspects *this* conversation.
@@ -237,7 +237,7 @@ fun ChatScreen(
                 onChatTemplateChange = viewModel::setChatTemplate,
                 onTemplateKwargsChange = viewModel::setTemplateKwargs,
                 onLiveParam = viewModel::setLiveParam,
-                onOpenParametersAtTier = onOpenParameters,
+                onOpenParameters = onOpenParameters,
             )
         }
     }

@@ -19,7 +19,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import ai.ondevice.core.Fmt
-import ai.ondevice.core.Tier
 import ai.ondevice.data.db.ModelEntity
 import ai.ondevice.ui.components.NBottomSheet
 import ai.ondevice.ui.components.NButton
@@ -48,7 +47,7 @@ fun ChatSettingsSheet(
     onChatTemplateChange: (String?) -> Unit,
     onTemplateKwargsChange: (String) -> Unit,
     onLiveParam: (String, Any?) -> Unit,
-    onOpenParametersAtTier: (Tier) -> Unit,
+    onOpenParameters: () -> Unit,
 ) {
     // The same chrome Image and Voice use.
     NBottomSheet("This conversation", onDismiss, note = "reload not required") {
@@ -281,13 +280,6 @@ fun ChatSettingsSheet(
                     SectionKicker(
                         "Basic",
                         Modifier.padding(top = 20.dp, bottom = 4.dp),
-                        trailing = {
-                            Text(
-                                "${Tier.BASIC.label.lowercase()} tier",
-                                style = NocturneType.Help,
-                                color = NocturneColors.TextMuted,
-                            )
-                        },
                     )
 
                     BasicParamSlider(
@@ -307,7 +299,7 @@ fun ChatSettingsSheet(
                     // control on it.
                     NButton(
                         "All Parameters",
-                        onClick = { onOpenParametersAtTier(Tier.EXPERT) },
+                        onClick = { onOpenParameters() },
                         style = NButtonStyle.Primary,
                         block = true,
                         modifier = Modifier.padding(top = 14.dp),

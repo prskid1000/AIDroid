@@ -96,7 +96,7 @@ fun ParamRow(
 
         if (showKeyLine) {
             Text(
-                "${spec.key} · ${spec.tier.label.lowercase()}",
+                spec.key,
                 style = NocturneType.Mono2Xs,
                 color = NocturneColors.TextMuted,
                 modifier = Modifier.padding(bottom = 5.dp),

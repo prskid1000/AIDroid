@@ -45,14 +45,12 @@ object Routes {
     const val RESOLVE_RESULTS = "models/resolve"
     const val MODEL_DETAIL = "models/detail/{modelId}"
     const val DOWNLOADS = "models/downloads"
-    const val ALL_PARAMETERS = "params/all?tier={tier}&runtime={runtime}"
+    const val ALL_PARAMETERS = "params/all?runtime={runtime}"
     const val SAMPLER_CHAIN = "params/samplers"
 
-    /** One parameter screen, told which tier and which runtime to render. */
-    fun parameters(
-        tier: ai.ondevice.core.Tier = ai.ondevice.core.Tier.BASIC,
-        runtime: String,
-    ) = "params/all?tier=${tier.name}&runtime=${android.net.Uri.encode(runtime)}"
+    /** One parameter screen, told which runtime to render. */
+    fun parameters(runtime: String) =
+        "params/all?runtime=${android.net.Uri.encode(runtime)}"
     const val PROMPT_INSPECTOR = "chat/prompt"
     const val MASK_EDITOR = "image/mask"
 
@@ -101,9 +99,9 @@ fun OnDeviceApp(
             ChatScreen(
                 currentRoute = currentRoute,
                 onNavigate = { navController.navigateToRoot(it) },
-                onOpenParameters = { tier ->
+                onOpenParameters = {
                     navController.navigate(
-                        Routes.parameters(tier, ai.ondevice.engine.RuntimeRegistry.LLAMA),
+                        Routes.parameters(ai.ondevice.engine.RuntimeRegistry.LLAMA),
                     )
                 },
                 onOpenPromptInspector = { navController.navigate(Routes.PROMPT_INSPECTOR) },
@@ -119,10 +117,7 @@ fun OnDeviceApp(
                 onAddModel = { navController.navigate(Routes.ADD_MODEL) },
                 onOpenAdvanced = {
                     navController.navigate(
-                        Routes.parameters(
-                            tier = ai.ondevice.core.Tier.ADVANCED,
-                            runtime = ai.ondevice.engine.RuntimeRegistry.STABLE_DIFFUSION,
-                        ),
+                        Routes.parameters(ai.ondevice.engine.RuntimeRegistry.STABLE_DIFFUSION),
                     )
                 },
             )
@@ -134,7 +129,7 @@ fun OnDeviceApp(
                 // The engine decides which parameter set opens.
                 onOpenAdvanced = { runtime ->
                     navController.navigate(
-                        Routes.parameters(tier = ai.ondevice.core.Tier.ADVANCED, runtime = runtime),
+                        Routes.parameters(runtime),
                     )
                 },
             )
@@ -184,8 +179,8 @@ fun OnDeviceApp(
             ModelDetailScreen(
                 modelId = entry.arguments?.getString("modelId").orEmpty(),
                 onBack = { navController.popBackStack() },
-                onOpenParameters = { tier, runtime ->
-                    navController.navigate(Routes.parameters(tier, runtime))
+                onOpenParameters = { runtime ->
+                    navController.navigate(Routes.parameters(runtime))
                 },
             )
         }
@@ -195,23 +190,15 @@ fun OnDeviceApp(
         composable(
             route = Routes.ALL_PARAMETERS,
             arguments = listOf(
-                navArgument("tier") {
-                    type = NavType.StringType
-                    defaultValue = ai.ondevice.core.Tier.BASIC.name
-                },
                 navArgument("runtime") {
                     type = NavType.StringType
                     defaultValue = ai.ondevice.engine.RuntimeRegistry.LLAMA
                 },
             ),
         ) { entry ->
-            val tier = entry.arguments?.getString("tier")
-                ?.let { runCatching { ai.ondevice.core.Tier.valueOf(it) }.getOrNull() }
-                ?: ai.ondevice.core.Tier.BASIC
             AllParametersScreen(
                 onBack = { navController.popBackStack() },
                 onOpenSamplerChain = { navController.navigate(Routes.SAMPLER_CHAIN) },
-                initialTier = tier,
                 initialRuntime = entry.arguments?.getString("runtime")
                     ?: ai.ondevice.engine.RuntimeRegistry.LLAMA,
             )
