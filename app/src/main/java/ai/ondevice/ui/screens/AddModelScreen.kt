@@ -541,10 +541,21 @@ private fun StarterTable(onPick: (ai.ondevice.core.StarterModel) -> Unit) {
         StarterRows(entries, onPick)
     }
 
-    // Add-ons last: they attach to a diffusion model, so installing one before
-    // you have a base model gives you nothing to attach it to.
-    SectionKicker("Image add-ons", Modifier.padding(top = 18.dp, bottom = 7.dp))
-    StarterRows(ai.ondevice.core.StarterModels.ADDONS, onPick)
+    // Add-ons last, and under the architecture each belongs to.
+    //
+    // They used to be one block of fourteen rows headed "Image add-ons", with
+    // which base a part fitted written into its sentence — "SDXL only", "Built
+    // for Klein 4B". That is unreadable at four architectures, and getting it
+    // wrong is not obviously wrong: a LoRA from another family loads, costs its
+    // time and changes nothing at all.
+    ai.ondevice.core.StarterModels.BUNDLES.forEach { bundle ->
+        if (bundle.parts.isEmpty()) return@forEach
+        SectionKicker(
+            "For ${bundle.label}",
+            Modifier.padding(top = 18.dp, bottom = 7.dp),
+        )
+        StarterRows(bundle.parts, onPick)
+    }
     NHelp(
         "These appear in the Image screen's Attachments section once installed — the app files " +
             "them by role from their filenames, so it never needs to know the model by name.",

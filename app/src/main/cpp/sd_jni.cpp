@@ -587,7 +587,10 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
     params.n_threads        = threads > 0 ? threads : od_default_threads();
     params.enable_mmap      = true;
     // Flash attention stays off.
-    params.flash_attn       = false;
+    // Attention without materialising the N-by-N matrix. Every video example
+    // upstream ships passes --diffusion-fa, and the saving is memory as much as
+    // time, which is the constraint that binds on a phone.
+    params.flash_attn       = true;
 
     params.backend        = "CPU";
     params.params_backend = "CPU";

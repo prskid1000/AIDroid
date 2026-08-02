@@ -69,238 +69,243 @@ object StarterModels {
 
         // — images —
         //
-        // FLUX.2 Klein is what the app leads with now. It does two things SD
-        // cannot: it follows a written instruction, and it edits a picture you
-        // hand it rather than only making one from nothing. The 4B is the one
-        // a phone can hold — the 9B needs an 8B text encoder beside it and
-        // comes to about 11 GB before the image is even started.
-        //
-        // It costs more than its own size, and the reason is [FLUX_ENCODER]:
-        // FLUX.2 reads the prompt with a language model, not with CLIP.
+        // One entry per architecture, each the smallest quant still worth
+        // running. What each needs *beside* itself lives in [BUNDLES] below,
+        // keyed to the same architecture, so a component can no longer be read
+        // as belonging to whichever base it happens to sit next to.
         StarterModel(
-            repoId = "leejet/FLUX.2-klein-4B-GGUF",
+            repoId = Z_IMAGE_TURBO,
             modality = Modality.DIFFUSION,
-            summary = "Follows instructions and edits a picture you give it, in four steps. " +
-                "Needs the Qwen3 4B encoder and the FLUX.2 VAE below — 5.4 GB in all.",
-            sizeHint = "~2.5 GB at Q4",
+            summary = "The one to try first. Turbo, and the whole bundle is about 5 GB — " +
+                "less than SDXL once its encoder is counted. Published by the author of the " +
+                "runtime this app uses, so its tensor names are the ones it expects.",
+            sizeHint = "2.59 GB at Q2_K",
         ),
-
-        // Stable Diffusion's current generation, in the distillation that makes
-        // it usable here. Like Klein it keeps its text encoders outside the
-        // checkpoint, so it costs more than its own size — the two CLIPs below.
-        //
-        // Its own repo also carries the VAE, which is why the decoder listed
-        // below is no longer the gated one.
         StarterModel(
             repoId = SD35_TURBO,
             modality = Modality.DIFFUSION,
-            summary = "SD 3.5 medium, distilled to four steps. Reads a prompt closely and " +
-                "writes legible text. Needs CLIP-L, CLIP-G and its VAE below.",
+            summary = "The smallest base here, and the only one under 2 GB. Takes CLIP-L, " +
+                "CLIP-G and a decoder; its own repo carries the decoder.",
             sizeHint = "1.79 GB at Q4_K_M",
         ),
-
-        // The only model here a ControlNet or an IP-Adapter fits.
-        //
-        // sd.cpp builds both for a UNet and nothing else — control.hpp branches
-        // on SD1/SD2/SDXL/SVD, and the IP-Adapter's injection map is a list of
-        // UNet block names — so on Klein or SD 3.5, which are both diffusion
-        // transformers, either would load, cost its memory and change no
-        // pixels. SDXL is the last model built that way, which is the whole
-        // reason it is here: nothing newer can be steered by a pose or a depth
-        // map at all.
-        //
-        // It is also the one card that needs nothing beside it. The file
-        // carries the denoiser, both CLIPs and the decoder — 2641 tensors under
-        // `model.`, `cond_stage_model.` and `first_stage_model.` — which is why
-        // it is four gigabytes where a bare SDXL denoiser is one and a half.
-        // Every other quantised release here is the denoiser alone.
         StarterModel(
-            repoId = "gpustack/stable-diffusion-xl-1.0-turbo-GGUF",
+            repoId = SDXL_TURBO,
             modality = Modality.DIFFUSION,
-            summary = "The one model a ControlNet or IP-Adapter fits — steer it with a pose, " +
-                "depth or edge map. Complete on its own: no encoders, no VAE. Turbo, so a " +
-                "few steps rather than twenty.",
+            summary = "The only one here that takes a ControlNet or an IP-Adapter — both are " +
+                "built for a UNet and this is the only UNet. Carries its own encoders and " +
+                "decoder, so it needs nothing else to run.",
             sizeHint = "3.94 GB at Q4_0",
         ),
-    )
-
-    /** The text encoder FLUX.2 Klein 4B reads its prompt with. */
-    const val FLUX_ENCODER = "unsloth/Qwen3-4B-GGUF"
-
-    /** SD 3.5's three, which live together in one repo. */
-    const val SD35_ENCODERS = "Comfy-Org/stable-diffusion-3.5-fp8"
-
-    /** The four-step SD 3.5, which also carries the decoder the base repo gates. */
-    const val SD35_TURBO = "tensorart/stable-diffusion-3.5-medium-turbo"
-
-    /** The things that attach to a diffusion model. */
-    val ADDONS: List<StarterModel> = listOf(
-        // — the two FLUX.2 Klein cannot run without —
         StarterModel(
-            repoId = FLUX_ENCODER,
+            repoId = FLUX2_KLEIN,
             modality = Modality.DIFFUSION,
-            role = AttachmentRole.LLM_ENCODER,
-            summary = "FLUX.2 Klein 4B reads its prompt with this. Required, and the " +
-                "reason a 4B image model costs 5 GB. Pick Q4_K_M.",
-            sizeHint = "~2.5 GB at Q4",
-        ),
-        StarterModel(
-            repoId = "Comfy-Org/flux2-klein-4B",
-            modality = Modality.DIFFUSION,
-            role = AttachmentRole.VAE,
-            summary = "FLUX.2's decoder, at split_files/vae/flux2-vae.safetensors. " +
-                "Required: Klein produces latents and nothing else can read them.",
-            sizeHint = "~336 MB",
-        ),
-
-        // — the three SD 3.5 cannot run without, all from one repo —
-        StarterModel(
-            repoId = SD35_ENCODERS,
-            modality = Modality.DIFFUSION,
-            role = AttachmentRole.CLIP_L,
-            summary = "SD 3.5's first text encoder — split_files/text_encoders/clip_l.",
-            sizeHint = "~246 MB",
-        ),
-        StarterModel(
-            repoId = SD35_ENCODERS,
-            modality = Modality.DIFFUSION,
-            role = AttachmentRole.CLIP_G,
-            summary = "SD 3.5's second — split_files/text_encoders/clip_g.",
-            sizeHint = "~1.4 GB",
-        ),
-        // SD 3.5's decoder, which used to be the one component with no ungated
-        // source: Comfy-Org's repo carries the three encoders and no VAE, and
-        // Stability's own repo wants a licence accepted and a token pasted
-        // before it will serve a 168 MB file. The turbo repo carries the same
-        // decoder in the diffusers layout and gates nothing.
-        //
-        // A 16-channel decoder, and the reason SDXL's cannot stand in: sd.cpp
-        // checks the shape and refuses, "expected [3,3,16,512]".
-        StarterModel(
-            repoId = SD35_TURBO,
-            modality = Modality.DIFFUSION,
-            role = AttachmentRole.VAE,
-            summary = "SD 3.5's decoder — 16-channel, so neither the SDXL nor the FLUX VAE can " +
-                "stand in. At vae/, in the same repo as the model itself.",
-            sizeHint = "168 MB",
-        ),
-
-        StarterModel(
-            repoId = SD35_ENCODERS,
-            modality = Modality.DIFFUSION,
-            role = AttachmentRole.T5XXL,
-            summary = "SD 3.5's third, and the one that reads a long prompt as a sentence " +
-                "rather than as keywords — split_files/text_encoders/t5xxl.",
-            sizeHint = "~4.9 GB fp8",
-        ),
-
-        // — the two only SDXL can use, and one optional fix —
-        //
-        // The SDXL card above is a complete checkpoint, so nothing here is
-        // required with it. This one is a repair, not a missing part: SDXL's
-        // original decoder overflows in fp16 and returns a black image, and
-        // this is the same decoder rescaled so it does not.
-        StarterModel(
-            repoId = "madebyollin/sdxl-vae-fp16-fix",
-            modality = Modality.DIFFUSION,
-            role = AttachmentRole.VAE,
-            summary = "SDXL's decoder, rebuilt so it does not produce a black image in fp16. " +
-                "Optional — the SDXL card carries its own — and worth having if yours comes " +
-                "out black.",
-            sizeHint = "319 MB",
-        ),
-        StarterModel(
-            repoId = "r3gm/controlnet-union-sdxl-1.0-fp16",
-            modality = Modality.DIFFUSION,
-            role = AttachmentRole.CONTROLNET,
-            // xinsir's original is fp32 at the same tensor count; this is the
-            // fp16 mirror. There is no GGUF of it anywhere — ComfyUI's GGUF
-            // loader does not handle ControlNets, so nobody has quantised one.
-            summary = "Canny, depth, pose, scribble and tile in one file. Attach a control " +
-                "image on the Image screen and it steers the composition. SDXL only.",
-            sizeHint = "2.39 GB fp16",
-        ),
-        StarterModel(
-            repoId = "h94/IP-Adapter",
-            modality = Modality.DIFFUSION,
-            role = AttachmentRole.IP_ADAPTER,
-            summary = "Style from a reference picture instead of from words. Pick " +
-                "ip-adapter_sdxl_vit-h, and take the CLIP-Vision encoder below with it — " +
-                "without one it binds to nothing.",
-            sizeHint = "666 MB",
-        ),
-        StarterModel(
-            repoId = "h94/IP-Adapter",
-            modality = Modality.DIFFUSION,
-            role = AttachmentRole.CLIP_VISION,
-            // models/image_encoder is the ViT-H, which is what the _vit-h
-            // adapters were trained against; sdxl_models/image_encoder is the
-            // bigG and 1.1 GB larger for no gain unless you picked that adapter.
-            summary = "The eye the IP-Adapter looks through — models/image_encoder. " +
-                "Nothing else uses it, and it is the expensive half of the pair.",
-            sizeHint = "2.4 GB",
-        ),
-
-        // — one LoRA per family, because a LoRA is trained against one —
-        //
-        // A LoRA is a small set of weight deltas, and the deltas are shaped
-        // like the model they were trained on. An SDXL LoRA on FLUX matches no
-        // tensor name and changes nothing; there is no universal one. So there
-        // is one here per base model this app offers, and each says which.
-        //
-        // They are also the cheapest way to see the stack work: two at once,
-        // each at its own strength, is what the LoRA row on All Parameters is
-        // for.
-        //
-        // One caveat on all three: the file list is pre-narrowed only when the
-        // filename says "lora", which is a convention rather than a rule. Where
-        // it does not, every file in the repo is offered and the role is set by
-        // hand on the download screen — which is one extra tap, not a wall.
-        StarterModel(
-            repoId = "ostris/photorealistic-slider-sdxl-lora",
-            modality = Modality.DIFFUSION,
-            role = AttachmentRole.LORA,
-            // A slider: positive strength towards photographic, negative away
-            // from it. 24 MB is the whole of it.
-            summary = "Pushes SDXL towards photography and away from the illustrated look it " +
-                "drifts to. A slider, so a negative strength goes the other way.",
-            sizeHint = "24 MB",
-        ),
-        // Trained against SD 3.5 *medium*, which is the size this app offers.
-        // The plentiful SD 3.5 LoRAs are for Large — 8B against 2.5B, with more
-        // blocks and wider ones — and its deltas fit nothing here.
-        StarterModel(
-            repoId = "bghira/sd35m-photo-SLG-shift0.8-attn_ff-512to2048px",
-            modality = Modality.DIFFUSION,
-            role = AttachmentRole.LORA,
-            summary = "Photographic realism for SD 3.5 medium — trained from 512 up to 2048 " +
-                "pixels, so it holds up at the sizes a phone will actually render.",
-            sizeHint = "116 MB",
-        ),
-        StarterModel(
-            repoId = "nomadoor/flux-2-klein-4B-360-erp-outpaint-lora",
-            modality = Modality.DIFFUSION,
-            role = AttachmentRole.LORA,
-            // Trained against klein-base-4B, which is the Klein this app ships.
-            // The 9B LoRAs are the more numerous kind and fit a model that
-            // needs an 8B encoder beside it.
-            summary = "Extends a picture outwards into a full 360° panorama. Built for Klein " +
-                "4B, which is the FLUX card above — the 9B LoRAs elsewhere do not fit it.",
-            sizeHint = "46 MB",
-        ),
-
-        // The upscaler is model-agnostic: it enlarges a finished PNG and does
-        // not care what made it.
-        StarterModel(
-            repoId = "ai-forever/Real-ESRGAN",
-            modality = Modality.DIFFUSION,
-            role = AttachmentRole.UPSCALER,
-            // The repo holds ×2, ×4 and ×8, all named RealESRGAN_* so the role is read off the filename.
-            summary = "Enlarge a finished picture ×4. Pick RealESRGAN_x4 — the ×2 and ×8 " +
-                "networks need upsample blocks this build's upscaler does not have.",
-            sizeHint = "~67 MB",
+            summary = "Follows a written instruction and edits a picture you hand it, in " +
+                "four steps. Reads its prompt with a language model, so the encoder beside " +
+                "it is most of what it costs.",
+            sizeHint = "2.46 GB at Q4_0",
         ),
     )
+
+    // Repo ids used by more than one card, or long enough to be worth a name.
+    private const val Z_IMAGE_TURBO = "leejet/Z-Image-Turbo-GGUF"
+    private const val SD35_TURBO = "tensorart/stable-diffusion-3.5-medium-turbo"
+    private const val SD35_ENCODERS = "Comfy-Org/stable-diffusion-3.5-fp8"
+    private const val SDXL_TURBO = "gpustack/stable-diffusion-xl-1.0-turbo-GGUF"
+    private const val IP_ADAPTER_REPO = "h94/IP-Adapter"
+    private const val FLUX2_KLEIN = "leejet/FLUX.2-klein-4B-GGUF"
+
+    /**
+     * What one architecture needs beside its base model, and what it can take.
+     *
+     * Grouped because the flat list could not say which component went with
+     * which base. That was recorded in comment banners and in English inside
+     * each summary — "SDXL only", "Built for Klein 4B" — which the screen could
+     * not read, so it rendered every add-on in one undifferentiated block. With
+     * four architectures and their LoRAs that block is unreadable, and picking
+     * wrong is not obviously wrong: a LoRA from another family loads, costs its
+     * time and changes nothing.
+     *
+     * Every repo and filename here was checked against the Hugging Face API
+     * rather than recalled. Where nothing suitable exists the row is absent —
+     * a card that 404s is worse than no card, and a component from the wrong
+     * family is worse than both.
+     */
+    data class StarterBundle(
+        /** As stable-diffusion.cpp names it, so [DiffusionFamily] agrees. */
+        val architecture: String,
+        val label: String,
+        val base: StarterModel,
+        val parts: List<StarterModel>,
+    )
+
+    val BUNDLES: List<StarterBundle> = listOf(
+        StarterBundle(
+            architecture = "Z-Image",
+            label = "Z-Image Turbo",
+            base = ALL.first { it.repoId == Z_IMAGE_TURBO },
+            parts = listOf(
+                StarterModel(
+                    repoId = "worstplayer/Z-Image_Qwen_3_4b_text_encoder_GGUF",
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.LLM_ENCODER,
+                    summary = "Required. Z-Image reads its prompt with Qwen3, and this " +
+                        "conversion was made for it rather than adapted from a chat model.",
+                    sizeHint = "2.08 GB at Q3_K_M",
+                ),
+                StarterModel(
+                    repoId = "Comfy-Org/z_image_turbo",
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.VAE,
+                    summary = "Required, at split_files/vae/ae.safetensors. The same " +
+                        "16-channel autoencoder FLUX uses — this copy is not gated, and the " +
+                        "one the runtime's own docs point at is.",
+                    sizeHint = "~335 MB",
+                ),
+                StarterModel(
+                    repoId = "alfredplpl/z-image-modern-anime-lora",
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.LORA,
+                    summary = "Anime. Trained on this architecture rather than adapted to it.",
+                    sizeHint = "~184 MB",
+                ),
+                StarterModel(
+                    repoId = "suayptalha/Z-Image-Turbo-Realism-LoRA",
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.LORA,
+                    summary = "Photoreal. Ships in diffusers key naming, which the runtime " +
+                        "may not match — the Image screen says so if none of it applied.",
+                    sizeHint = "~85 MB",
+                ),
+            ),
+        ),
+        StarterBundle(
+            architecture = "SD3.x",
+            label = "SD 3.5 medium turbo",
+            base = ALL.first { it.repoId == SD35_TURBO },
+            parts = listOf(
+                StarterModel(
+                    repoId = SD35_ENCODERS,
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.CLIP_L,
+                    summary = "Required, at text_encoders/clip_l.",
+                    sizeHint = "~246 MB",
+                ),
+                StarterModel(
+                    repoId = SD35_ENCODERS,
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.CLIP_G,
+                    summary = "Required, at text_encoders/clip_g.",
+                    sizeHint = "~1.39 GB",
+                ),
+                StarterModel(
+                    repoId = SD35_TURBO,
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.VAE,
+                    summary = "Required, at vae/. The base model's own repo carries it.",
+                    sizeHint = "~168 MB",
+                ),
+                StarterModel(
+                    repoId = "city96/t5-v1_1-xxl-encoder-gguf",
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.T5XXL,
+                    summary = "Optional. Long written-out prompts read better with it. " +
+                        "Quantised to under half the fp8 release, which is 4.89 GB.",
+                    sizeHint = "2.10 GB at Q3_K_S",
+                ),
+            ),
+        ),
+        StarterBundle(
+            architecture = "SDXL",
+            label = "SDXL turbo",
+            base = ALL.first { it.repoId == SDXL_TURBO },
+            parts = listOf(
+                StarterModel(
+                    repoId = "Linaqruf/anime-detailer-xl-lora",
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.LORA,
+                    summary = "Anime, and small enough to be worth trying on anything.",
+                    sizeHint = "~43 MB",
+                ),
+                StarterModel(
+                    repoId = "ostris/photorealistic-slider-sdxl-lora",
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.LORA,
+                    summary = "Photoreal, at a strength you set rather than a look you take.",
+                    sizeHint = "~24 MB",
+                ),
+                StarterModel(
+                    repoId = "diffusers/controlnet-canny-sdxl-1.0-small",
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.CONTROLNET,
+                    summary = "Hold an outline while the prompt changes everything else. " +
+                        "Distilled — an eighth the size of the full union model.",
+                    sizeHint = "~320 MB",
+                ),
+                StarterModel(
+                    repoId = IP_ADAPTER_REPO,
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.IP_ADAPTER,
+                    summary = "Take the style of a picture you supply. Use the vit-h file at " +
+                        "sdxl_models/ip-adapter_sdxl_vit-h — the other one needs an encoder " +
+                        "a gigabyte larger for no gain.",
+                    sizeHint = "~698 MB",
+                ),
+                StarterModel(
+                    repoId = IP_ADAPTER_REPO,
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.CLIP_VISION,
+                    summary = "Required by the IP-Adapter above and useless without it, at " +
+                        "models/image_encoder. This is the vit-h encoder that file expects.",
+                    sizeHint = "~2.53 GB",
+                ),
+                StarterModel(
+                    repoId = "madebyollin/sdxl-vae-fp16-fix",
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.VAE,
+                    summary = "Optional, and a substitution rather than a gap: this " +
+                        "checkpoint has its own decoder. Fixes the fp16 artefacts SDXL's " +
+                        "original is known for.",
+                    sizeHint = "~335 MB",
+                ),
+            ),
+        ),
+        StarterBundle(
+            architecture = "Flux.2 klein",
+            label = "FLUX.2 Klein 4B",
+            base = ALL.first { it.repoId == FLUX2_KLEIN },
+            parts = listOf(
+                StarterModel(
+                    repoId = "unsloth/Qwen3-4B-GGUF",
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.LLM_ENCODER,
+                    summary = "Required. Klein reads its prompt with Qwen3 rather than with " +
+                        "CLIP — take the UD-IQ2_M file, a gigabyte under Q4_K_M and still an " +
+                        "imatrix quant.",
+                    sizeHint = "1.53 GB at UD-IQ2_M",
+                ),
+                StarterModel(
+                    repoId = "Comfy-Org/vae-text-encorder-for-flux-klein-4b",
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.VAE,
+                    summary = "Required, at split_files/vae/flux2-vae.safetensors. Klein " +
+                        "produces latents and nothing else can read them.",
+                    sizeHint = "~336 MB",
+                ),
+                StarterModel(
+                    repoId = "nomadoor/flux-2-klein-4B-360-erp-outpaint-lora",
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.LORA,
+                    summary = "Extends a picture outward into a 360 panorama. The only LoRA " +
+                        "found for this architecture — it is new enough that the style ones " +
+                        "do not exist yet.",
+                    sizeHint = "~46 MB",
+                ),
+            ),
+        ),
+    )
+
+    /** Every add-on, flattened, for whatever still wants one list. */
+    val ADDONS: List<StarterModel> = BUNDLES.flatMap { it.parts }
 
     /** Grouped for display, in the order a new install would want them. */
     val BY_MODALITY: List<Pair<Modality, List<StarterModel>>> = listOf(
