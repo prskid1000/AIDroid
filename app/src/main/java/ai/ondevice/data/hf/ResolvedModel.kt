@@ -66,6 +66,41 @@ data class ResolvedModel(
     val hasPickleFiles: Boolean,
 ) {
     val isVision: Boolean get() = companions.any { it.role == CompanionRole.VISION_PROJECTOR }
+
+    /**
+     * The same model, with no two variants answering to one name.
+     *
+     * A variant's name *is* its identity here: the screen draws a row as
+     * selected when it matches the chosen name, and the download looks the
+     * variant up by it. Four places build that name, all of them from a
+     * filename, and a filename is only unique within its folder — a repo
+     * holding `ema/pytorch_lora_weights.safetensors` beside the root copy of
+     * it produced two rows called the same thing, both drawn as selected at
+     * once, and picking either gave whichever the lookup reached first.
+     *
+     * Rather than teach each of the four to disambiguate, the guarantee is
+     * made once, here, on the way to the screen. A name that already stands
+     * alone is left exactly as it was, so the ordinary case — `Q4_K_M` beside
+     * `Q8_0` — reads as it always did.
+     */
+    fun withDistinctQuantNames(): ResolvedModel {
+        val clashing = quants.groupBy { it.name }.filterValues { it.size > 1 }
+        if (clashing.isEmpty()) return this
+
+        val paths = quants.map { it.files.firstOrNull()?.filename ?: it.name }
+        val labels = ai.ondevice.core.FileLabels.distinguish(paths.distinct())
+        return copy(
+            quants = quants.mapIndexed { index, variant ->
+                if (variant.name !in clashing) {
+                    variant
+                } else {
+                    variant.copy(
+                        name = labels[paths[index]]?.removeSuffix(".safetensors") ?: variant.name,
+                    )
+                }
+            },
+        )
+    }
 }
 
 /** One downloadable variant. */

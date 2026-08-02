@@ -215,16 +215,6 @@ fun ImageScreen(
                     onPick = pickControl,
                     onClear = { viewModel.setControlImage(null) },
                 )
-                if (state.controlImageUri != null) {
-                    LabeledSlider(
-                        label = "Control strength",
-                        value = state.controlStrength,
-                        display = String.format("%.2f", state.controlStrength),
-                        range = 0f..1f,
-                        onChange = viewModel::setControlStrength,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                }
             }
 
             // A third picture, and a third thing: the IP-Adapter reads style
@@ -239,16 +229,6 @@ fun ImageScreen(
                     onPick = pickStyle,
                     onClear = { viewModel.setStyleImage(null) },
                 )
-                if (state.styleImageUri != null) {
-                    LabeledSlider(
-                        label = "Style strength",
-                        value = state.styleStrength,
-                        display = String.format("%.2f", state.styleStrength),
-                        range = 0f..1f,
-                        onChange = viewModel::setStyleStrength,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                }
             }
 
             // What the attached picture is for. Four screens once, and they
@@ -724,6 +704,34 @@ private fun AttachmentsSection(
                             onChange = { viewModel.setAttachmentWeight(attachment.modelId, it) },
                             modifier = Modifier.padding(top = 6.dp),
                         )
+                    }
+                    // A ControlNet and an IP-Adapter take one strength each,
+                    // and it is a number about the run rather than about the
+                    // file — so it is not the per-attachment weight above, and
+                    // it belongs beside its component all the same. It lived
+                    // under the picture pickers on the main screen, which is
+                    // where the picture is chosen and not where the component
+                    // is; two dials in two places for one idea.
+                    if (attachment.enabled) {
+                        when (attachment.role) {
+                            ai.ondevice.core.AttachmentRole.CONTROLNET -> LabeledSlider(
+                                label = "Strength",
+                                value = state.controlStrength,
+                                display = String.format("%.2f", state.controlStrength),
+                                range = 0f..1f,
+                                onChange = viewModel::setControlStrength,
+                                modifier = Modifier.padding(top = 6.dp),
+                            )
+                            ai.ondevice.core.AttachmentRole.IP_ADAPTER -> LabeledSlider(
+                                label = "Strength",
+                                value = state.styleStrength,
+                                display = String.format("%.2f", state.styleStrength),
+                                range = 0f..1f,
+                                onChange = viewModel::setStyleStrength,
+                                modifier = Modifier.padding(top = 6.dp),
+                            )
+                            else -> Unit
+                        }
                     }
                 }
             }

@@ -330,9 +330,13 @@ private fun NothingInstalled() {
 /**
  * Several files under one key, each with its own strength.
  *
- * The stack is ordered and duplicates are allowed to be prevented rather than
- * policed: the same LoRA twice is the same LoRA at whichever multiplier came
- * last, so the picker offers only files not already in the stack.
+ * All of them apply to the same run: sd.cpp takes an array of LoRAs with a
+ * multiplier each and adds every one of their deltas to the model, so a style
+ * at 0.8 under a subject at 0.5 is one picture with both in it.
+ *
+ * The same file twice is not one of the useful combinations — it is the same
+ * LoRA at whichever multiplier came last — so the picker offers only files not
+ * already in the stack.
  */
 @Composable
 private fun WeightedPathStack(
@@ -391,12 +395,23 @@ private fun WeightedPathStack(
             }
         }
 
+        // The button is always drawn, and says why when it cannot be pressed.
+        //
+        // It used to disappear once every installed file was in the stack,
+        // which is the state anybody with exactly one LoRA reaches on their
+        // first tap — and the disappearance reads as "this holds one", which is
+        // the opposite of what this control is for.
         val unused = choices.filter { choice -> entries.none { it.path == choice.path } }
-        if (unused.isNotEmpty()) {
-            ai.ondevice.ui.components.NButton(
-                if (entries.isEmpty()) "Add one" else "Add another",
-                onClick = { onChange(entries + ai.ondevice.core.WeightedPath(unused.first().path)) },
-                block = true,
+        ai.ondevice.ui.components.NButton(
+            if (entries.isEmpty()) "Add one" else "Add another",
+            onClick = { unused.firstOrNull()?.let { onChange(entries + ai.ondevice.core.WeightedPath(it.path)) } },
+            enabled = unused.isNotEmpty(),
+            block = true,
+        )
+        if (unused.isEmpty() && entries.isNotEmpty()) {
+            NHelp(
+                "All ${entries.size} installed here are in the stack. They apply together, each " +
+                    "at its own strength; install another and it can join them.",
             )
         }
     }

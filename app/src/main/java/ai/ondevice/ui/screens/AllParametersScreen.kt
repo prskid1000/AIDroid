@@ -279,13 +279,48 @@ fun AllParametersScreen(
  * four unrelated files.
  */
 private fun groupLabel(group: String): String = when (group) {
+    // Shared
+    "generation" -> "Generation"
+    "sampling" -> "Sampling"
+    "model" -> "Model"
+    "lora" -> "LoRA"
+    "voice" -> "Voice"
+    "output" -> "Output"
+
+    // llama.cpp
+    "dynatemp" -> "Dynamic temperature"
+    "repetition" -> "Repetition"
+    "dry" -> "DRY repetition"
+    "xtc" -> "XTC"
+    "mirostat" -> "Mirostat"
+    "constraints" -> "Constrained output"
+    "context" -> "Context & KV cache"
+    "rope" -> "RoPE & long context"
+    "loading" -> "Loading & threads"
+    "vision" -> "Vision"
+    "chat" -> "Chat template"
+
+    // whisper.cpp
+    "transcribe" -> "Transcription"
+    "decoding" -> "Decoding"
+    "segments" -> "Segments"
+    "thresholds" -> "Quality thresholds"
+    "audio" -> "Audio window"
+
+    // stable-diffusion.cpp
+    "prompt" -> "Prompt"
+    "size" -> "Size"
+    "guidance" -> "Guidance"
+    "img2img" -> "Image to image"
     "encoder" -> "Prompt encoder"
     "decoder" -> "Decoder"
     "controlnet" -> "ControlNet"
     "ipadapter" -> "IP-Adapter"
-    "lora" -> "LoRA"
     "embeddings" -> "Embeddings"
-    "img2img" -> "Image to image"
     "postprocess" -> "Post-processing"
+
+    // kokoro
+    "synthesis" -> "Synthesis"
+
     else -> group
 }

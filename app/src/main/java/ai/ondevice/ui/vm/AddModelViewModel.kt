@@ -116,7 +116,10 @@ class AddModelViewModel @Inject constructor(
                         enriched,
                         _state.value.intendedRole ?: _state.value.selectedRole,
                     )
-                    val forRole = narrowed.model
+                    // Every producer of a variant list passes through here, so
+                    // this is where the names are made to stand apart — before
+                    // one of them is picked as the default and stored.
+                    val forRole = narrowed.model.withDistinctQuantNames()
                     val defaultQuant = pickDefaultQuant(forRole)
                     _state.value = _state.value.copy(
                         resolving = false,
