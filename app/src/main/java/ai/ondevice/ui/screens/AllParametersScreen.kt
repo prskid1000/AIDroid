@@ -31,6 +31,7 @@ import ai.ondevice.ui.components.NCardKicker
 import ai.ondevice.ui.components.NHelp
 import ai.ondevice.ui.components.NInput
 import ai.ondevice.ui.components.NPills
+import ai.ondevice.ui.components.NTextArea
 import ai.ondevice.ui.components.PhoneScaffold
 import ai.ondevice.ui.components.PushToolbar
 import ai.ondevice.ui.components.SectionKicker
@@ -217,16 +218,39 @@ fun AllParametersScreen(
             ) {
                 NCardKicker("Escape hatch · §16.6")
                 Text("Raw parameters", style = NocturneType.CardTitleSm)
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .ring(NocturneColors.Divider, Radius.Sm)
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                // A text area, not a line: this is where JSON gets typed by
+                // hand, and JSON has newlines in it. It scrolls, so a long
+                // object stays editable instead of running off the side.
+                NTextArea(
+                    value = state.rawJson,
+                    onValueChange = viewModel::setRawJson,
+                    minHeight = 120.dp,
+                    textStyle = NocturneType.MonoCode,
+                )
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    NInput(
-                        value = state.rawJson,
-                        onValueChange = viewModel::setRawJson,
-                        textStyle = NocturneType.MonoCode,
+                    Text(
+                        when (state.rawJsonParses) {
+                            null -> "Empty"
+                            true -> "Parses"
+                            false -> "Not valid JSON yet"
+                        },
+                        style = NocturneType.Help,
+                        color = if (state.rawJsonParses == false) {
+                            NocturneColors.Neutral300
+                        } else {
+                            NocturneColors.Accent300
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                    NButton(
+                        "Format",
+                        onClick = viewModel::formatRawJson,
+                        enabled = state.rawJsonParses == true,
+                        style = NButtonStyle.Ghost,
                     )
                 }
                 Text(

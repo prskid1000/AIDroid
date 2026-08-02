@@ -94,12 +94,14 @@ class DiffusionEngine(
             )
             check(newHandle != 0L) { "The runtime returned no handle for $modelPath." }
             handle = newHandle
+            residentComponents = AttachmentRole.entries.mapNotNull { role ->
+                pathFor(role).takeIf { it.isNotBlank() }?.let { role to File(it).name }
+            }
             android.util.Log.i(
                 TAG,
                 "loaded ${File(modelPath).name} (${File(modelPath).length() / 1024 / 1024} MB) " +
                     "threads=$threads " +
-                    "attached=" + AttachmentRole.entries
-                    .mapNotNull { role -> pathFor(role).takeIf { it.isNotBlank() }?.let { role.name } }
+                    "attached=" + residentComponents.map { it.first.name }
                     .ifEmpty { listOf("none") }.joinToString("+"),
             )
             loadedModelId = modelId
@@ -134,11 +136,32 @@ class DiffusionEngine(
     var bareDiffusion: Boolean = false
         private set
 
+    /**
+     * What the loaded context is holding, as role → the file's own name.
+     *
+     * Empty when nothing is loaded. The screen reads this to say what is
+     * resident rather than what is merely chosen — the two differ every time a
+     * component is switched off, and differed silently until now.
+     */
+    @Volatile
+    var residentComponents: List<Pair<AttachmentRole, String>> = emptyList()
+        private set
+
+    /** The loader's own account of where it has got to, or null between loads. */
+    val loadStage: String?
+        get() = if (SdBridge.available) SdBridge.nativeLoadStage().takeIf { it.isNotBlank() } else null
+
     fun unload() {
         if (handle != 0L) {
+            android.util.Log.i(
+                TAG,
+                "unloading " + (loadedModelId ?: "?") +
+                    residentComponents.joinToString("") { " -${it.first.name}" },
+            )
             SdBridge.nativeFree(handle)
             handle = 0L
         }
+        residentComponents = emptyList()
         loadedModelId = null
     }
 

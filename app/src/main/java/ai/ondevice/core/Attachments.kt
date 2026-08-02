@@ -142,4 +142,15 @@ data class ModelAttachment(
      * against has changed too.
      */
     val chosenWeight: Float = weight,
+    /**
+     * Whether the loaded model has any use for this role.
+     *
+     * False keeps the row visible and unusable rather than removing it, and the
+     * distinction matters more than it looks: the loader falls back to the
+     * stored path for any role the caller does not mention, so a role dropped
+     * from this list is a role the loader quietly loads anyway. An LLM encoder
+     * left over from FLUX was costing SDXL two and a half gigabytes that way,
+     * with nothing on screen to say so.
+     */
+    val applicable: Boolean = true,
 )

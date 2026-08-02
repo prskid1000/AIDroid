@@ -23,6 +23,13 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
 import javax.inject.Inject
 
+/** Laid out rather than minified: this text is read and edited by hand. */
+private val PRETTY = kotlinx.serialization.json.Json {
+    prettyPrint = true
+    prettyPrintIndent = "  "
+    isLenient = true
+}
+
 /** S8/S9 — the manifest renderer's state, and the escape hatch. */
 @HiltViewModel
 class ParamsViewModel @Inject constructor(
@@ -226,7 +233,29 @@ class ParamsViewModel @Inject constructor(
 
     /** SPEC §16.6 — arbitrary JSON straight through to the runtime. */
     fun setRawJson(json: String) {
-        _state.value = _state.value.copy(rawJson = json)
+        _state.value = _state.value.copy(rawJson = json, rawError = null)
+    }
+
+    /**
+     * Re-indent what is in the box, if it parses.
+     *
+     * The box is where a parameter the manifest has never heard of gets typed,
+     * which means it is where JSON gets typed by hand on a phone keyboard. A
+     * button that lays it out is the difference between reading it back and
+     * squinting at it — and it doubles as the check that it parses at all,
+     * because it silently does nothing when it does not.
+     */
+    fun formatRawJson() {
+        val parsed = runCatching {
+            PRETTY.parseToJsonElement(_state.value.rawJson)
+        }.getOrNull() ?: run {
+            _state.value = _state.value.copy(rawError = "Not valid JSON, so there is nothing to lay out.")
+            return
+        }
+        _state.value = _state.value.copy(
+            rawJson = PRETTY.encodeToString(kotlinx.serialization.json.JsonElement.serializer(), parsed),
+            rawError = null,
+        )
     }
 
     fun applyRawJson() {
@@ -355,6 +384,12 @@ data class ParamsState(
     val advancedCount: Int get() = allSpecs.count { it.tier == Tier.ADVANCED }
     val expertCount: Int get() = allSpecs.count { it.tier == Tier.EXPERT }
     val needsReload: Boolean get() = pendingReloadKeys.isNotEmpty()
+
+    /** Null while the box is empty; otherwise whether what is in it parses. */
+    val rawJsonParses: Boolean?
+        get() = rawJson.takeIf { it.isNotBlank() }?.let {
+            runCatching { PRETTY.parseToJsonElement(it) }.isSuccess
+        }
 
     /**
      * Whether the reload happens on the button or at the start of the next run.

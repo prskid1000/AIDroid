@@ -125,6 +125,26 @@ fun ImageScreen(
                 )
             }
 
+            // Loading four gigabytes is minutes of one opaque call. Name what
+            // is going in, and let the loader say where it has got to.
+            if (state.loadingModel && state.loadingWhat.isNotEmpty()) {
+                NCard(Modifier.padding(top = 10.dp), ring = NocturneColors.Accent800) {
+                    Text("Loading into memory", style = NocturneType.CardTitleSm)
+                    state.loadingWhat.forEach {
+                        Text(it, style = NocturneType.MonoXs, color = NocturneColors.Accent300)
+                    }
+                    state.loadingStage?.let {
+                        Text(
+                            it,
+                            style = NocturneType.Help,
+                            color = NocturneColors.TextMuted,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+
             // §1.2 — a model that cannot run says why, in the runtime's own
             // words, instead of leaving a blank frame.
             state.error?.let { message ->
@@ -660,7 +680,13 @@ private fun AttachmentsSection(
                             if (attachment.enabled) NocturneColors.Accent else NocturneColors.Divider,
                             Radius.Md,
                         )
-                        .nClickableFlat { viewModel.toggleAttachment(attachment.modelId) }
+                        .then(
+                            if (attachment.applicable) {
+                                Modifier.nClickableFlat { viewModel.toggleAttachment(attachment.modelId) }
+                            } else {
+                                Modifier
+                            },
+                        )
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                 ) {
                     Row(
@@ -677,9 +703,23 @@ private fun AttachmentsSection(
                             modifier = Modifier.weight(1f),
                         )
                         Text(
-                            if (attachment.enabled) "on" else "off",
+                            when {
+                                !attachment.applicable -> "n/a"
+                                attachment.enabled -> "on"
+                                else -> "off"
+                            },
                             style = NocturneType.Mono2Xs,
                             color = if (attachment.enabled) NocturneColors.Accent else NocturneColors.TextMuted,
+                        )
+                    }
+                    // Chosen, but this model has no use for it — so it is not
+                    // armed, not passed to the loader, and says which.
+                    if (!attachment.applicable) {
+                        Text(
+                            "Not used by ${state.recognisedAs ?: state.model?.architecture ?: "this model"}",
+                            style = NocturneType.Help,
+                            color = NocturneColors.TextMuted,
+                            modifier = Modifier.padding(top = 2.dp),
                         )
                     }
                     // Which file is in the slot — by the name it is known by,

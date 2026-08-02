@@ -115,6 +115,37 @@ std::string g_version;
  */
 std::atomic<bool> g_bare_diffusion{false};
 
+/**
+ * What the loader said it was doing, most recently.
+ *
+ * A load of a full diffusion stack is minutes: the checkpoint, then a text
+ * encoder or three, then the decoder, each mapped and dequantised in turn. From
+ * outside it is one opaque JNI call, so the screen could only say "loading" and
+ * hope. sd.cpp narrates every one of those steps to its log callback already —
+ * this keeps the last line it said, so the app can report the runtime's own
+ * words rather than a guess about which stage it might be at.
+ */
+std::mutex  g_stage_mutex;
+std::string g_stage;
+
+void note_stage(const char * text) {
+    if (text == nullptr) return;
+    std::string line(text);
+    while (!line.empty() && (line.back() == '\n' || line.back() == '\r' || line.back() == ' ')) {
+        line.pop_back();
+    }
+    if (line.empty()) return;
+    // Upstream prefixes every line with `file.hpp:72 - `; the prefix is for a
+    // developer reading logcat, not for someone waiting on a picture.
+    const auto dash = line.find(" - ");
+    if (dash != std::string::npos && line.find(':') < dash) {
+        line = line.substr(dash + 3);
+    }
+    if (line.empty()) return;
+    std::lock_guard<std::mutex> lock(g_stage_mutex);
+    g_stage = line;
+}
+
 void note_version(const char * text) {
     if (text == nullptr) return;
     const std::string line(text);
@@ -356,6 +387,12 @@ Java_ai_ondevice_engine_SdBridge_nativeDetectedVersion(JNIEnv * env, jobject) {
 }
 
 JNIEXPORT jstring JNICALL
+Java_ai_ondevice_engine_SdBridge_nativeLoadStage(JNIEnv * env, jobject) {
+    std::lock_guard<std::mutex> lock(g_stage_mutex);
+    return jni_from_string(env, g_stage);
+}
+
+JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeSystemInfo(JNIEnv * env, jobject) {
     json info;
     info["system"] = std::string(sd_get_system_info());
@@ -386,6 +423,7 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
 
     // A version left over from the last checkpoint would be read as this one's.
     { std::lock_guard<std::mutex> lock(g_version_mutex); g_version.clear(); }
+    { std::lock_guard<std::mutex> lock(g_stage_mutex); g_stage.clear(); }
     g_bare_diffusion.store(false);
 
     static std::once_flag once;
@@ -396,6 +434,7 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
                 set_last_error(text);
             }
             note_version(text);
+            note_stage(text);
             if (level >= SD_LOG_WARN) {
                 __android_log_write(level >= SD_LOG_ERROR ? ANDROID_LOG_ERROR : ANDROID_LOG_WARN,
                                     "ondevice.sd", text);

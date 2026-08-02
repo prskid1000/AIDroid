@@ -25,6 +25,15 @@ object SdBridge {
     /** True when the last load found a denoiser alone rather than a full checkpoint. */
     external fun nativeIsBareDiffusion(): Boolean
 
+    /**
+     * The last thing the loader said it was doing, in its own words.
+     *
+     * A load is one JNI call that takes minutes, and sd.cpp narrates it to the
+     * log callback throughout. This is that narration, so the screen can say
+     * where it has got to instead of showing a spinner for four gigabytes.
+     */
+    external fun nativeLoadStage(): String
+
     external fun nativeLoad(
         modelPath: String,
         vaePath: String,
