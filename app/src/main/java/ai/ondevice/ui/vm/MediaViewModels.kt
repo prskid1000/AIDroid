@@ -10,6 +10,7 @@ import ai.ondevice.core.TranscriptSegment
 import ai.ondevice.data.ModelStorage
 import ai.ondevice.data.db.GeneratedImageEntity
 import ai.ondevice.data.db.ModelEntity
+import ai.ondevice.data.db.fromSameRepoAs
 import ai.ondevice.data.db.OnDeviceDatabase
 import ai.ondevice.data.db.TranscriptEntity
 import ai.ondevice.data.hf.DeviceCapabilities
@@ -736,7 +737,9 @@ class ImageViewModel @Inject constructor(
             val candidates = installed.filter {
                 it.attachmentRole == role && java.io.File(it.localPath).isFile
             }.filter { suitsFamily(model, role, it) }
-            val only = candidates.singleOrNull() ?: continue
+            // Several for one slot is a question, unless one of them shipped in
+            // the same repo as the checkpoint — see fromSameRepoAs.
+            val only = candidates.fromSameRepoAs(model).singleOrNull() ?: continue
             next = next.with(role.paramKey, only.localPath)
             adopted += role.paramKey
         }

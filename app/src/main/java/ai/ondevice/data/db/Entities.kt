@@ -165,6 +165,28 @@ data class MessageEntity(
     val parentMessageId: String?,
 )
 
+/**
+ * Narrow several files for one slot to the one that belongs to this checkpoint.
+ *
+ * A role with two candidates is a question rather than a guess, and refusing to
+ * answer it is right when the two are equally plausible. They often are not:
+ * a publisher who ships a decoder beside the weights ships it in the *same
+ * repository*, so "the VAE from the repo this model came from" picks the
+ * intended one out of a library holding several — which is what the video tab
+ * needed when a FLUX decoder and a Wan decoder both offered themselves and
+ * neither could be told from the other by its role.
+ *
+ * Repo identity, not a name: nothing here knows what Wan or FLUX are, only that
+ * these two files arrived together and those two did not. Where it does not
+ * narrow to exactly one, the list comes back untouched and the question stands.
+ */
+fun List<ModelEntity>.fromSameRepoAs(model: ModelEntity?): List<ModelEntity> {
+    val repo = model?.hfRepo?.takeIf { it.isNotBlank() } ?: return this
+    if (size <= 1) return this
+    val together = filter { it.hfRepo == repo }
+    return if (together.size == 1) together else this
+}
+
 @Entity(tableName = "generated_images", indices = [Index("createdAt")])
 data class GeneratedImageEntity(
     @PrimaryKey val id: String,

@@ -7,6 +7,7 @@ import ai.ondevice.core.Modality
 import ai.ondevice.core.ModelAttachment
 import ai.ondevice.core.SparseParams
 import ai.ondevice.data.db.ModelEntity
+import ai.ondevice.data.db.fromSameRepoAs
 import ai.ondevice.data.db.OnDeviceDatabase
 import ai.ondevice.engine.DiffusionClip
 import ai.ondevice.engine.DiffusionEngine
@@ -156,7 +157,11 @@ class VideoViewModel @Inject constructor(
             // it, and there has to be exactly one file that could fill it. Two
             // candidates is a question for the person, not a coin toss — it
             // shows up under "installed, not chosen".
-            val onlyOne = perRole[role]?.size == 1
+            // Two files for one slot is a question — unless one of them came
+            // out of the same repo as the checkpoint, in which case it is the
+            // one the publisher shipped for it.
+            val forRole = perRole[role].orEmpty().fromSameRepoAs(model)
+            val onlyOne = forRole.size == 1 && forRole.first().id == entity.id
             val wanted = reads == null || role in reads
             ModelAttachment(
                 modelId = entity.id,
