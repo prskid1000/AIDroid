@@ -85,7 +85,25 @@ class ModelStorage(private val context: Context, private val db: OnDeviceDatabas
             .filterNot(::isOwned)
             .toList()
 
-        val missingFiles = records.filter { it.id !in downloading && !File(it.localPath).exists() }
+        // "The file has gone" is a claim about a file that was once there.
+        //
+        // A row is written when a download *starts*, so between that write and
+        // the job row landing beside it there is a moment with a record, no
+        // file and nothing in `downloading` to vouch for it — and the Models
+        // screen, which is where you are taken after starting a download, runs
+        // this on open. The record was reported as an orphan and Clean up
+        // deleted it, stranding a part-written multi-gigabyte download with no
+        // library row to finish into.
+        //
+        // `completedAt` closes it for good: it is stamped once, by the
+        // downloader, when the last file verifies. A row that has never had it
+        // is a download in progress or a download that died, and neither is a
+        // file that went missing. What it does leave behind — a row for a job
+        // that was cancelled out from under it — is reachable by deleting the
+        // model, which is a deliberate act rather than a sweep.
+        val missingFiles = records.filter {
+            it.id !in downloading && it.completedAt != null && !File(it.localPath).exists()
+        }
 
         OrphanReport(strayFiles = strayFiles, recordsWithoutFiles = missingFiles)
     }

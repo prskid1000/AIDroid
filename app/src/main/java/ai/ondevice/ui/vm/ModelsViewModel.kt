@@ -134,10 +134,22 @@ class ModelsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Delete what is orphaned *now*, not what was orphaned when the screen
+     * opened.
+     *
+     * The report is taken once at init and refreshed only after a delete or a
+     * sweep, so between opening this screen and pressing the button a download
+     * can have started, finished, or been resumed. Acting on the stale copy
+     * meant the button deleted rows on the strength of a fact that had since
+     * stopped being true. Recomputing costs a directory walk and is the only
+     * way the count on the button and the thing it does can agree.
+     */
     fun sweepOrphans() {
         viewModelScope.launch {
-            orphans.value?.strayFiles?.forEach { runCatching { it.delete() } }
-            orphans.value?.recordsWithoutFiles?.forEach { db.models().deleteById(it.id) }
+            val report = storage.findOrphans()
+            report.strayFiles.forEach { runCatching { it.delete() } }
+            report.recordsWithoutFiles.forEach { db.models().deleteById(it.id) }
             orphans.value = storage.findOrphans()
         }
     }

@@ -170,6 +170,26 @@ class Downloader(
         // A sharded model completes atomically: only once every part has
         // verified does the job report complete.
         val current = db.downloads().get(jobId) ?: return
+        // Nothing to finish into.
+        //
+        // `markCompleted` is an UPDATE, so a job whose library row has gone
+        // updated nothing and still reported COMPLETE: gigabytes verified onto
+        // the disk, no row anywhere, and the files then read as strays by the
+        // orphan sweep that had deleted the row in the first place. Saying so
+        // keeps the bytes — the part files stay where they are — and leaves a
+        // sentence rather than a silence.
+        if (db.models().get(current.modelId) == null) {
+            android.util.Log.w(TAG, "no library row for ${current.modelId}; leaving files in place")
+            update(
+                current.copy(
+                    state = DownloadState.FAILED,
+                    error = "The library entry for this model is gone. Add it again — the " +
+                        "downloaded bytes are still here and it will carry on from them.",
+                    updatedAt = now(),
+                ),
+            )
+            return
+        }
         // Stamped before the job flips to COMPLETE, so there is no instant in
         // which the queue says finished and the library still says not.
         db.models().markCompleted(current.modelId, now())
