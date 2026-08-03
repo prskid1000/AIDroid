@@ -146,7 +146,16 @@ class ToolsViewModel @Inject constructor(
                     )
                 },
                 onFailure = { failure ->
-                    db.mcpServers().upsert(server.copy(lastError = failure.message))
+                    // Re-read before recording the failure. Discovery writes
+                    // the endpoints to this row on its way through, and copying
+                    // from the `server` captured before the call would put them
+                    // straight back to null — which is what left a server that
+                    // had plainly asked for a sign-in with no Authorize button
+                    // to press, and no way back except removing it.
+                    val current = db.mcpServers().getAll().firstOrNull { it.id == server.id }
+                        ?: server
+                    db.mcpServers().upsert(current.copy(lastError = failure.message))
+                    refreshAuthorized()
                 },
             )
         }

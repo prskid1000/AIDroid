@@ -109,6 +109,25 @@ class McpAuthorizer(
         runCatching {
             val discovered = oauth.discover(server.url, challenge)
 
+            // Written down before registration is attempted, not after.
+            //
+            // Storing them only on success meant a server that refused to
+            // register left no trace that it had ever asked for a sign-in — so
+            // the card offered no Authorize button, and the only way to try
+            // again after pasting a registration token was to remove the
+            // server and add it back. Discovery succeeding is itself the fact
+            // worth keeping: it is what says this server does OAuth.
+            db.mcpServers().upsert(
+                server.copy(
+                    oauthIssuer = discovered.issuer,
+                    oauthAuthorizeEndpoint = discovered.authorizationEndpoint,
+                    oauthTokenEndpoint = discovered.tokenEndpoint,
+                    oauthRegistrationEndpoint = discovered.registrationEndpoint,
+                    oauthScope = discovered.scopesSupported.takeIf { it.isNotEmpty() }
+                        ?.joinToString(" "),
+                ),
+            )
+
             // Reuse the registration when there is one. Registering again on
             // every sign-in leaves a trail of dead client ids on the server and
             // gains nothing.
@@ -132,16 +151,13 @@ class McpAuthorizer(
                 )
             }
 
+            // Re-read: the row was rewritten above, and copying from the stale
+            // `server` here would put the endpoints back to what they were.
+            val registered = db.mcpServers().getAll().firstOrNull { it.id == server.id } ?: server
             db.mcpServers().upsert(
-                server.copy(
-                    oauthIssuer = discovered.issuer,
-                    oauthAuthorizeEndpoint = discovered.authorizationEndpoint,
-                    oauthTokenEndpoint = discovered.tokenEndpoint,
-                    oauthRegistrationEndpoint = discovered.registrationEndpoint,
+                registered.copy(
                     oauthClientId = id,
                     oauthClientSecret = secret,
-                    oauthScope = discovered.scopesSupported.takeIf { it.isNotEmpty() }
-                        ?.joinToString(" "),
                     lastError = null,
                 ),
             )
