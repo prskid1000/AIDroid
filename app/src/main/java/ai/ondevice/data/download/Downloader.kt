@@ -47,8 +47,47 @@ class Downloader(
     fun observeActiveCount(): Flow<Int> = db.downloads().observeActiveCount()
 
     suspend fun enqueue(job: DownloadJob) {
+        // Adding the same model twice is one download, not two.
+        //
+        // A job's key is its own id and a fresh one is minted per enqueue, so
+        // nothing stopped a second job for the same model existing beside the
+        // first — with the same destination paths, the same `.part` files, and
+        // two coroutines writing into them at once. Whichever finished second
+        // wrote over the first's offsets, and the result was a file that
+        // downloaded twice and verified once, if at all.
+        //
+        // An unfinished job for this model is the download the person is
+        // asking for, so this resumes it. A FAILED or COMPLETE one is not
+        // unfinished, and re-adding after either still starts a fresh job —
+        // which is what makes "add it again" a working repair.
+        val existing = db.downloads().forModel(job.modelId)
+            .firstOrNull { it.state in UNFINISHED }
+        if (existing != null) {
+            android.util.Log.i(TAG, "already downloading ${job.modelId}; resuming instead")
+            start(existing.id)
+            return
+        }
         db.downloads().upsert(job.toEntity())
         start(job.id)
+    }
+
+    /**
+     * Stop and forget every job for a model, and drop what they had written.
+     *
+     * Deleting a model deleted its row, its file and its folder and left the
+     * download running — so the bytes kept arriving into a directory nobody
+     * owned, for a library entry that no longer existed. The row came back off
+     * the list, the traffic did not, and the only sign was the queue.
+     */
+    suspend fun cancelForModel(modelId: String) {
+        db.downloads().forModel(modelId).forEach { entity ->
+            activeJobs.remove(entity.id)?.cancel()
+            entity.toJob().files.forEach { file ->
+                runCatching { File(file.destPath).delete() }
+                runCatching { File(file.destPath + PART_SUFFIX).delete() }
+            }
+            db.downloads().deleteById(entity.id)
+        }
     }
 
     fun start(jobId: String) {
@@ -390,6 +429,14 @@ class Downloader(
     companion object {
         private const val TAG = "ondevice.download"
         const val PART_SUFFIX = ".part"
+
+        /** States that mean "this download is still someone's business". */
+        private val UNFINISHED = setOf(
+            DownloadState.QUEUED,
+            DownloadState.RUNNING,
+            DownloadState.PAUSED,
+            DownloadState.VERIFYING,
+        )
         private const val BUFFER_BYTES = 64 * 1024
         private const val PERSIST_INTERVAL_MS = 750L
     }

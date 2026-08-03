@@ -331,6 +331,16 @@ interface DownloadDao {
     @Query("SELECT * FROM download_jobs WHERE state IN ('QUEUED','RUNNING','PAUSED','VERIFYING') ORDER BY createdAt")
     suspend fun getUnfinished(): List<DownloadJobEntity>
 
+    /**
+     * Every job for one model, finished or not.
+     *
+     * A job's primary key is its own id, so nothing stopped two of them
+     * existing for one model and writing the same files at the same time —
+     * and nothing connected deleting the model to stopping them.
+     */
+    @Query("SELECT * FROM download_jobs WHERE modelId = :modelId ORDER BY createdAt")
+    suspend fun forModel(modelId: String): List<DownloadJobEntity>
+
     /** Clear finished history. */
     @Query("DELETE FROM download_jobs WHERE state IN ('COMPLETE','FAILED')")
     suspend fun clearFinished()

@@ -129,6 +129,9 @@ class ModelsViewModel @Inject constructor(
 
     fun delete(model: ModelEntity) {
         viewModelScope.launch {
+            // The download first, or it carries on writing into the folder
+            // that is about to be deleted, for a row that is about to go.
+            downloader.cancelForModel(model.id)
             storage.deleteModel(model)
             orphans.value = storage.findOrphans()
         }
@@ -215,6 +218,7 @@ class ModelDetailViewModel @Inject constructor(
     private val capabilities: DeviceCapabilities,
     private val registry: ai.ondevice.engine.RuntimeRegistry,
     private val synthesizer: ai.ondevice.speech.SpeechSynthesizer,
+    private val downloader: Downloader,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ModelDetailState())
@@ -353,6 +357,9 @@ class ModelDetailViewModel @Inject constructor(
     fun delete(onDone: () -> Unit) {
         val model = _state.value.model ?: return
         viewModelScope.launch {
+            // Same order as the list screen's delete: stop the download before
+            // taking the folder out from under it.
+            downloader.cancelForModel(model.id)
             storage.deleteModel(model)
             onDone()
         }
