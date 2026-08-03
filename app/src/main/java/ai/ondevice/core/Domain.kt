@@ -39,18 +39,42 @@ enum class Capability { TEXT, VISION, TOOLS, EMBEDDING, DIFFUSION, TRANSCRIBE, S
 enum class Verdict {
     FAST,
     TIGHT,
-    WONT_FIT,
+
+    /**
+     * Nothing in this build claims the architecture — a caution, not a stop.
+     *
+     * It used to stop the download, and that made a list of names into the
+     * thing deciding what could be installed. Those names come from two
+     * vocabularies that were never agreed between: a GGUF says what its
+     * *family* is, while a runtime enumerates the specific versions it builds,
+     * so the same model is `ltxv` on one side and `ltxav` on the other. Every
+     * disagreement of that shape read as "no runtime can load this", which was
+     * not true and could not be checked without downloading the file.
+     *
+     * So the claim is weakened to what is actually known: this build does not
+     * recognise the name. The loader is the thing that can answer the real
+     * question, and it answers it in seconds against a file on disk.
+     */
     UNSUPPORTED_ARCH,
+    WONT_FIT,
     NOT_RUNNABLE,
     ;
 
-    val runnable: Boolean get() = this == FAST || this == TIGHT
+    /**
+     * Whether to let the download start.
+     *
+     * The two that say no are the two the device settles: it will not fit, or
+     * no runtime here reads the format at all. Everything else — including an
+     * unrecognised architecture — is advice attached to a download that is
+     * allowed to proceed.
+     */
+    val runnable: Boolean get() = this != WONT_FIT && this != NOT_RUNNABLE
 
     val tone: VerdictTone
         get() = when (this) {
             FAST -> VerdictTone.AFFIRMATIVE
-            TIGHT -> VerdictTone.CAVEAT
-            WONT_FIT, UNSUPPORTED_ARCH, NOT_RUNNABLE -> VerdictTone.REFUSAL
+            TIGHT, UNSUPPORTED_ARCH -> VerdictTone.CAVEAT
+            WONT_FIT, NOT_RUNNABLE -> VerdictTone.REFUSAL
         }
 
     val label: String
@@ -58,7 +82,7 @@ enum class Verdict {
             FAST -> "Fits"
             TIGHT -> "Tight"
             WONT_FIT -> "Won't fit"
-            UNSUPPORTED_ARCH -> "Unsupported architecture"
+            UNSUPPORTED_ARCH -> "Unrecognised architecture"
             NOT_RUNNABLE -> "Not runnable"
         }
 }
@@ -118,11 +142,6 @@ enum class RefusalKind(val heading: String, val explanation: String) {
         "PyTorch weights only",
         "The repo ships safetensors or .bin with no GGUF or ONNX export. Converting needs a " +
             "desktop, and the app will not pretend otherwise.",
-    ),
-    UNKNOWN_ARCHITECTURE(
-        "Unsupported architecture",
-        "The installed runtime does not list this architecture. The live refusal names the " +
-            "build and how many it knows; a newer one may add it.",
     ),
     GATED(
         "Gated repo",

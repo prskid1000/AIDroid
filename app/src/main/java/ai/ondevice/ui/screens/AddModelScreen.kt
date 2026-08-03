@@ -264,6 +264,16 @@ fun AddModelScreen(
                                 color = verdictInkMuted(verdict.verdict.tone).copy(alpha = 0.75f),
                                 modifier = Modifier.padding(top = 5.dp),
                             )
+                            // Only when the verdict is about something the three
+                            // lines above cannot express.
+                            verdict.cautionNote?.let { note ->
+                                Text(
+                                    note,
+                                    style = NocturneType.Body,
+                                    color = verdictInkMuted(verdict.verdict.tone),
+                                    modifier = Modifier.padding(top = 8.dp),
+                                )
+                            }
                         }
                     }
                 }

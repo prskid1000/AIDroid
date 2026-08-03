@@ -53,8 +53,19 @@ class RuntimeRegistry(private val context: Context) {
         descriptors.filter { it.installed }.flatMap { it.architectures }.toSet()
     }
 
-    /** Only *installed* runtimes count. */
-    fun supportsArchitecture(arch: String): Boolean = arch.lowercase() in knownArchitectures.map { it.lowercase() }
+    /** Whether any installed runtime claims this architecture. */
+    fun supportsArchitecture(arch: String): Boolean =
+        knownArchitectures.any { namesMatch(arch, it) }
+
+    /**
+     * Whether *this* runtime claims it — the same question, narrowed.
+     *
+     * Asked by the resolver to decide what a model is, which is a different
+     * decision from whether it will run and must not be answered by a second,
+     * differently-written comparison.
+     */
+    fun runtimeSupports(runtimeId: String, arch: String): Boolean =
+        architecturesFor(runtimeId).any { namesMatch(arch, it) }
 
     /** The architectures one runtime declares, lower-cased for matching. */
     fun architecturesFor(runtimeId: String): Set<String> =
@@ -91,18 +102,46 @@ class RuntimeRegistry(private val context: Context) {
 
     private val reported = mutableMapOf<String, List<String>>()
 
-    val llamaBuildTag: String get() = buildTag(LLAMA)
-
     /** The build tag the parameter screen gates `sinceBuild` against, per runtime. */
     fun buildTag(runtimeId: String): String = descriptor(runtimeId)?.version ?: "not installed"
-
-    val architectureCount: Int get() = descriptor(LLAMA)?.architectures?.size ?: 0
 
     /** The JNI contract the Kotlin side hard-requires. */
     fun contractSatisfied(descriptor: RuntimeDescriptor): Boolean =
         descriptor.jniContract == REQUIRED_JNI_CONTRACT
 
     companion object {
+        /** Short enough for "wan", long enough that "sd" cannot match five families. */
+        private const val MIN_FAMILY_PREFIX = 3
+
+        /**
+         * The one rule for "are these the same architecture", used everywhere.
+         *
+         * Not equality, because the two sides name things differently and
+         * neither is wrong. A GGUF's `general.architecture` is the *family* —
+         * Wan 2.2 TI2V 5B says `wan` — while stable-diffusion.cpp's version
+         * strings are specific: `wan2`, `wan2_2_i2v`, `wan2_2_ti2v`. Comparing
+         * those directly refused every Wan checkpoint there is and blamed the
+         * runtime for it.
+         *
+         * One rule and no table of names: a declared family that begins one of
+         * the known versions is that family, with a three-character floor so a
+         * short string cannot match half the list. A table would have to grow
+         * every time either side invented a name, and the entry nobody added is
+         * a model that fails for no visible reason.
+         *
+         * It is deliberately incomplete. Names that differ in the middle — LTX
+         * ships as `ltxv` where the runtime says `ltxav` — are not caught, and
+         * are not meant to be. What makes that survivable is that no caller
+         * treats a miss as a refusal: it is a caution on a download that still
+         * proceeds, and the loader settles it.
+         */
+        fun namesMatch(declared: String, known: String): Boolean {
+            val a = declared.lowercase().trim()
+            val b = known.lowercase().trim()
+            if (a.isEmpty() || b.isEmpty()) return false
+            return a == b || (a.length >= MIN_FAMILY_PREFIX && b.startsWith(a))
+        }
+
         const val ASSET = "runtimes.json"
         const val LLAMA = "llama.cpp"
         const val WHISPER = "whisper.cpp"

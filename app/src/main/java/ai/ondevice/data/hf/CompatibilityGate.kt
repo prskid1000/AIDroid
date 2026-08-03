@@ -119,10 +119,16 @@ object CompatibilityGate {
         archSupported: Boolean,
         hasRuntimeForFormat: Boolean,
     ): Verdict = when {
+        // What the device settles comes first. `archSupported` used to sit
+        // second and masked both size checks, so a 14 GB video model on an
+        // 8 GB phone was reported as an architecture problem — the one thing
+        // about it that might have been wrong — and the arithmetic that was
+        // certainly right never got shown.
         !hasRuntimeForFormat -> Verdict.NOT_RUNNABLE
-        !archSupported -> Verdict.UNSUPPORTED_ARCH
         estimate.totalBytes > availableRamBytes -> Verdict.WONT_FIT
         estimate.weightsBytes + storageReserveBytes > freeStorageBytes -> Verdict.WONT_FIT
+        // Last, and a caution rather than a refusal: see [Verdict.UNSUPPORTED_ARCH].
+        !archSupported -> Verdict.UNSUPPORTED_ARCH
         availableRamBytes - estimate.totalBytes < TIGHT_HEADROOM_BYTES -> Verdict.TIGHT
         else -> Verdict.FAST
     }

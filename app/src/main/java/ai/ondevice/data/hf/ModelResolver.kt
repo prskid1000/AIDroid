@@ -15,10 +15,20 @@ class ModelResolver(
     private val registry: RuntimeRegistry,
 ) {
 
-    /** Which architecture strings mean "diffusion". */
-    private val diffusionArchitectures: Set<String> by lazy {
-        registry.architecturesFor(RuntimeRegistry.STABLE_DIFFUSION) + setOf("unet", "dit")
-    }
+    /**
+     * Whether an architecture string means "diffusion".
+     *
+     * Matched by [RuntimeRegistry.namesMatch] rather than by set membership,
+     * for the same reason the runnability question is. Exact membership meant a
+     * GGUF declaring the family name — `wan`, against a runtime listing
+     * `wan2_2_ti2v` — fell through to the `format == GGUF -> TEXT` line at the
+     * bottom of [classifyModality] and was installed as a chat model. That is a
+     * quieter failure than a refusal and a worse one: nothing says anything is
+     * wrong until the model is on the device and cannot be given a prompt.
+     */
+    private fun isDiffusionArchitecture(arch: String): Boolean =
+        arch.lowercase().trim() in setOf("unet", "dit") ||
+            registry.runtimeSupports(RuntimeRegistry.STABLE_DIFFUSION, arch)
 
     fun normalize(input: String): NormalizedInput? {
         val trimmed = input.trim()
@@ -295,9 +305,14 @@ class ModelResolver(
             tags = info.tags,
         )
         val modality = classifyModality(info, format, files, companions)
-        if (format == ModelFormat.GGUF && arch != null && !registry.supportsArchitecture(arch)) {
-            return@withContext unsupportedArchRefusal(repoId, arch)
-        }
+
+        // An architecture this build does not recognise used to stop here, and
+        // stopping was the mistake. The resolver knows the name a repo declares
+        // and the names a runtime enumerates; it does not know that a
+        // disagreement between them means the model cannot load, because the
+        // two are not the same vocabulary. It goes on the card as a caution
+        // instead — see [ai.ondevice.core.Verdict.UNSUPPORTED_ARCH] — where it
+        // is visible without being the last word.
 
         val security = sizeLookup.values.firstNotNullOfOrNull { it.securityFileStatus?.status }
 
@@ -340,9 +355,9 @@ class ModelResolver(
 
         // Learning the architecture can change what the model *is*.
         val modality = if (model.modality == Modality.TEXT && architecture != null) {
-            when (architecture.lowercase()) {
-                in diffusionArchitectures -> Modality.DIFFUSION
-                "whisper" -> Modality.SPEECH_TO_TEXT
+            when {
+                isDiffusionArchitecture(architecture) -> Modality.DIFFUSION
+                architecture.equals("whisper", true) -> Modality.SPEECH_TO_TEXT
                 else -> model.modality
             }
         } else {
@@ -378,7 +393,7 @@ class ModelResolver(
             files.any { it.contains("voices", true) && it.endsWith(".bin") } &&
                 files.any { it.endsWith(".onnx") } -> Modality.TEXT_TO_SPEECH
             format == ModelFormat.ONNX && info.tags.any { it.contains("text-to-speech", true) } -> Modality.TEXT_TO_SPEECH
-            arch != null && arch in diffusionArchitectures -> Modality.DIFFUSION
+            arch != null && isDiffusionArchitecture(arch) -> Modality.DIFFUSION
             files.any { it.equals("model_index.json", true) } -> Modality.DIFFUSION
             files.any { it.contains("unet", true) } && files.any { it.contains("vae", true) } -> Modality.DIFFUSION
             info.pipelineTag == "text-to-image" || info.pipelineTag == "image-to-image" -> Modality.DIFFUSION
@@ -732,22 +747,6 @@ class ModelResolver(
             add(Remedy("Search for ${ref.repo}-GGUF", RemedyAction.SearchRepo("${ref.repo}-GGUF"), primary = true))
             HfApi.GGUF_MIRRORS.forEach { add(Remedy(it, RemedyAction.OpenMirror(it, "${ref.repo}-GGUF"))) }
         },
-    )
-
-    private fun unsupportedArchRefusal(repoId: String, arch: String) = Resolution.Refused(
-        kind = RefusalKind.UNKNOWN_ARCHITECTURE,
-        title = "Unsupported architecture",
-        subject = "arch $arch",
-        detail = "llama.cpp ${registry.llamaBuildTag} — the build installed on this device — has " +
-            "${registry.architectureCount} architectures and this isn't one of them. A newer " +
-            "runtime may add it.",
-        remedies = listOf(
-            Remedy("Check for runtime update", RemedyAction.CheckRuntimeUpdate, primary = true),
-            Remedy(
-                "Upstream issues",
-                RemedyAction.OpenUrl("https://github.com/ggml-org/llama.cpp/issues?q=$arch"),
-            ),
-        ),
     )
 
     private suspend fun resolveDirect(input: NormalizedInput): Resolution {

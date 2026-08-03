@@ -318,6 +318,7 @@ class AddModelViewModel @Inject constructor(
                     estimate = estimate,
                     availableRamBytes = capabilities.availableRamBytes,
                     freeStorageBytes = capabilities.freeStorageBytes,
+                    architecture = resolved.architecture,
                 ),
             )
         }
@@ -525,7 +526,7 @@ data class AddModelState(
     val companionChoice: Map<ai.ondevice.data.hf.CompanionRole, Set<String>> = emptyMap(),
 ) {
     val runnable: Boolean get() = verdict?.verdict?.runnable == true
-    val isRefused: Boolean get() = refusal != null || verdict?.verdict == Verdict.WONT_FIT
+    val isRefused: Boolean get() = refusal != null || verdict?.verdict?.runnable == false
 
     /** Type and role are required, so Download stays closed until both are set. */
     val classified: Boolean get() = selectedModality != null && roleAnswered

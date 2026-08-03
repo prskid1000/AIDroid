@@ -33,7 +33,6 @@ sealed interface RemedyAction {
     data class OpenMirror(val owner: String, val repo: String) : RemedyAction
     data class OpenUrl(val url: String) : RemedyAction
     data object EnterToken : RemedyAction
-    data object CheckRuntimeUpdate : RemedyAction
     data class ShowSmallerQuants(val repoId: String) : RemedyAction
     data class ContinueAnyway(val repoId: String) : RemedyAction
 }
@@ -235,7 +234,28 @@ data class VerdictResult(
     val estimate: FitEstimate,
     val availableRamBytes: Long,
     val freeStorageBytes: Long,
+    /** Carried only so the caution below can name it. */
+    val architecture: String? = null,
 ) {
+    /**
+     * The one thing the arithmetic cannot say, said in words, or null.
+     *
+     * The three numeric lines are about memory, so a verdict that is not about
+     * memory has nowhere to appear except the tag — and a tag reading
+     * "Unrecognised architecture" beside a download button that works is a
+     * puzzle rather than a warning. This is the sentence that resolves it.
+     */
+    val cautionNote: String?
+        get() = when (verdict) {
+            Verdict.UNSUPPORTED_ARCH -> buildString {
+                append("No runtime in this build lists ")
+                append(architecture?.let { "\"$it\"" } ?: "this architecture")
+                append(". It may still load — repos and runtimes name families ")
+                append("differently — but that is only settled once it is on the device.")
+            }
+            else -> null
+        }
+
     /** "You have 10.40 GB free of 12.00 GB. Headroom 3.20 GB." */
     fun headroomNote(totalRamBytes: Long): String {
         val headroom = estimate.headroomBytes(availableRamBytes)
