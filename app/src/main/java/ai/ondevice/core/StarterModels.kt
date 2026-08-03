@@ -135,9 +135,33 @@ object StarterModels {
                 "need a LoRA to reach. About 6.7 GB with its encoder and decoder.",
             sizeHint = "4.89 GB at Q2_K",
         ),
+
+        // — video —
+        //
+        // Both are vid_gen models, and both need more beside them than an image
+        // model does, so the size below is the whole bundle rather than the
+        // checkpoint — the checkpoint is the part that fits.
+        StarterModel(
+            repoId = WAN22_TI2V_5B,
+            modality = Modality.DIFFUSION,
+            summary = "Video, and the one that fits. Text or a picture in, a few seconds of " +
+                "clip out. Silent: nothing here makes sound except LTX.",
+            sizeHint = "2.37 GB at Q3_K_M, ~6.5 GB the bundle",
+        ),
+        StarterModel(
+            repoId = LTX_2_3,
+            modality = Modality.DIFFUSION,
+            summary = "Video with synced audio, and the only architecture that makes any. " +
+                "A 22B model that reads its prompt with a 12B one — about 14 GB of weights " +
+                "before buffers, which is more than most phones have free. Here to be tried " +
+                "rather than because it is expected to run.",
+            sizeHint = "7.39 GB at Q2_K, ~14 GB the bundle",
+        ),
     )
 
     // Repo ids used by more than one card, or long enough to be worth a name.
+    private const val WAN22_TI2V_5B = "QuantStack/Wan2.2-TI2V-5B-GGUF"
+    private const val LTX_2_3 = "unsloth/LTX-2.3-GGUF"
     private const val Z_IMAGE_TURBO = "leejet/Z-Image-Turbo-GGUF"
     private const val SD35_TURBO = "tensorart/stable-diffusion-3.5-medium-turbo"
     private const val SD35_ENCODERS = "Comfy-Org/stable-diffusion-3.5-fp8"
@@ -473,6 +497,78 @@ object StarterModels {
                     summary = "Required, at vae/qwen_image_vae.safetensors. Krea 2 borrows " +
                         "Qwen-Image's decoder rather than shipping one of its own.",
                     sizeHint = "~254 MB",
+                ),
+            ),
+        ),
+
+        StarterBundle(
+            architecture = "wan2_2_ti2v",
+            label = "Wan 2.2 TI2V 5B",
+            base = ALL.first { it.repoId == WAN22_TI2V_5B },
+            parts = listOf(
+                StarterModel(
+                    repoId = "city96/umt5-xxl-encoder-gguf",
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.T5XXL,
+                    summary = "Required. Wan reads its prompt with UMT5-XXL, and the encoder " +
+                        "is larger than the model it feeds — Q3_K_M is where it stops being " +
+                        "the biggest thing in the bundle.",
+                    sizeHint = "2.85 GB at Q3_K_M",
+                ),
+                StarterModel(
+                    repoId = WAN22_TI2V_5B,
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.VAE,
+                    summary = "Required, at VAE/Wan2.2_VAE.safetensors. The 2.2 decoder, not " +
+                        "the 2.1 one every other Wan uses — TI2V 5B is the exception, and the " +
+                        "wrong one decodes to noise rather than failing.",
+                    sizeHint = "1.31 GB",
+                ),
+            ),
+        ),
+
+        StarterBundle(
+            architecture = "ltxav",
+            label = "LTX-2.3, audio and video",
+            base = ALL.first { it.repoId == LTX_2_3 },
+            parts = listOf(
+                StarterModel(
+                    repoId = "unsloth/gemma-3-12b-it-GGUF",
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.LLM_ENCODER,
+                    summary = "Required, and not substitutable: the runtime's LTX conditioner " +
+                        "is compiled against Gemma-3-12B, so a smaller encoder is not a trade " +
+                        "available. UD-IQ1_S is the smallest that exists, and quantises a 12B " +
+                        "model hard enough to show.",
+                    sizeHint = "2.85 GB at UD-IQ1_S",
+                ),
+                StarterModel(
+                    repoId = LTX_2_3,
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.EMBEDDING,
+                    summary = "Required, under text_encoders/ — the connectors ending " +
+                        "_embeddings_connectors.safetensors. They map Gemma's hidden states " +
+                        "into what the transformer conditions on; without them the encoder " +
+                        "and the denoiser have nothing to say to each other.",
+                    sizeHint = "2.15 GB",
+                ),
+                StarterModel(
+                    repoId = LTX_2_3,
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.VAE,
+                    summary = "Required, under vae/ — the file ending _video_vae.safetensors. " +
+                        "Temporal as well as spatial: it decodes frames together, which is " +
+                        "where a video decoder's memory goes.",
+                    sizeHint = "1.35 GB",
+                ),
+                StarterModel(
+                    repoId = LTX_2_3,
+                    modality = Modality.DIFFUSION,
+                    role = AttachmentRole.AUDIO_VAE,
+                    summary = "Under vae/ — the file ending _audio_vae.safetensors. Optional " +
+                        "in that the clip renders silently without it, and the whole reason to " +
+                        "choose LTX with it.",
+                    sizeHint = "343 MB",
                 ),
             ),
         ),
