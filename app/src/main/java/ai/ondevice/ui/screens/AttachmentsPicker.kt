@@ -217,13 +217,17 @@ private fun MissingCards(missing: List<MissingComponent>) {
     missing.forEach { entry ->
         NCard(Modifier.padding(bottom = 8.dp)) {
             // A substitution is a choice, not a fault, and reads as one.
+            // Neither is a part that is on its way: there is nothing to do
+            // about it and nothing has gone wrong, so it does not take the
+            // colour the other findings do.
             Text(
                 entry.what,
                 style = NocturneType.CardTitleSm,
-                color = if (entry.state == MissingComponent.State.SUBSTITUTES) {
-                    NocturneColors.TextMuted
-                } else {
-                    NocturneColors.Accent200
+                color = when (entry.state) {
+                    MissingComponent.State.SUBSTITUTES,
+                    MissingComponent.State.ARRIVING,
+                    -> NocturneColors.TextMuted
+                    else -> NocturneColors.Accent200
                 },
             )
             Text(

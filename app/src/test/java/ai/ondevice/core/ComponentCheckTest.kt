@@ -83,6 +83,54 @@ class ComponentCheckTest {
     }
 
     @Test
+    fun `a part that is downloading is not a part that is absent`() {
+        // The library only offers a file once every byte has verified, which
+        // is right. The warning beside it was drawn from the same list, so a
+        // UMT5 nine per cent of the way here read as "No T5-XXL for wan · add
+        // one from Models → Add" — advice to start the download that is
+        // already running.
+        val arriving = ComponentCheck.forDiffusion(
+            available = emptyList(),
+            architecture = "wan2_2_ti2v",
+            arrivingRoles = setOf(AttachmentRole.T5XXL),
+        )
+        val t5 = arriving.single { it.what.contains("T5-XXL") }
+        assertEquals(MissingComponent.State.ARRIVING, t5.state)
+        assertTrue("reads as absent: ${t5.what}", t5.what.contains("downloading"))
+        assertTrue(t5.remedy.contains("Downloading"))
+    }
+
+    @Test
+    fun `a part nobody is fetching is still absent`() {
+        // Wan needs a decoder too, and nothing is downloading one.
+        val arriving = ComponentCheck.forDiffusion(
+            available = emptyList(),
+            architecture = "wan2_2_ti2v",
+            arrivingRoles = setOf(AttachmentRole.T5XXL),
+        )
+        assertTrue(
+            arriving.filterNot { it.what.contains("T5-XXL") }
+                .all { it.state == MissingComponent.State.NOT_INSTALLED },
+        )
+    }
+
+    @Test
+    fun `already installed outranks still arriving`() {
+        // Both true of a second copy mid-download. The one that can be acted
+        // on now is the one worth saying.
+        val both = ComponentCheck.forDiffusion(
+            available = emptyList(),
+            architecture = "wan2_2_ti2v",
+            installedRoles = setOf(AttachmentRole.T5XXL),
+            arrivingRoles = setOf(AttachmentRole.T5XXL),
+        )
+        assertEquals(
+            MissingComponent.State.INSTALLED_NOT_ATTACHED,
+            both.single { it.what.contains("T5-XXL") }.state,
+        )
+    }
+
+    @Test
     fun `an unrecognised architecture is not lectured about parts nobody can name`() {
         assertEquals(emptyList<String>(), missingRoles("some model published next year"))
     }

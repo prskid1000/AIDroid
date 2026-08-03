@@ -1218,12 +1218,17 @@ data class ImageState(
     val attachments: List<ai.ondevice.core.ModelAttachment>
         get() = availableAttachments.filter { it.enabled }
 
+    /** The slots a download is on its way to filling. */
+    val arrivingRoles: Set<ai.ondevice.core.AttachmentRole>
+        get() = installing.mapNotNull { it.attachmentRole }.toSet()
+
     /** Combinations that will not work, said before Generate rather than after. */
     val missingComponents: List<ai.ondevice.core.MissingComponent>
         get() = ai.ondevice.core.ComponentCheck.forDiffusion(
             availableAttachments,
             recognisedAs ?: model?.architecture,
             installedRoles,
+            arrivingRoles,
             bareDenoiser,
         )
     val progress: Float

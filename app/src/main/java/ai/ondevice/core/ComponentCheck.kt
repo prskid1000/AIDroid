@@ -10,6 +10,17 @@ data class MissingComponent(
         /** Nothing installed can fill this slot. */
         NOT_INSTALLED,
 
+        /**
+         * One is downloading. Not installed yet, and not missing either.
+         *
+         * A part is only offered once every byte of it has verified, which is
+         * right — half a file loads into a crash. But the warning above it was
+         * computed from the same list, so a T5 that was 9% of the way here read
+         * as "No T5-XXL … add one from Models → Add", which is advice to start
+         * the download that is already running.
+         */
+        ARRIVING,
+
         /** It is installed and is not attached, so it will not be passed. */
         INSTALLED_NOT_ATTACHED,
 
@@ -27,6 +38,7 @@ data class MissingComponent(
 
     val remedy: String get() = when (state) {
         State.NOT_INSTALLED -> "Add one from Models → Add"
+        State.ARRIVING -> "Downloading — it fills the slot when it finishes"
         State.INSTALLED_NOT_ATTACHED -> "Switch it on under Attachments"
         State.WONT_ATTACH -> "Switch it off, or pick a base model it fits"
         State.SUBSTITUTES -> "Switch it off to use the checkpoint's own"
@@ -71,6 +83,15 @@ object ComponentCheck {
         available: List<ModelAttachment>,
         architecture: String? = null,
         installedRoles: Set<AttachmentRole> = emptySet(),
+        /**
+         * The slots something is being downloaded for right now.
+         *
+         * Separate from [installedRoles] because they answer different
+         * questions and only one of them can be acted on: an absent part is
+         * something to go and fetch, and an arriving one is something to wait
+         * for.
+         */
+        arrivingRoles: Set<AttachmentRole> = emptySet(),
         /**
          * Whether the checkpoint is the denoiser alone.
          *
@@ -130,8 +151,21 @@ object ComponentCheck {
             }
         }
         val unfilled = needed.filter { it !in enabled }.map { role ->
+            val state = when {
+                role in installed && role !in enabled ->
+                    MissingComponent.State.INSTALLED_NOT_ATTACHED
+                role in arrivingRoles -> MissingComponent.State.ARRIVING
+                else -> MissingComponent.State.NOT_INSTALLED
+            }
+            val subject = architecture ?: "this model"
             MissingComponent(
-                what = "No ${role.label} for ${architecture ?: "this model"}",
+                // "No T5-XXL for wan" is not true of a T5-XXL that is nine per
+                // cent downloaded, and the heading is the part that gets read.
+                what = if (state == MissingComponent.State.ARRIVING) {
+                    "${role.label} for $subject is downloading"
+                } else {
+                    "No ${role.label} for $subject"
+                },
                 because = if (role == AttachmentRole.VAE) {
                     "a quantised release is the denoiser alone, so the decoder that turns the " +
                         "latent into pixels has to come from a separate file"
@@ -139,11 +173,7 @@ object ComponentCheck {
                     "this architecture reads its prompt through it, and without one there is " +
                         "nothing to turn the words into conditioning"
                 },
-                state = when {
-                    role in installed && role !in enabled ->
-                        MissingComponent.State.INSTALLED_NOT_ATTACHED
-                    else -> MissingComponent.State.NOT_INSTALLED
-                },
+                state = state,
             )
         }
 
@@ -167,10 +197,10 @@ object ComponentCheck {
             MissingComponent(
                 what = "${role.label} needs a ${needed.label}",
                 because = requirement.because,
-                state = if (needed in installed) {
-                    MissingComponent.State.INSTALLED_NOT_ATTACHED
-                } else {
-                    MissingComponent.State.NOT_INSTALLED
+                state = when {
+                    needed in installed -> MissingComponent.State.INSTALLED_NOT_ATTACHED
+                    needed in arrivingRoles -> MissingComponent.State.ARRIVING
+                    else -> MissingComponent.State.NOT_INSTALLED
                 },
             )
         }.sortedBy { it.what }

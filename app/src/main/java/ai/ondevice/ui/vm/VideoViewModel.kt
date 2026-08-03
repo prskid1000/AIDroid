@@ -90,6 +90,22 @@ class VideoViewModel @Inject constructor(
                 refreshAttachments(all)
             }
         }
+
+        // A part that is still arriving is not a part that is missing.
+        //
+        // Every list on this screen comes from `observeInstalledByModality`,
+        // which is completed rows only — rightly, because half a file loads
+        // into a crash. But the component warnings were computed from the same
+        // list, so a UMT5 encoder nine per cent of the way here was reported as
+        // "No T5-XXL for wan · add one from Models → Add", which is advice to
+        // start the download that is already running.
+        viewModelScope.launch {
+            db.models().observeInstalling().collect { jobs ->
+                _state.value = _state.value.copy(
+                    installing = jobs.filter { it.modality == Modality.DIFFUSION },
+                )
+            }
+        }
     }
 
     /**
@@ -524,6 +540,8 @@ class VideoViewModel @Inject constructor(
 data class VideoState(
     val models: List<ModelEntity> = emptyList(),
     val model: ModelEntity? = null,
+    /** Downloads in flight, so an arriving part is not reported as an absent one. */
+    val installing: List<ai.ondevice.data.db.InstallingModel> = emptyList(),
     val runtimeInstalled: Boolean = false,
     val prompt: String = "",
     val negativePrompt: String = "",
@@ -595,6 +613,11 @@ data class VideoState(
             ai.ondevice.core.ComponentCheck.forDiffusion(
                 available = availableAttachments,
                 architecture = recognisedAs,
+                arrivingRoles = arrivingRoles,
             )
         }
+
+    /** The slots a download is on its way to filling. */
+    val arrivingRoles: Set<ai.ondevice.core.AttachmentRole>
+        get() = installing.mapNotNull { it.attachmentRole }.toSet()
 }
