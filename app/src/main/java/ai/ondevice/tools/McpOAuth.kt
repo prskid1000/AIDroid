@@ -218,10 +218,10 @@ class McpOAuth(private val http: OkHttpClient) {
                 }
                 if (unauthorized && initialAccessToken == null) {
                     error(
-                        "$endpoint refused an anonymous registration. This server does not allow " +
-                            "apps to register themselves, so it needs a registration token — put " +
-                            "it in this server's Authorization header field and try again, or ask " +
-                            "for a client id issued to you.",
+                        "$endpoint refused the registration because nothing was sent to " +
+                            "authenticate it. This server does not let apps register themselves, " +
+                            "so it needs either a client ID issued to you or a registration " +
+                            "token — fill in one of the two fields above, then press Authorize.",
                     )
                 }
                 throw failure

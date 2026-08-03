@@ -14,9 +14,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -286,6 +290,8 @@ fun ToolsScreen(
                     authorizing = state.authorizingServerId == server.id,
                     onAuthorize = { viewModel.authorize(server) },
                     onSignOut = { viewModel.signOut(server) },
+                    onSetClientId = { viewModel.setServerClientId(server, it) },
+                    onSetClientSecret = { viewModel.setServerClientSecret(server, it) },
                 )
             }
 
@@ -311,6 +317,49 @@ fun ToolsScreen(
                     textStyle = NocturneType.MonoCode,
                     minHeight = 42.dp,
                 )
+
+                // Closed by default. Most servers need nothing in here — the
+                // app registers itself — and two empty boxes above the button
+                // would read as two more things to fill in.
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .nClickableFlat { viewModel.toggleDraftAdvanced() }
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        NIcons.ChevronDown,
+                        contentDescription = null,
+                        tint = NocturneColors.Accent2,
+                        modifier = Modifier
+                            .size(14.dp)
+                            .rotate(if (state.draftAdvancedOpen) 180f else 0f),
+                    )
+                    Text("Advanced settings", style = NocturneType.Row, color = NocturneColors.Accent2)
+                }
+
+                if (state.draftAdvancedOpen) {
+                    NInput(
+                        value = state.draftClientId,
+                        onValueChange = { viewModel.setDraft(clientId = it) },
+                        placeholder = "OAuth client ID (optional)",
+                        textStyle = NocturneType.MonoCode,
+                        minHeight = 42.dp,
+                    )
+                    NInput(
+                        value = state.draftClientSecret,
+                        onValueChange = { viewModel.setDraft(clientSecret = it) },
+                        placeholder = "OAuth client secret (optional)",
+                        textStyle = NocturneType.MonoCode,
+                        minHeight = 42.dp,
+                    )
+                    NHelp(
+                        "Only for a server that will not let apps register themselves. " +
+                            "Left empty, the app asks the server for a client ID of its own.",
+                    )
+                }
                 state.draftError?.let { error ->
                     Row(
                         Modifier.fillMaxWidth(),
@@ -457,6 +506,8 @@ private fun ServerCard(
     authorizing: Boolean,
     onAuthorize: () -> Unit,
     onSignOut: () -> Unit,
+    onSetClientId: (String) -> Unit,
+    onSetClientSecret: (String) -> Unit,
 ) {
     val tools = remember(server.lastToolsJson) { McpTools.parse(server.lastToolsJson) }
     val disabled = remember(server.disabledToolsJson) { McpTools.disabled(server) }
@@ -490,6 +541,47 @@ private fun ServerCard(
         // the endpoints only get there by a 401 having sent us discovering, so
         // their presence is the record that this server asked. A server behind
         // a pasted header never shows any of this.
+        // MCP's fourth option: ask the person.
+        //
+        // Only while signed out, and only once the server has shown it wants
+        // OAuth — before that these two fields would be a question about
+        // nothing. Held in local state so typing does not wait on a round trip
+        // through Room, and written on every change so there is no Save to
+        // forget.
+        if (!authorized && server.oauthAuthorizeEndpoint != null) {
+            var clientId by rememberSaveable(server.id) {
+                mutableStateOf(server.oauthClientId.orEmpty())
+            }
+            var secret by rememberSaveable(server.id) {
+                mutableStateOf(server.oauthClientSecret.orEmpty())
+            }
+            Column(
+                Modifier.fillMaxWidth().padding(top = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                NInput(
+                    value = clientId,
+                    onValueChange = { clientId = it; onSetClientId(it) },
+                    placeholder = "OAuth client ID (optional)",
+                    textStyle = NocturneType.MonoCode,
+                    minHeight = 42.dp,
+                )
+                NInput(
+                    value = secret,
+                    onValueChange = { secret = it; onSetClientSecret(it) },
+                    placeholder = "OAuth client secret (optional)",
+                    textStyle = NocturneType.MonoCode,
+                    minHeight = 42.dp,
+                )
+                NHelp(
+                    "Leave both empty and the app registers itself. Fill in an ID " +
+                        "you were issued to skip registration — which is what a " +
+                        "server that will not let apps register themselves needs. " +
+                        "The secret is usually blank.",
+                )
+            }
+        }
+
         if (authorized || server.oauthAuthorizeEndpoint != null) {
             Row(
                 Modifier.fillMaxWidth().padding(top = 8.dp),

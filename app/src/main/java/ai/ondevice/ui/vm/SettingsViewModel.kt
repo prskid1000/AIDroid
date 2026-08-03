@@ -161,6 +161,42 @@ class ToolsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * A client ID issued out of band — MCP's first choice and its last resort.
+     *
+     * The spec's order is pre-registered, then Client ID Metadata Documents,
+     * then dynamic registration, then asking the person. The second is closed
+     * to this app: a metadata document has to be served from an https URL, and
+     * this project has no server anywhere to serve one. The third is refused
+     * by any authorization server that guards its registration endpoint. So
+     * the first and the fourth are the same field — paste what you were given
+     * and registration is skipped entirely.
+     */
+    fun setServerClientId(server: McpServerEntity, value: String) {
+        viewModelScope.launch {
+            db.mcpServers().upsert(
+                server.copy(oauthClientId = value.trim().takeIf { it.isNotBlank() }),
+            )
+        }
+    }
+
+    /**
+     * The secret that came with a pre-issued client ID, where there is one.
+     *
+     * Usually blank. A public client on a phone has nowhere to keep a secret,
+     * so this app registers itself with `token_endpoint_auth_method=none` and
+     * relies on PKCE. It exists because some authorization servers issue a
+     * confidential client anyway, and refusing to carry what they handed out
+     * would mean refusing the server.
+     */
+    fun setServerClientSecret(server: McpServerEntity, value: String) {
+        viewModelScope.launch {
+            db.mcpServers().upsert(
+                server.copy(oauthClientSecret = value.trim().takeIf { it.isNotBlank() }),
+            )
+        }
+    }
+
     fun signOut(server: McpServerEntity) {
         viewModelScope.launch {
             factory.authorizer.signOut(server.id)
@@ -197,12 +233,25 @@ class ToolsViewModel @Inject constructor(
         _state.value = _state.value.copy(expandedServerId = id)
     }
 
-    fun setDraft(name: String? = null, url: String? = null, auth: String? = null) {
+    fun setDraft(
+        name: String? = null,
+        url: String? = null,
+        auth: String? = null,
+        clientId: String? = null,
+        clientSecret: String? = null,
+    ) {
         _state.value = _state.value.copy(
             draftName = name ?: _state.value.draftName,
             draftUrl = url ?: _state.value.draftUrl,
             draftAuth = auth ?: _state.value.draftAuth,
+            draftClientId = clientId ?: _state.value.draftClientId,
+            draftClientSecret = clientSecret ?: _state.value.draftClientSecret,
         )
+    }
+
+    /** The advanced block starts closed: most servers need nothing in it. */
+    fun toggleDraftAdvanced() {
+        _state.value = _state.value.copy(draftAdvancedOpen = !_state.value.draftAdvancedOpen)
     }
 
     /** Add a server only after it has answered. */
@@ -224,6 +273,8 @@ class ToolsViewModel @Inject constructor(
                 name = _state.value.draftName.ifBlank { url.substringAfter("://").substringBefore('/') },
                 url = url,
                 authHeader = _state.value.draftAuth.takeIf { it.isNotBlank() },
+                oauthClientId = _state.value.draftClientId.trim().takeIf { it.isNotBlank() },
+                oauthClientSecret = _state.value.draftClientSecret.trim().takeIf { it.isNotBlank() },
                 enabled = true,
                 lastToolsJson = null,
                 disabledToolsJson = "[]",
@@ -239,6 +290,7 @@ class ToolsViewModel @Inject constructor(
                 db.mcpServers().upsert(candidate.copy(lastError = probe.error))
                 _state.value = _state.value.copy(
                     testing = false, draftName = "", draftUrl = "", draftAuth = "",
+                    draftClientId = "", draftClientSecret = "",
                     draftError = null, expandedServerId = candidate.id,
                 )
                 authorize(candidate)
@@ -262,6 +314,8 @@ class ToolsViewModel @Inject constructor(
                 draftName = "",
                 draftUrl = "",
                 draftAuth = "",
+                draftClientId = "",
+                draftClientSecret = "",
                 draftError = null,
                 expandedServerId = candidate.id,
             )
@@ -305,6 +359,9 @@ data class ToolsState(
     val draftName: String = "",
     val draftUrl: String = "",
     val draftAuth: String = "",
+    val draftClientId: String = "",
+    val draftClientSecret: String = "",
+    val draftAdvancedOpen: Boolean = false,
     val draftError: String? = null,
     val testing: Boolean = false,
     val fileTools: List<String> = ai.ondevice.tools.FileToolProvider.toolNames(),
