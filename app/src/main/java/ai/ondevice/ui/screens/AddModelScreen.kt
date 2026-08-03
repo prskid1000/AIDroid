@@ -551,9 +551,9 @@ fun AddModelScreen(
 /** Somewhere to start. */
 @Composable
 private fun StarterTable(onPick: (ai.ondevice.core.StarterModel) -> Unit) {
-    ai.ondevice.core.StarterModels.BY_MODALITY.forEach { (modality, entries) ->
+    ai.ondevice.core.StarterModels.BY_SECTION.forEach { (title, entries) ->
         if (entries.isEmpty()) return@forEach
-        SectionKicker(modality.label, Modifier.padding(top = 18.dp, bottom = 7.dp))
+        SectionKicker(title, Modifier.padding(top = 18.dp, bottom = 7.dp))
         StarterRows(entries, onPick)
     }
 

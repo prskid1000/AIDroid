@@ -577,11 +577,33 @@ object StarterModels {
     /** Every add-on, flattened, for whatever still wants one list. */
     val ADDONS: List<StarterModel> = BUNDLES.flatMap { it.parts }
 
-    /** Grouped for display, in the order a new install would want them. */
-    val BY_MODALITY: List<Pair<Modality, List<StarterModel>>> = listOf(
-        Modality.TEXT,
-        Modality.SPEECH_TO_TEXT,
-        Modality.TEXT_TO_SPEECH,
-        Modality.DIFFUSION,
-    ).map { modality -> modality to ALL.filter { it.modality == modality } }
+    /**
+     * The bases that make video, taken from their bundle's architecture.
+     *
+     * A [StarterModel] carries no architecture of its own — the bundle does —
+     * so this is derived rather than declared, and stays right when a bundle is
+     * added. `isVideo` is the same answer the screens use, which is upstream's
+     * `sd_version_supports_video_generation` by name.
+     */
+    private val VIDEO_BASES: Set<String> = BUNDLES
+        .filter { DiffusionFamily.isVideo(it.architecture) == true }
+        .map { it.base.repoId }
+        .toSet()
+
+    /**
+     * Grouped for display, in the order a new install would want them.
+     *
+     * Stills and clips are one modality to the runtime and two different
+     * decisions to a person: they share DIFFUSION, the same loader and the
+     * same parameters, but a 6.5 GB video bundle listed between two 2 GB image
+     * models reads as an image model that is inexplicably enormous. Split by
+     * what they make, not by what loads them.
+     */
+    val BY_SECTION: List<Pair<String, List<StarterModel>>> = listOf(
+        Modality.TEXT.label to ALL.filter { it.modality == Modality.TEXT },
+        Modality.SPEECH_TO_TEXT.label to ALL.filter { it.modality == Modality.SPEECH_TO_TEXT },
+        Modality.TEXT_TO_SPEECH.label to ALL.filter { it.modality == Modality.TEXT_TO_SPEECH },
+        "Image" to ALL.filter { it.modality == Modality.DIFFUSION && it.repoId !in VIDEO_BASES },
+        "Video" to ALL.filter { it.modality == Modality.DIFFUSION && it.repoId in VIDEO_BASES },
+    )
 }
