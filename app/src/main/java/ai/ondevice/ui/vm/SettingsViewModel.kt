@@ -40,7 +40,13 @@ class ToolsViewModel @Inject constructor(
         _state.value = _state.value.copy(toolSettings = factory.allSettings(context))
         viewModelScope.launch {
             db.mcpServers().observeAll().collect { servers ->
-                _state.value = _state.value.copy(servers = servers)
+                _state.value = _state.value.copy(
+                    servers = servers,
+                    authorizedServers = servers
+                        .filter { factory.authorizer.isAuthorized(it.id) }
+                        .map { it.id }
+                        .toSet(),
+                )
             }
         }
         viewModelScope.launch {
@@ -113,6 +119,57 @@ class ToolsViewModel @Inject constructor(
 
     fun clearShellLog() = ai.ondevice.tools.ShellLog.clear()
 
+    /**
+     * Sign in to a server: discover, register, open the browser, store tokens.
+     *
+     * Re-probes afterwards so the tool list fills in — before the sign-in the
+     * server answered 401 to tools/list and there was nothing to show.
+     */
+    fun authorize(server: McpServerEntity) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(authorizingServerId = server.id)
+            val outcome = factory.authorizer.authorize(server)
+            _state.value = _state.value.copy(authorizingServerId = null)
+            outcome.fold(
+                onSuccess = {
+                    refreshAuthorized()
+                    val fresh = db.mcpServers().getAll().firstOrNull { it.id == server.id } ?: server
+                    val probe = factory.provider(fresh).probe()
+                    db.mcpServers().upsert(
+                        fresh.copy(
+                            lastToolsJson = if (probe.ok) {
+                                ai.ondevice.tools.McpTools.encode(probe.tools)
+                            } else {
+                                fresh.lastToolsJson
+                            },
+                            lastCheckedAt = System.currentTimeMillis(),
+                            lastError = if (probe.ok) null else probe.error,
+                        ),
+                    )
+                },
+                onFailure = { failure ->
+                    db.mcpServers().upsert(server.copy(lastError = failure.message))
+                },
+            )
+        }
+    }
+
+    fun signOut(server: McpServerEntity) {
+        viewModelScope.launch {
+            factory.authorizer.signOut(server.id)
+            refreshAuthorized()
+        }
+    }
+
+    private suspend fun refreshAuthorized() {
+        _state.value = _state.value.copy(
+            authorizedServers = db.mcpServers().getAll()
+                .filter { factory.authorizer.isAuthorized(it.id) }
+                .map { it.id }
+                .toSet(),
+        )
+    }
+
     /** Pause without forgetting. */
     fun pauseServer(server: McpServerEntity, enabled: Boolean) {
         viewModelScope.launch { db.mcpServers().upsert(server.copy(enabled = enabled)) }
@@ -168,6 +225,18 @@ class ToolsViewModel @Inject constructor(
                 createdAt = System.currentTimeMillis(),
             )
             val probe = factory.provider(candidate).probe()
+            // A server that answers 401 is a working server that wants a
+            // sign-in, so it is added and offered an Authorize button rather
+            // than rejected as unreachable.
+            if (!probe.ok && probe.needsAuthorization) {
+                db.mcpServers().upsert(candidate.copy(lastError = probe.error))
+                _state.value = _state.value.copy(
+                    testing = false, draftName = "", draftUrl = "", draftAuth = "",
+                    draftError = null, expandedServerId = candidate.id,
+                )
+                authorize(candidate)
+                return@launch
+            }
             if (!probe.ok) {
                 _state.value = _state.value.copy(
                     testing = false,
@@ -241,6 +310,10 @@ data class ToolsState(
     /** What has actually been changed; absent keys mean "still the default". */
     val tuning: ai.ondevice.core.SparseParams = ai.ondevice.core.SparseParams.EMPTY,
     val expandedProviderId: String? = null,
+    /** Server ids that currently hold OAuth tokens. */
+    val authorizedServers: Set<String> = emptySet(),
+    /** The server a sign-in is running for, so its button can say so. */
+    val authorizingServerId: String? = null,
 ) {
     /** The settings belonging to one provider's tools, in declaration order. */
     fun settingsFor(providerId: String, tools: List<String>): List<ai.ondevice.params.ParamSpec> =

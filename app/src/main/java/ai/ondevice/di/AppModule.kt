@@ -131,7 +131,8 @@ object AppModule {
         db: OnDeviceDatabase,
         capabilities: DeviceCapabilities,
         @ApplicationContext context: Context,
-    ) = ai.ondevice.tools.ToolProviderFactory(db, capabilities, context)
+        tokens: ai.ondevice.data.secure.TokenStore,
+    ) = ai.ondevice.tools.ToolProviderFactory(db, capabilities, context, tokens)
 
     @Provides
     @Singleton

@@ -80,7 +80,7 @@ abstract class OnDeviceDatabase : RoomDatabase() {
             arrayOf(
                 MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
                 MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
-                MIGRATION_9_10,
+                MIGRATION_9_10, MIGRATION_10_11,
             )
     }
 }
@@ -270,4 +270,22 @@ private val MIGRATION_9_10 = object : androidx.room.migration.Migration(9, 10) {
     }
 }
 
-internal const val DATABASE_VERSION = 10
+internal const val DATABASE_VERSION = 11
+
+/**
+ * v11 — OAuth on `mcp_servers`.
+ *
+ * Columns only, and every one nullable: a server added before this release is
+ * still a working server with a static header, and it must stay one. Nothing
+ * here is a secret; the tokens go to TokenStore.
+ */
+private val MIGRATION_10_11 = object : androidx.room.migration.Migration(10, 11) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        listOf(
+            "oauthIssuer", "oauthAuthorizeEndpoint", "oauthTokenEndpoint",
+            "oauthRegistrationEndpoint", "oauthClientId", "oauthClientSecret", "oauthScope",
+        ).forEach { column ->
+            db.execSQL("ALTER TABLE `mcp_servers` ADD COLUMN `$column` TEXT")
+        }
+    }
+}

@@ -5,7 +5,7 @@ import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
-/** The Hugging Face token, and nothing else. */
+/** Every credential the app holds, behind the Android Keystore. */
 class TokenStore(context: Context) {
 
     private val prefs: SharedPreferences by lazy {
@@ -35,8 +35,52 @@ class TokenStore(context: Context) {
         if (it.length <= 11) "•".repeat(it.length) else "${it.take(6)}…${it.takeLast(4)}"
     }
 
+    // — MCP OAuth —
+    //
+    // Here rather than in the database for the same reason the Hugging Face
+    // token is: a bearer token is a credential, the database is a plain file
+    // inside the app's directory, and a backup or an extraction would carry it
+    // off intact. The server row keeps the discovered endpoints and the client
+    // id, which are not secrets; only these three are.
+
+    fun oauthTokens(serverId: String): Triple<String, String?, Long?>? {
+        val access = prefs.getString("$KEY_MCP_ACCESS$serverId", null)?.takeIf { it.isNotBlank() }
+            ?: return null
+        val refresh = prefs.getString("$KEY_MCP_REFRESH$serverId", null)?.takeIf { it.isNotBlank() }
+        val expiry = prefs.getLong("$KEY_MCP_EXPIRY$serverId", 0L).takeIf { it > 0L }
+        return Triple(access, refresh, expiry)
+    }
+
+    fun setOauthTokens(serverId: String, access: String, refresh: String?, expiresAt: Long?) {
+        prefs.edit().apply {
+            putString("$KEY_MCP_ACCESS$serverId", access)
+            if (refresh.isNullOrBlank()) {
+                remove("$KEY_MCP_REFRESH$serverId")
+            } else {
+                putString("$KEY_MCP_REFRESH$serverId", refresh)
+            }
+            if (expiresAt == null) {
+                remove("$KEY_MCP_EXPIRY$serverId")
+            } else {
+                putLong("$KEY_MCP_EXPIRY$serverId", expiresAt)
+            }
+        }.apply()
+    }
+
+    /** Called when a server is forgotten, and when its authorisation is revoked. */
+    fun clearOauthTokens(serverId: String) {
+        prefs.edit()
+            .remove("$KEY_MCP_ACCESS$serverId")
+            .remove("$KEY_MCP_REFRESH$serverId")
+            .remove("$KEY_MCP_EXPIRY$serverId")
+            .apply()
+    }
+
     private companion object {
         const val FILE_NAME = "hf_token"
         const val KEY_HF_TOKEN = "hf_token"
+        const val KEY_MCP_ACCESS = "mcp_access:"
+        const val KEY_MCP_REFRESH = "mcp_refresh:"
+        const val KEY_MCP_EXPIRY = "mcp_expiry:"
     }
 }

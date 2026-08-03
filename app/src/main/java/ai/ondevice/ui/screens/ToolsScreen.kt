@@ -282,6 +282,10 @@ fun ToolsScreen(
                     onToggleTool = { viewModel.toggleTool(server, it) },
                     onRefresh = { viewModel.refresh(server) },
                     onRemove = { viewModel.removeServer(server.id) },
+                    authorized = server.id in state.authorizedServers,
+                    authorizing = state.authorizingServerId == server.id,
+                    onAuthorize = { viewModel.authorize(server) },
+                    onSignOut = { viewModel.signOut(server) },
                 )
             }
 
@@ -449,6 +453,10 @@ private fun ServerCard(
     onToggleTool: (String) -> Unit,
     onRefresh: () -> Unit,
     onRemove: () -> Unit,
+    authorized: Boolean,
+    authorizing: Boolean,
+    onAuthorize: () -> Unit,
+    onSignOut: () -> Unit,
 ) {
     val tools = remember(server.lastToolsJson) { McpTools.parse(server.lastToolsJson) }
     val disabled = remember(server.disabledToolsJson) { McpTools.disabled(server) }
@@ -474,6 +482,46 @@ private fun ServerCard(
                 )
             }
             NSwitch(checked = server.enabled, onCheckedChange = onPause)
+        }
+
+        // Sign-in, when the server wants one.
+        //
+        // Shown whenever it is signed in *or* it has OAuth endpoints on file —
+        // the endpoints only get there by a 401 having sent us discovering, so
+        // their presence is the record that this server asked. A server behind
+        // a pasted header never shows any of this.
+        if (authorized || server.oauthAuthorizeEndpoint != null) {
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (authorized) "Signed in" else "Needs you to sign in",
+                        style = NocturneType.Row,
+                    )
+                    server.oauthIssuer?.takeIf { it.isNotBlank() }?.let { issuer ->
+                        Text(
+                            issuer,
+                            style = NocturneType.MonoXs,
+                            color = NocturneColors.TextMuted,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                NButton(
+                    text = when {
+                        authorizing -> "Opening…"
+                        authorized -> "Sign out"
+                        else -> "Authorize"
+                    },
+                    onClick = if (authorized) onSignOut else onAuthorize,
+                    style = if (authorized) NButtonStyle.Ghost else NButtonStyle.Primary,
+                    enabled = !authorizing,
+                )
+            }
         }
 
         // The count is of what is *offered*, and says so when that is fewer than the server has — a switched-off tool is the kind of thing you forget you did.

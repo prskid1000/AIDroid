@@ -54,6 +54,35 @@
             </intent-filter>
         </activity>
 
+        <!--
+          Where an MCP sign-in comes back to.
+
+          A custom scheme, not an https App Link: an App Link has to be claimed
+          by publishing assetlinks.json on a domain, and this project has no
+          server anywhere to publish it on. The trade is that another app could
+          register the same scheme, which is exactly what PKCE is for — the
+          code alone is worth nothing without the verifier, and that never
+          leaves this process.
+
+          No affinity and excluded from recents so it never shows up as a
+          second card; it draws nothing and finishes immediately.
+        -->
+        <activity
+            android:name=".tools.OAuthCallbackActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="ai.ondevice" android:host="oauth" />
+            </intent-filter>
+        </activity>
+
         <!-- SPEC 3.4 — downloads survive app kill. -->
         <service
             android:name=".data.download.DownloadService"

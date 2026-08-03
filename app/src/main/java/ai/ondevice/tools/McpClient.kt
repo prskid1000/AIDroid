@@ -26,6 +26,15 @@ import java.util.concurrent.atomic.AtomicLong
 class McpToolProvider(
     private val server: McpServerEntity,
     private val client: OkHttpClient,
+    /**
+     * Supplies a bearer for this server, refreshing it if it has expired.
+     *
+     * A function rather than a token because a registry is built once per turn
+     * and a turn can outlive an access token — capturing the string here would
+     * mean the second tool call of a long conversation failing with a 401 that
+     * a refresh would have prevented.
+     */
+    private val bearer: suspend () -> String? = { null },
 ) : ToolProvider {
 
     override val id: String = "${ID_PREFIX}${server.id}"
@@ -118,12 +127,20 @@ class McpToolProvider(
                 protocolVersion = info["protocolVersion"]?.jsonPrimitive?.content.orEmpty(),
                 tools = offered.map { McpTool(it.name, it.description) },
             )
-        }.getOrElse { McpProbe(ok = false, error = it.message ?: it.toString()) }
+        }.getOrElse { failure ->
+            val unauthorized = failure as? McpUnauthorized
+            McpProbe(
+                ok = false,
+                error = failure.message ?: failure.toString(),
+                needsAuthorization = unauthorized != null,
+                challenge = unauthorized?.challenge,
+            )
+        }
     }
 
     private var initialized = false
 
-    private fun initialize(force: Boolean = false): JsonObject {
+    private suspend fun initialize(force: Boolean = false): JsonObject {
         if (initialized && !force) return buildJsonObject { }
         val result = rpc(
             "initialize",
@@ -143,7 +160,7 @@ class McpToolProvider(
         return result
     }
 
-    private fun rpc(method: String, params: JsonObject): JsonObject {
+    private suspend fun rpc(method: String, params: JsonObject): JsonObject {
         val body = buildJsonObject {
             put("jsonrpc", "2.0")
             put("id", nextId.getAndIncrement())
@@ -160,7 +177,15 @@ class McpToolProvider(
             .header("Content-Type", "application/json")
             .apply {
                 sessionId?.let { header("Mcp-Session-Id", it) }
-                server.authHeader?.takeIf { it.isNotBlank() }?.let { header("Authorization", it) }
+                // A live OAuth token wins over a header typed by hand: the
+                // header is what someone pasted before authorising, and after
+                // authorising it is the stale half of the pair.
+                val token = bearer()
+                when {
+                    token != null -> header("Authorization", "Bearer $token")
+                    else -> server.authHeader?.takeIf { it.isNotBlank() }
+                        ?.let { header("Authorization", it) }
+                }
                 header("MCP-Protocol-Version", PROTOCOL_VERSION)
             }
             .build()
@@ -168,6 +193,14 @@ class McpToolProvider(
         client.newCall(request).execute().use { response ->
             response.header("Mcp-Session-Id")?.let { sessionId = it }
             val raw = response.body?.string().orEmpty()
+            if (response.code == HTTP_UNAUTHORIZED) {
+                // Not an error string: the challenge header names where to go
+                // and sign in, and the Tools screen turns it into a button.
+                throw McpUnauthorized(
+                    server.url,
+                    response.header("WWW-Authenticate"),
+                )
+            }
             if (!response.isSuccessful) {
                 error("HTTP ${response.code} from ${server.url}: ${raw.take(200)}")
             }
@@ -190,7 +223,7 @@ class McpToolProvider(
         }
     }
 
-    private fun notify(method: String) {
+    private suspend fun notify(method: String) {
         val body = buildJsonObject {
             put("jsonrpc", "2.0")
             put("method", method)
@@ -202,7 +235,12 @@ class McpToolProvider(
             .header("Accept", "application/json, text/event-stream")
             .apply {
                 sessionId?.let { header("Mcp-Session-Id", it) }
-                server.authHeader?.takeIf { it.isNotBlank() }?.let { header("Authorization", it) }
+                val token = bearer()
+                when {
+                    token != null -> header("Authorization", "Bearer $token")
+                    else -> server.authHeader?.takeIf { it.isNotBlank() }
+                        ?.let { header("Authorization", it) }
+                }
             }
             .build()
         client.newCall(request).execute().close()
@@ -212,6 +250,7 @@ class McpToolProvider(
         const val ID_PREFIX = "mcp:"
         /** The revision this client implements; sent on every request. */
         const val PROTOCOL_VERSION = "2025-06-18"
+        private const val HTTP_UNAUTHORIZED = 401
         private val JSON_MEDIA = "application/json".toMediaType()
 
         fun httpClient(): OkHttpClient = OkHttpClient.Builder()
@@ -220,6 +259,19 @@ class McpToolProvider(
             .build()
     }
 }
+
+/**
+ * A server that wants a sign-in.
+ *
+ * Its own type because it is not a failure the user can do anything about by
+ * retrying — it is the one error with a next step attached, and the screen
+ * turns it into an Authorize button rather than a red line.
+ */
+class McpUnauthorized(
+    val serverUrl: String,
+    /** The `WWW-Authenticate` challenge, which names where the metadata lives. */
+    val challenge: String?,
+) : Exception("This server needs you to sign in.")
 
 /** One tool as a server described it. */
 @kotlinx.serialization.Serializable
@@ -231,6 +283,15 @@ data class McpProbe(
     val protocolVersion: String = "",
     val tools: List<McpTool> = emptyList(),
     val error: String? = null,
+    /**
+     * The server answered 401 rather than failing.
+     *
+     * Kept apart from [error] because it is the one failure with a next step:
+     * the server is reachable and working, it just has not been signed in to.
+     */
+    val needsAuthorization: Boolean = false,
+    /** The `WWW-Authenticate` challenge, when the 401 carried one. */
+    val challenge: String? = null,
 )
 
 /** Reading and writing the two tool lists on a server row. */
@@ -265,9 +326,13 @@ class ToolProviderFactory(
     private val db: OnDeviceDatabase,
     private val capabilities: ai.ondevice.data.hf.DeviceCapabilities,
     private val context: android.content.Context,
+    tokens: ai.ondevice.data.secure.TokenStore,
 ) {
     private val http = McpToolProvider.httpClient()
     private val web = WebSearch(http)
+
+    /** Sign-in, refresh and the bearer every MCP request asks for. */
+    val authorizer = McpAuthorizer(context, db, tokens, http)
 
     /**
      * @param enabled the provider ids the user has switched on. The shell is in
@@ -287,7 +352,7 @@ class ToolProviderFactory(
                 if (BuiltInToolProvider.ID in enabled) add(built(tuning))
                 if (FileToolProvider.ID in enabled) add(FileToolProvider(workspace, settingsFor(files(workspace), tuning)))
                 if (ShellToolProvider.ID in enabled) add(ShellToolProvider(workspace, settingsFor(shell(workspace), tuning)))
-                addAll(servers.map { McpToolProvider(it, http) })
+                addAll(servers.map { server -> provider(server) })
             },
         )
     }
@@ -318,5 +383,6 @@ class ToolProviderFactory(
     private fun settingsFor(provider: ToolProvider, tuning: ai.ondevice.core.SparseParams) =
         ToolSettings(tuning, provider.settings())
 
-    fun provider(server: McpServerEntity): McpToolProvider = McpToolProvider(server, http)
+    fun provider(server: McpServerEntity): McpToolProvider =
+        McpToolProvider(server, http, bearer = { authorizer.bearer(server.id) })
 }

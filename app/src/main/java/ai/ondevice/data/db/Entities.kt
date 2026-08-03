@@ -309,6 +309,28 @@ data class McpServerEntity(
     val lastCheckedAt: Long?,
     val lastError: String?,
     val createdAt: Long,
+
+    // — OAuth, discovered rather than typed —
+    //
+    // The tokens are not here. These are the things a thief gains nothing
+    // from — an issuer, two endpoint URLs and a client id the server handed
+    // out to anyone who asked — while the bearer and refresh tokens live in
+    // TokenStore behind the Keystore. Kept so an authorised server survives a
+    // restart without rediscovering and re-registering itself.
+    val oauthIssuer: String? = null,
+    val oauthAuthorizeEndpoint: String? = null,
+    val oauthTokenEndpoint: String? = null,
+    val oauthRegistrationEndpoint: String? = null,
+    val oauthClientId: String? = null,
+    /**
+     * Only ever set when a server insisted on issuing one.
+     *
+     * This app registers as a public client — `token_endpoint_auth_method` of
+     * `none` — because an app distributed to strangers cannot keep a secret.
+     * A server that returns one anyway is honoured rather than argued with.
+     */
+    val oauthClientSecret: String? = null,
+    val oauthScope: String? = null,
 )
 
 @Entity(tableName = "param_manifests")
