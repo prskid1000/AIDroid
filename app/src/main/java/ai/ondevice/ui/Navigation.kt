@@ -2,6 +2,7 @@ package ai.ondevice.ui
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -33,6 +34,18 @@ import ai.ondevice.ui.theme.NIcons
 
 /** Routes. */
 object Routes {
+    /**
+     * The graph itself, so a screen can scope a view model to something that
+     * outlives its own entry.
+     *
+     * Video needs it. It is a pushed destination and its Stills toggle pops it,
+     * which clears the entry and with it the view model holding a running
+     * generation — so leaving the tab for a moment threw away the progress, the
+     * resource trace and the clip, while sd.cpp carried on denoising in the
+     * background with nothing left to report to.
+     */
+    const val GRAPH = "graph"
+
     const val CHAT = "chat"
     const val IMAGE = "image"
     const val VOICE = "voice"
@@ -112,6 +125,7 @@ fun OnDeviceApp(
             ai.ondevice.MainActivity.DEST_DOWNLOADS -> Routes.DOWNLOADS
             else -> Routes.CHAT
         },
+        route = Routes.GRAPH,
         modifier = modifier,
     ) {
         // — root destinations —
@@ -142,7 +156,16 @@ fun OnDeviceApp(
                 onOpenVideo = { navController.navigate(Routes.VIDEO) },
             )
         }
-        composable(Routes.VIDEO) {
+        composable(Routes.VIDEO) { entry ->
+            // Scoped to the graph, not to this entry.
+            //
+            // Stills pops Video off the stack, which clears an entry-scoped
+            // view model — so stepping across to the image tab while a clip
+            // rendered threw away the progress, the trace and the clip itself,
+            // and coming back showed an idle screen over a run that was still
+            // going. A generation outlives the screen that started it, so the
+            // thing holding it has to as well.
+            val graph = remember(entry) { navController.getBackStackEntry(Routes.GRAPH) }
             VideoScreen(
                 currentRoute = currentRoute,
                 onNavigate = { navController.navigateToRoot(it) },
@@ -153,6 +176,7 @@ fun OnDeviceApp(
                         Routes.parameters(ai.ondevice.engine.RuntimeRegistry.STABLE_DIFFUSION),
                     )
                 },
+                viewModel = androidx.hilt.navigation.compose.hiltViewModel(graph),
             )
         }
         composable(Routes.VOICE) {
