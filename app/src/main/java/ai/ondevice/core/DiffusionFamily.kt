@@ -281,6 +281,14 @@ data class DiffusionFamily(
         fun isVideo(name: String?): Boolean? {
             val key = name?.lowercase()?.trim()?.takeIf { it.isNotEmpty() } ?: return null
             if (VIDEO_NAMES.any { key.contains(it) }) return true
+            // The family rule has to reach this list too, or the two answers
+            // contradict each other. `wan` contains none of the video names —
+            // they are versions, `wan 2` and `wan2` — so the first check missed
+            // it and the fallback below, once [forName] learned to resolve a
+            // family, started answering a confident "no". The video tab filters
+            // on `!= false`, so Wan disappeared from it and the screen said
+            // there was no video model installed, of a device with one.
+            if (key.length >= MIN_FAMILY_PREFIX && VIDEO_NAMES.any { it.startsWith(key) }) return true
             return if (forName(key) != null) false else null
         }
 

@@ -47,6 +47,22 @@ class FamilyPrefixTest {
     }
 
     @Test
+    fun `a declared family that makes video still says so`() {
+        // The two answers have to agree. Teaching forName to resolve `wan`
+        // without teaching isVideo the same rule turned "nobody knows" into a
+        // confident "no", and the video tab — which filters on `!= false` —
+        // reported no video model installed on a device holding one.
+        assertEquals(true, DiffusionFamily.isVideo("wan"))
+        assertEquals(true, DiffusionFamily.isVideo("wan2_2_ti2v"))
+    }
+
+    @Test
+    fun `a family that makes stills is still not video`() {
+        assertEquals(false, DiffusionFamily.isVideo("flux"))
+        assertEquals(false, DiffusionFamily.isVideo("sdxl"))
+    }
+
+    @Test
     fun `a name nothing begins is still unknown`() {
         assertNull(DiffusionFamily.forName("zzz"))
         assertNull(DiffusionFamily.forName("some model published next year"))
