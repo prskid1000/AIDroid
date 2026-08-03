@@ -858,6 +858,20 @@ private fun LivePreview(state: ImageState) {
                 when {
                     state.loadingModel -> "loading model…"
                     !state.generating -> "No preview yet"
+                    // Said out loud, because the press is honoured but not
+                    // instantly and a silent wait reads as a hang.
+                    //
+                    // Encoding the prompt is one ggml graph — FLUX.2 reads it
+                    // through a 4B language model, half a minute of it — and
+                    // abandoning that graph hands sd.cpp an empty result it
+                    // asserts on rather than checks, which is an abort and
+                    // takes the process with it. So the press waits for the
+                    // encode and lands on the first step. Sampling and the
+                    // decode stop inside the current graph, in about a step.
+                    state.cancelling &&
+                        state.phase == ai.ondevice.engine.DiffusionPhase.PREPARING ->
+                        "stopping · the prompt encode can't be interrupted, so it finishes first"
+                    state.cancelling -> "stopping · leaving the current step"
                     state.phase == ai.ondevice.engine.DiffusionPhase.PREPARING ->
                         "preparing · loading weights, no steps to count yet"
                     state.phase == ai.ondevice.engine.DiffusionPhase.DECODING ->

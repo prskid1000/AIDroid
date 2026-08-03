@@ -3,6 +3,7 @@
 #include <jni.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <map>
 #include <mutex>
@@ -33,6 +34,18 @@ namespace {
 struct od_whisper {
     whisper_context * ctx = nullptr;
     std::mutex        mutex;
+
+    /**
+     * Set by Stop, read by ggml before every node of the encoder and decoder.
+     *
+     * A take is transcribed in one pass, and on a phone that is minutes of
+     * work inside a single uninterruptible JNI call — so without this there is
+     * nothing a Stop could reach, and the screen offered none. Unlike the
+     * diffusion path this needs no deferral: whisper checks the callback's
+     * answer and returns a failure code, and every caller here already treats
+     * a failed decode as a failed transcription rather than asserting on it.
+     */
+    std::atomic<bool> cancelled{false};
 
     // Held so a string parameter outlives the whisper_full call that reads it.
     std::string language      = "auto";
@@ -221,6 +234,13 @@ whisper_full_params build_params(od_whisper & e) {
     p.print_timestamps = false;
     p.print_special    = false;
 
+    // ggml asks this before each graph node and abandons the graph the moment
+    // it answers true, which is the only place a Stop can land inside a pass.
+    p.abort_callback           = [](void * user_data) -> bool {
+        return static_cast<od_whisper *>(user_data)->cancelled.load();
+    };
+    p.abort_callback_user_data = &e;
+
     p.translate        = e.translate;
     p.detect_language  = e.detect_language;
     p.language         = e.language.empty() || e.language == "auto" ? nullptr : e.language.c_str();
@@ -347,7 +367,21 @@ Java_ai_ondevice_engine_WhisperBridge_nativeLoad(JNIEnv * env, jobject, jstring 
 
 JNIEXPORT void JNICALL
 Java_ai_ondevice_engine_WhisperBridge_nativeFree(JNIEnv *, jobject, jlong handle) {
-    delete as_whisper(handle);
+    auto * e = as_whisper(handle);
+    if (e == nullptr) return;
+    // A pass still inside whisper_full holds e->mutex and is still reading
+    // e->ctx. Stop only sets a flag, so an unload that follows one can arrive
+    // while the pass is still unwinding; deleting under it is a use-after-free.
+    e->cancelled.store(true);
+    { std::lock_guard<std::mutex> wait_for_the_pass(e->mutex); }
+    delete e;
+}
+
+/** Stop the pass in flight. Safe from any thread; takes no lock. */
+JNIEXPORT void JNICALL
+Java_ai_ondevice_engine_WhisperBridge_nativeCancel(JNIEnv *, jobject, jlong handle) {
+    auto * e = as_whisper(handle);
+    if (e != nullptr) e->cancelled.store(true);
 }
 
 JNIEXPORT jstring JNICALL
@@ -409,6 +443,10 @@ Java_ai_ondevice_engine_WhisperBridge_nativeTranscribe(
     env->GetFloatArrayRegion(jsamples, 0, n, samples.data());
 
     std::lock_guard<std::mutex> lock(e->mutex);
+    // Cleared here, before any of the work a Stop is meant to interrupt, and
+    // not again afterwards — clearing it later would throw away a press that
+    // arrived while the pass was already running.
+    e->cancelled.store(false);
     whisper_full_params params = build_params(*e);
 
     // A decode that throws is a failed transcription, not a dead app.
@@ -423,6 +461,12 @@ Java_ai_ondevice_engine_WhisperBridge_nativeTranscribe(
         return jni_from_string(env, dump_json(json{ { "error", "the decode failed" } }));
     }
     if (t0 != 0) {
+        // The abort callback fails the pass too, and telling someone who just
+        // pressed Stop that the decode failed is a different answer to a
+        // question they did not ask.
+        if (e->cancelled.load()) {
+            return jni_from_string(env, R"({"cancelled":true,"segments":[]})");
+        }
         return jni_from_string(env, dump_json(json{ { "error", "whisper_full failed" } }));
     }
 

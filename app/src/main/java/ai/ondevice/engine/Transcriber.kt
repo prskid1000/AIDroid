@@ -243,9 +243,23 @@ class Transcriber(private val context: Context) {
         }
     }
 
+    /**
+     * Stop the pass in flight.
+     *
+     * Deliberately takes no [nativeLock]: that lock is held for the whole
+     * length of the decode this is trying to stop, so waiting for it would
+     * mean the Stop could only arrive once it was no longer needed.
+     */
+    fun cancel() {
+        if (handle != 0L) WhisperBridge.nativeCancel(handle)
+    }
+
     private fun decode(samples: FloatArray): List<TranscriptSegment> = nativeLock.withLock {
         if (handle == 0L) return emptyList()
         val result = json.parseToJsonElement(WhisperBridge.nativeTranscribe(handle, samples)).jsonObject
+        // A stopped pass has no segments and is not a failure. Reported as an
+        // empty list, which is what every caller already does nothing with.
+        if (result["cancelled"]?.jsonPrimitive?.content == "true") return emptyList()
         return result["segments"]?.jsonArray.orEmpty().map { element ->
             val obj = element.jsonObject
             TranscriptSegment(

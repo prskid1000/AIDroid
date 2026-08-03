@@ -29,4 +29,14 @@ object WhisperBridge {
 
     /** @param samples mono PCM, 16 kHz, in [-1, 1]. */
     external fun nativeTranscribe(handle: Long, samples: FloatArray): String
+
+    /**
+     * Stop the pass in flight.
+     *
+     * Cancelling the coroutine cannot do this: a take is transcribed in one
+     * uninterruptible JNI call, so the flow does not unwind until the call
+     * returns. This sets a flag ggml reads before every graph node, from
+     * whichever thread pressed the button.
+     */
+    external fun nativeCancel(handle: Long)
 }

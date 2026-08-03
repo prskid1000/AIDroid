@@ -439,10 +439,26 @@ void note_phase(const std::string & line) {
     // Order matters: "sampling completed" has to be read as the end of
     // sampling, not as the start of it, so the completions are tested first.
     if (says("sampling completed") || says("decoding") || says("decode_first_stage") ||
-        says("decoded, taking") || says("upscal")) {
+        says("decoded, taking") || says("upscal") || says("generate_video completed")) {
         e->phase.store(PHASE_DECODING);
-    } else if (says("sampling using") || says("generating image:") ||
-               says("generating latent")) {
+    } else if (says("generating image:") || says("generate_video ")) {
+        // The two lines upstream prints *after* conditioning and immediately
+        // before it samples — `stable-diffusion.cpp:5473` and `:6448`.
+        //
+        // Deliberately not "sampling using %s method", which is the obvious
+        // candidate and the wrong one: it is printed by the SamplePlan
+        // constructor, which resolves the sampler and the sigmas long before
+        // the prompt is encoded. On FLUX.2 klein that put the latch 38 seconds
+        // early — measured, not estimated — and those 38 seconds are exactly
+        // the window this latch exists to protect, so the deferral below could
+        // never fire and Cancel went on aborting the conditioner's graph.
+        // `LLMEmbedder::encode_prompt` asserts on the empty result, and a
+        // GGML_ASSERT is ggml_abort: the app died rather than stopping. Four
+        // tombstones, all the same stack.
+        //
+        // Nor "generating latent", whose only match is upstream's
+        // "generating latent video completed" — the end of sampling read as
+        // the start of it.
         e->phase.store(PHASE_SAMPLING);
         e->sampling_started.store(true);
         // A Cancel pressed during the prompt encode has been waiting for this.
@@ -1579,10 +1595,50 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
     return reinterpret_cast<jlong>(engine);
 }
 
+/**
+ * Ask a run to stop, by whichever of the two routes is safe right now.
+ *
+ * Both flags matter and neither is enough alone. `sd_cancel_generation` is
+ * upstream's, and upstream reads it between denoising steps, between batches
+ * and between latents; on a phone one step of a 4B transformer is closer to two
+ * minutes than to a moment, and the VAE decode that follows is a single op with
+ * no check inside it, so a press could sit unnoticed for the length of the
+ * thing it was meant to stop. `cancelled` is read by the graph callback, which
+ * ggml asks before every node.
+ *
+ * The gate is the whole point. Before sampling begins, upstream's cancel
+ * abandons the conditioner's graph, and `LLMEmbedder::encode_prompt` asserts on
+ * the empty result it then gets — a GGML_ASSERT is ggml_abort, so the app dies
+ * instead of stopping. During that phase the press is only remembered;
+ * note_phase applies it the moment sampling actually starts.
+ */
+void request_cancel(od_sd * e) {
+    if (e == nullptr || e->ctx == nullptr) return;
+    e->cancelled.store(true);
+    if (e->sampling_started.load()) {
+        sd_cancel_generation(e->ctx, SD_CANCEL_ALL);
+    } else {
+        e->cancel_deferred.store(true);
+    }
+}
+
 JNIEXPORT void JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeFree(JNIEnv *, jobject, jlong handle) {
     auto * e = as_sd(handle);
+    if (e == nullptr) return;
     if (g_current.load() == e) g_current.store(nullptr);
+
+    // A run still inside generate_image holds e->mutex and is still reading
+    // e->ctx, and this used to delete both out from under it.
+    //
+    // The window is not theoretical. Cancel returns the screen to idle while
+    // the native call keeps running — there is no interrupting it mid-encode —
+    // so anything that unloads next lands in the middle of a live run: picking
+    // a different checkpoint, or the upscaler, which unloads the denoiser on
+    // purpose to get its memory back. A use-after-free of a context this size
+    // is a segfault, not an exception.
+    request_cancel(e);
+    { std::lock_guard<std::mutex> wait_for_the_run(e->mutex); }
     delete e;
 }
 
@@ -1660,28 +1716,7 @@ Java_ai_ondevice_engine_SdBridge_nativePreview(JNIEnv * env, jobject, jlong hand
 
 JNIEXPORT void JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeCancel(JNIEnv *, jobject, jlong handle) {
-    auto * e = as_sd(handle);
-    if (e == nullptr || e->ctx == nullptr) return;
-    // Both, and the order matters only in that neither is enough alone.
-    //
-    // sd_cancel_generation is upstream's flag, and upstream reads it between
-    // denoising steps, between batches and between latents. On a phone one
-    // step of a 4B transformer is closer to two minutes than to a moment, and
-    // the VAE decode that follows is a single op with no check inside it — so
-    // a press could sit unnoticed for the length of the thing it was meant to
-    // stop. The atomic below is read by the graph callback, which ggml asks
-    // before every node.
-    e->cancelled.store(true);
-    // Only once sampling is running. Before that, upstream's cancel abandons
-    // the conditioner's graph and the assert on its empty result is an abort,
-    // not an error — the app dies rather than stopping. The press is remembered
-    // and applied the moment sampling begins; the graph callback below already
-    // covers everything after that point.
-    if (e->sampling_started.load()) {
-        sd_cancel_generation(e->ctx, SD_CANCEL_ALL);
-    } else {
-        e->cancel_deferred.store(true);
-    }
+    request_cancel(as_sd(handle));
 }
 
 /** What this context can make, so the app offers the screen that fits it. */

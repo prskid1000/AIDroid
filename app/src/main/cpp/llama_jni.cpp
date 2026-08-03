@@ -740,7 +740,20 @@ Java_ai_ondevice_engine_LlamaBridge_nativeLoad(JNIEnv * env, jobject, jstring jp
 
 JNIEXPORT void JNICALL
 Java_ai_ondevice_engine_LlamaBridge_nativeFree(JNIEnv *, jobject, jlong handle) {
-    delete as_engine(handle);
+    auto * e = as_engine(handle);
+    if (e == nullptr) return;
+    // A turn still inside nativeStartGeneration or nativeNextToken holds
+    // e->mutex and is still decoding against e->ctx.
+    //
+    // Stop is not synchronous and cannot be: it sets a flag and returns, and
+    // the JNI call unwinds only when the current graph notices. So an unload
+    // that follows a Stop — switching model, or the memory-pressure path —
+    // can arrive while the decode is still running, and deleting the context
+    // under it is a use-after-free rather than an exception. Ask it to stop,
+    // then wait for the mutex it is holding.
+    e->cancelled = true;
+    { std::lock_guard<std::mutex> wait_for_the_decode(e->mutex); }
+    delete e;
 }
 
 /** What the model actually says about itself. */
