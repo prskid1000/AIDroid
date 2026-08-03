@@ -83,14 +83,22 @@ object GgufHeaderReader {
         else -> null
     }
 
-    private fun readArray(buf: ByteBuffer): List<Any?>? {
+    private fun readArray(buf: ByteBuffer): Any? {
         if (buf.remaining() < 12) return null
         val elementType = buf.int
         val count = buf.long
         if (count < 0) return null
         // Token vocabularies run to hundreds of thousands of strings and are of
         // no use here; skipping them keeps a 1 MB slice sufficient.
-        if (count > 65_536) return emptyList()
+        //
+        // How many there were is worth keeping, though, and it used to be
+        // thrown away with them. It is the only thing separating the two models
+        // that both call themselves T5-XXL: they agree on every other field in
+        // the header — embedding length, block count, head count, context — and
+        // differ by a vocabulary, 32k against 256k. Reporting the size of what
+        // was skipped costs nothing and means nobody has to write down a
+        // parameter count read off a model page.
+        if (count > 65_536) return SkippedArray(count)
         val out = ArrayList<Any?>(count.toInt().coerceAtMost(1024))
         for (i in 0 until count) {
             out.add(readValue(buf, elementType) ?: return out)
@@ -98,6 +106,9 @@ object GgufHeaderReader {
         return out
     }
 }
+
+/** An array the parser walked past, and how long it was. */
+data class SkippedArray(val count: Long)
 
 /** Normalised GGUF metadata. */
 data class GgufMetadata(
@@ -120,6 +131,20 @@ data class GgufMetadata(
     val bosTokenId: Int? get() = (kv["tokenizer.ggml.bos_token_id"] as? Number)?.toInt()
     val eosTokenId: Int? get() = (kv["tokenizer.ggml.eos_token_id"] as? Number)?.toInt()
     val quantVersion: Int? get() = (kv["general.quantization_version"] as? Number)?.toInt()
+
+    /**
+     * How many tokens this file's tokenizer holds.
+     *
+     * The list itself is skipped — see [GgufHeaderReader] — so this is the
+     * count of what was walked past, or the size of the list where it was
+     * small enough to keep.
+     */
+    val vocabSize: Int?
+        get() = when (val tokens = kv["tokenizer.ggml.tokens"]) {
+            is SkippedArray -> tokens.count.toInt()
+            is List<*> -> tokens.size.takeIf { it > 0 }
+            else -> null
+        }
     val name: String? get() = kv["general.name"] as? String
     val paramCount: Long? get() = (kv["general.parameter_count"] as? Number)?.toLong()
 

@@ -210,7 +210,8 @@ class VideoViewModel @Inject constructor(
     ): Boolean {
         if (role != AttachmentRole.T5XXL) return true
         val wanted = family?.t5 ?: return true
-        val kind = ai.ondevice.core.DiffusionFamily.T5Kind.of(candidate.parameterCount) ?: return true
+        val vocab = ai.ondevice.data.hf.LocalGguf.vocabSize(candidate.localPath)
+        val kind = ai.ondevice.core.DiffusionFamily.T5Kind.of(vocab) ?: return true
         return kind == wanted
     }
 

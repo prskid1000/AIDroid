@@ -693,7 +693,8 @@ class ImageViewModel @Inject constructor(
     ): String? {
         if (role != ai.ondevice.core.AttachmentRole.T5XXL) return null
         val wanted = ai.ondevice.core.DiffusionFamily.forName(model.architecture)?.t5 ?: return null
-        val kind = ai.ondevice.core.DiffusionFamily.T5Kind.of(candidate?.parameterCount) ?: return null
+        val vocab = candidate?.localPath?.let { ai.ondevice.data.hf.LocalGguf.vocabSize(it) }
+        val kind = ai.ondevice.core.DiffusionFamily.T5Kind.of(vocab) ?: return null
         if (kind == wanted) return null
         return "This is ${kind.label}; ${model.architecture} reads ${wanted.label}. They share " +
             "the slot and not the vocabulary, so this loads and conditions on the wrong tokens."

@@ -74,35 +74,39 @@ data class DiffusionFamily(
      */
     val t5: T5Kind? = null,
 ) {
-    /** The two T5s that share a slot. Told apart by size, not by name. */
-    enum class T5Kind(val label: String, val approxParams: Long) {
-        /** `google/t5-v1_1-xxl` — 32k vocab, English. */
-        T5_V1_1("T5 v1.1 XXL", 4_762_310_656L),
+    /**
+     * The two T5s that share a slot, told apart by the vocabulary each is
+     * built around.
+     *
+     * The conditioner decides this, not the file: sd.cpp builds a UMT5
+     * embedder for Wan and a T5 v1.1 one for FLUX.1 and SD 3.x, and those two
+     * tokenizers are 256k and 32k. So the number below is a property of the
+     * architecture's conditioner, and the file states its own to be compared
+     * against — `tokenizer.ggml.tokens` is in every GGUF header.
+     *
+     * It was a pair of parameter counts read off two model pages, which is a
+     * different kind of fact: it identified two *repositories* rather than two
+     * tokenizers, and it would have needed a new line for every re-quantisation
+     * that shifted the total.
+     */
+    enum class T5Kind(val label: String, val vocabSize: Int) {
+        /** 32k tokens, English. What FLUX.1, SD 3.x and Chroma read. */
+        T5_V1_1("T5 v1.1 XXL", 32_128),
 
-        /** `google/umt5-xxl` — 256k vocab, multilingual. */
-        UMT5("UMT5 XXL", 5_680_910_336L),
+        /** 256k tokens, multilingual. What Wan reads. */
+        UMT5("UMT5 XXL", 256_384),
         ;
 
         companion object {
             /**
-             * Which of the two a parameter count belongs to, or null.
+             * Which of the two a vocabulary belongs to, or null for neither.
              *
-             * Parameter count rather than file size, because it does not move
-             * with the quant, and rather than the repo name, because a name is
-             * whatever someone typed. The gap between the two is 0.92B — the
-             * vocabulary — so a tenth of that is a wide margin, and anything
-             * outside both windows is left unclaimed rather than forced into
-             * the nearer one.
+             * Exact, because a tokenizer has the size it has — there is no
+             * quant or conversion that moves it, which is the whole reason it
+             * is a better question than the parameter count was.
              */
-            fun of(parameterCount: Long?): T5Kind? {
-                val count = parameterCount?.takeIf { it > 0 } ?: return null
-                return entries.firstOrNull {
-                    kotlin.math.abs(count - it.approxParams) < TOLERANCE
-                }
-            }
-
-            /** A tenth of the gap the vocabulary opens between the two. */
-            private const val TOLERANCE = 92_000_000L
+            fun of(vocabSize: Int?): T5Kind? =
+                vocabSize?.let { size -> entries.firstOrNull { it.vocabSize == size } }
         }
     }
 

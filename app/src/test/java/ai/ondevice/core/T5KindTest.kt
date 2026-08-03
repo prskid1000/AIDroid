@@ -15,27 +15,21 @@ import org.junit.Test
 class T5KindTest {
 
     @Test
-    fun `each encoder is recognised from its own parameter count`() {
-        // The counts Hugging Face reports for city96's two conversions.
-        assertEquals(T5Kind.T5_V1_1, T5Kind.of(4_762_310_656L))
-        assertEquals(T5Kind.UMT5, T5Kind.of(5_680_910_336L))
+    fun `each encoder is recognised by its own vocabulary`() {
+        // Read out of the two files' headers, not off a model page: every
+        // other field they carry is identical.
+        assertEquals(T5Kind.T5_V1_1, T5Kind.of(32_128))
+        assertEquals(T5Kind.UMT5, T5Kind.of(256_384))
     }
 
     @Test
-    fun `neither is mistaken for the other`() {
-        // 0.92B apart, which is the 256k vocabulary against the 32k one.
-        assertEquals(T5Kind.T5_V1_1, T5Kind.of(4_800_000_000L))
-        assertEquals(T5Kind.UMT5, T5Kind.of(5_650_000_000L))
-    }
-
-    @Test
-    fun `an encoder that is neither is left unclaimed`() {
-        // Forcing a stranger into the nearer window is how a wrong answer gets
-        // stated confidently. Null means the caller says nothing.
-        assertNull(T5Kind.of(5_200_000_000L))
-        assertNull(T5Kind.of(300_000_000L))
+    fun `a tokenizer that is neither is left unclaimed`() {
+        // Nearest-match is how a wrong answer gets stated confidently. A
+        // vocabulary is exact or it is somebody else's.
+        assertNull(T5Kind.of(32_000))
+        assertNull(T5Kind.of(250_000))
         assertNull(T5Kind.of(null))
-        assertNull(T5Kind.of(0L))
+        assertNull(T5Kind.of(0))
     }
 
     @Test
