@@ -138,30 +138,21 @@ object StarterModels {
 
         // — video —
         //
-        // Both are vid_gen models, and both need more beside them than an image
-        // model does, so the size below is the whole bundle rather than the
-        // checkpoint — the checkpoint is the part that fits.
+        // A vid_gen model needs more beside it than an image model does, so the
+        // size below is the whole bundle rather than the checkpoint — the
+        // checkpoint is the part that fits.
         StarterModel(
             repoId = WAN22_TI2V_5B,
             modality = Modality.DIFFUSION,
             summary = "Video, and the one that fits. Text or a picture in, a few seconds of " +
-                "clip out. Silent: nothing here makes sound except LTX.",
+                "clip out, silently — sound needs an architecture no phone here has the " +
+                "memory for.",
             sizeHint = "2.37 GB at Q3_K_M, ~6.5 GB the bundle",
-        ),
-        StarterModel(
-            repoId = LTX_2_3,
-            modality = Modality.DIFFUSION,
-            summary = "Video with synced audio, and the only architecture that makes any. " +
-                "A 22B model that reads its prompt with a 12B one — about 14 GB of weights " +
-                "before buffers, which is more than most phones have free. Here to be tried " +
-                "rather than because it is expected to run.",
-            sizeHint = "7.39 GB at Q2_K, ~14 GB the bundle",
         ),
     )
 
     // Repo ids used by more than one card, or long enough to be worth a name.
     private const val WAN22_TI2V_5B = "QuantStack/Wan2.2-TI2V-5B-GGUF"
-    private const val LTX_2_3 = "unsloth/LTX-2.3-GGUF"
     private const val Z_IMAGE_TURBO = "leejet/Z-Image-Turbo-GGUF"
     private const val SD35_TURBO = "tensorart/stable-diffusion-3.5-medium-turbo"
     private const val SD35_ENCODERS = "Comfy-Org/stable-diffusion-3.5-fp8"
@@ -527,51 +518,15 @@ object StarterModels {
             ),
         ),
 
-        StarterBundle(
-            architecture = "ltxav",
-            label = "LTX-2.3, audio and video",
-            base = ALL.first { it.repoId == LTX_2_3 },
-            parts = listOf(
-                StarterModel(
-                    repoId = "unsloth/gemma-3-12b-it-GGUF",
-                    modality = Modality.DIFFUSION,
-                    role = AttachmentRole.LLM_ENCODER,
-                    summary = "Required, and not substitutable: the runtime's LTX conditioner " +
-                        "is compiled against Gemma-3-12B, so a smaller encoder is not a trade " +
-                        "available. UD-IQ1_S is the smallest that exists, and quantises a 12B " +
-                        "model hard enough to show.",
-                    sizeHint = "2.85 GB at UD-IQ1_S",
-                ),
-                StarterModel(
-                    repoId = LTX_2_3,
-                    modality = Modality.DIFFUSION,
-                    role = AttachmentRole.EMBEDDING,
-                    summary = "Required, under text_encoders/ — the connectors ending " +
-                        "_embeddings_connectors.safetensors. They map Gemma's hidden states " +
-                        "into what the transformer conditions on; without them the encoder " +
-                        "and the denoiser have nothing to say to each other.",
-                    sizeHint = "2.15 GB",
-                ),
-                StarterModel(
-                    repoId = LTX_2_3,
-                    modality = Modality.DIFFUSION,
-                    role = AttachmentRole.VAE,
-                    summary = "Required, under vae/ — the file ending _video_vae.safetensors. " +
-                        "Temporal as well as spatial: it decodes frames together, which is " +
-                        "where a video decoder's memory goes.",
-                    sizeHint = "1.35 GB",
-                ),
-                StarterModel(
-                    repoId = LTX_2_3,
-                    modality = Modality.DIFFUSION,
-                    role = AttachmentRole.AUDIO_VAE,
-                    summary = "Under vae/ — the file ending _audio_vae.safetensors. Optional " +
-                        "in that the clip renders silently without it, and the whole reason to " +
-                        "choose LTX with it.",
-                    sizeHint = "343 MB",
-                ),
-            ),
-        ),
+        // LTX-2.3 had a card and a bundle here and no longer does.
+        //
+        // It is the only architecture that makes sound, which is the whole
+        // reason it was worth trying, and it wants about 14 GB of weights
+        // before a single buffer is allocated — against roughly 9.9 GB free on
+        // the phone this was measured on. A starter card is a recommendation,
+        // and recommending a download that ends in "won't fit" after seven
+        // gigabytes is not one. Nothing stops anyone pasting the repo id; what
+        // is gone is the app suggesting it.
     )
 
     /** Every add-on, flattened, for whatever still wants one list. */
