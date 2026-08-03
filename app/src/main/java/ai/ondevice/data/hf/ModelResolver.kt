@@ -210,7 +210,18 @@ class ModelResolver(
 
         // Step 4/6 — enumerate quant variants, folding shard sets into one entry.
         val primaryFiles = when (format) {
-            ModelFormat.GGUF -> ggufFiles.filterNot { isCompanionFilename(it) }
+            // Subtracting the companions assumes there is a main model to be
+            // left with, and a repo that *is* a component has none: every file
+            // in city96/umt5-xxl-encoder-gguf is a T5 encoder, so all ten were
+            // filed as companions, nothing remained, and the repo was refused
+            // with "No loadable weights" — of a repo that is ten sets of
+            // loadable weights and nothing else.
+            //
+            // Falling back to the unfiltered list says what is true of any repo
+            // where the subtraction empties the set: the components are the
+            // model. It cannot affect a repo that has a main file, because then
+            // the subtraction leaves one.
+            ModelFormat.GGUF -> ggufFiles.filterNot { isCompanionFilename(it) }.ifEmpty { ggufFiles }
             ModelFormat.GGML_BIN -> ggmlBins
             ModelFormat.ONNX -> onnxFiles
             // For an auxiliary pack the "variants" are the individual auxiliaries — canny, depth, openpose — and picking one is the point, not a quality trade-off.
