@@ -50,6 +50,7 @@ import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NCard
 import ai.ondevice.ui.components.NDropdown
+import ai.ondevice.ui.components.GenerationProgress
 import ai.ondevice.ui.components.NField
 import ai.ondevice.ui.components.PickedImageField
 import ai.ondevice.ui.components.NHelp
@@ -839,56 +840,13 @@ private fun LivePreview(state: ImageState) {
         }
 
         if (state.generating) {
-            Column(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .bottomScrim()
-                    .padding(horizontal = 11.dp, vertical = 9.dp),
-            ) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        // Only the sampling phase has steps worth counting.
-                        if (state.phase == ai.ondevice.engine.DiffusionPhase.SAMPLING) {
-                            "step ${state.step}/${state.progressSteps}"
-                        } else {
-                            state.phase.label
-                        },
-                        style = NocturneType.MonoSm,
-                        color = NocturneColors.Accent200,
-                    )
-                    if (state.secondsPerStep > 0f) {
-                        Text("·", style = NocturneType.MonoSm, color = Color.White.copy(alpha = 0.7f))
-                        // The rate, not the device: there is one device.
-                        Text(
-                            "${String.format("%.1f", state.secondsPerStep)} s/it",
-                            style = NocturneType.MonoSm,
-                            color = Color.White.copy(alpha = 0.7f),
-                        )
-                    }
-                    Box(Modifier.weight(1f))
-                    // An ETA computed from a rate we do not have yet is a
-                    // guess dressed as a number. Better to show nothing.
-                    if (state.secondsPerStep > 0f && state.etaSeconds > 0) {
-                        Text(
-                            Fmt.eta(state.etaSeconds),
-                            style = NocturneType.MonoSm,
-                            color = Color.White.copy(alpha = 0.7f),
-                        )
-                    }
-                }
-                NProgressBar(
-                    fraction = state.progress,
-                    modifier = Modifier.padding(top = 6.dp),
-                    height = 4.dp,
-                    fill = NocturneColors.Accent400,
-                    track = Color.Black.copy(alpha = 0.45f),
-                )
-            }
+            GenerationProgress(
+                phase = state.phase,
+                step = state.step,
+                steps = state.progressSteps,
+                secondsPerStep = state.secondsPerStep,
+                etaSeconds = state.etaSeconds,
+            )
         }
     }
 }

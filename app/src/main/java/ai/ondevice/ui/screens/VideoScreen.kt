@@ -31,6 +31,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import ai.ondevice.core.Fmt
 import ai.ondevice.ui.BottomDestinations
+import ai.ondevice.ui.components.GenerationProgress
 import ai.ondevice.ui.components.PickedImageField
 import ai.ondevice.ui.components.ResourceBlock
 import ai.ondevice.ui.components.NBottomBar
@@ -78,7 +79,7 @@ fun VideoScreen(
     onBack: () -> Unit,
     onAddModel: () -> Unit,
     onOpenAdvanced: () -> Unit,
-    viewModel: VideoViewModel = hiltViewModel(),
+    viewModel: VideoViewModel = activityVideoViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
@@ -343,24 +344,19 @@ private fun ClipStage(state: VideoState, viewModel: VideoViewModel) {
                 color = NocturneColors.TextMuted,
             )
         }
-    }
 
-    if (state.generating && state.progressSteps > 0) {
-        NProgressBar(
-            fraction = state.step / state.progressSteps.toFloat(),
-            modifier = Modifier.padding(top = 8.dp),
-        )
-        Text(
-            "${state.phase.label} · ${state.step}/${state.progressSteps}" +
-                (if (state.secondsPerStep > 0f) " · ${String.format("%.1f", state.secondsPerStep)} s/step" else "") +
-                // A clip is the denoiser run N times, so the wait is minutes
-                // rather than seconds and "how long is left" is the question
-                // the screen was not answering.
-                (if (state.etaSeconds > 0) " · ~${ai.ondevice.core.Fmt.duration(state.etaSeconds)} left" else ""),
-            style = NocturneType.MonoXs,
-            color = NocturneColors.TextMuted,
-            modifier = Modifier.padding(top = 4.dp),
-        )
+        // Over the frame, not under it — the same block the still screen
+        // draws, so one run does not describe itself in two shapes depending
+        // on which tab is open.
+        if (state.generating) {
+            GenerationProgress(
+                phase = state.phase,
+                step = state.step,
+                steps = state.progressSteps,
+                secondsPerStep = state.secondsPerStep,
+                etaSeconds = state.etaSeconds,
+            )
+        }
     }
 
     // Live while it renders, then the finished run's — the same block the

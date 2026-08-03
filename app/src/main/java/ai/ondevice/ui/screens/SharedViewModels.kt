@@ -29,6 +29,23 @@ fun activityImageViewModel(): ImageViewModel =
 fun activityVoiceViewModel(): ai.ondevice.ui.vm.VoiceViewModel =
     hiltViewModel(viewModelStoreOwner = LocalContext.current.findActivity())
 
+/**
+ * A clip outlives the screen that asked for it.
+ *
+ * Video is a pushed destination and its Stills toggle pops it, so an
+ * entry-scoped view model was cleared the moment you looked at the still tab —
+ * taking the progress, the resource trace and the clip about to land with it,
+ * while sd.cpp carried on denoising with nothing left to report to. Coming back
+ * showed an idle screen over a running generation.
+ *
+ * Chat, Image and Voice were each given this for the same reason and Video was
+ * not, which is the whole of the bug: a run that takes minutes cannot be owned
+ * by whichever entry happens to be on the stack.
+ */
+@Composable
+fun activityVideoViewModel(): ai.ondevice.ui.vm.VideoViewModel =
+    hiltViewModel(viewModelStoreOwner = LocalContext.current.findActivity())
+
 private fun Context.findActivity(): ViewModelStoreOwner {
     var context = this
     while (context is ContextWrapper) {
