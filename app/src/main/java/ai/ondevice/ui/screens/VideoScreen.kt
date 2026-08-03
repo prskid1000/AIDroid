@@ -31,6 +31,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import ai.ondevice.core.Fmt
 import ai.ondevice.ui.BottomDestinations
+import ai.ondevice.ui.components.ResourceBlock
 import ai.ondevice.ui.components.NBottomBar
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
@@ -317,9 +318,14 @@ private fun ClipStage(state: VideoState, viewModel: VideoViewModel) {
         Modifier
             .fillMaxWidth()
             .aspectRatio(1f)
-            .clip(Radius.Lg)
-            .background(NocturneColors.Surface)
-            .ring(NocturneColors.Divider, Radius.Lg),
+            // The image tab's viewport, to the pixel. These were `Radius.Lg`
+            // over `Surface` against the still screen's `Radius.Md` over
+            // `Neutral900` — a lighter box with rounder corners, side by side
+            // with the one it is a sibling of, for no reason either screen
+            // could give.
+            .clip(Radius.Md)
+            .background(NocturneColors.Neutral900)
+            .ring(NocturneColors.Divider, Radius.Md),
         contentAlignment = Alignment.Center,
     ) {
         when {
@@ -354,10 +360,27 @@ private fun ClipStage(state: VideoState, viewModel: VideoViewModel) {
         )
         Text(
             "${state.phase.label} · ${state.step}/${state.progressSteps}" +
-                if (state.secondsPerStep > 0f) " · ${String.format("%.1f", state.secondsPerStep)} s/step" else "",
+                (if (state.secondsPerStep > 0f) " · ${String.format("%.1f", state.secondsPerStep)} s/step" else "") +
+                // A clip is the denoiser run N times, so the wait is minutes
+                // rather than seconds and "how long is left" is the question
+                // the screen was not answering.
+                (if (state.etaSeconds > 0) " · ~${ai.ondevice.core.Fmt.duration(state.etaSeconds)} left" else ""),
             style = NocturneType.MonoXs,
             color = NocturneColors.TextMuted,
             modifier = Modifier.padding(top = 4.dp),
+        )
+    }
+
+    // Live while it renders, then the finished run's — the same block the
+    // image tab shows, on the tab that works the phone hardest.
+    (state.liveTrace ?: state.lastTrace)?.let { trace ->
+        var traceExpanded by rememberSaveable { mutableStateOf(false) }
+        ResourceBlock(
+            trace = trace,
+            expanded = traceExpanded,
+            onToggle = { traceExpanded = !traceExpanded },
+            live = state.generating,
+            modifier = Modifier.padding(top = 8.dp),
         )
     }
 
@@ -590,7 +613,7 @@ private fun VideoSettingsSheet(
                 available = state.availableAttachments,
                 armedCount = state.attachments.size,
                 missing = state.missingComponents,
-                unchosenRoles = emptyList(),
+                unchosenRoles = state.unchosenRoles,
                 architectureLabel = state.recognisedAs ?: state.model?.architecture,
                 onToggle = viewModel::toggleAttachment,
                 onWeight = viewModel::setAttachmentWeight,

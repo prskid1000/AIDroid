@@ -600,6 +600,31 @@ void set_last_error(const char * text) {
     }
 }
 
+// An error that is followed by progress was recovered from.
+//
+// Upstream tries ggml's GGUF loader first and falls back to its own when that
+// refuses, and the first attempt logs at ERROR on its way past. Wan's
+// `patch_embedding` is a Conv3d, so it is five-dimensional and ggml's reader
+// caps at four:
+//
+//   gguf_init_from_reader: tensor 'patch_embedding.weight' has invalid number
+//   of dimensions: 5 > 4
+//
+// leejet confirms this is expected and the file loads normally afterwards
+// (leejet/stable-diffusion.cpp#1759). The latch held it anyway, and the load
+// path treats a non-empty latch as proof the weights are broken — so every Wan
+// checkpoint reported "This model's weights could not be read" after loading
+// perfectly well.
+//
+// Clearing on the next non-error line keeps both halves true: within one burst
+// of errors the first still names the cause, and a burst that something
+// carried on after was not fatal. What a genuine failure leaves behind is the
+// last burst, which is the one that stopped it.
+void clear_last_error() {
+    std::lock_guard<std::mutex> lock(g_last_error_mutex);
+    g_last_error.clear();
+}
+
 std::string take_last_error() {
     std::lock_guard<std::mutex> lock(g_last_error_mutex);
     return g_last_error;
@@ -1324,6 +1349,8 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
             if (text == nullptr) return;
             if (level >= SD_LOG_ERROR) {
                 set_last_error(text);
+            } else {
+                clear_last_error();
             }
             note_version(text);
             note_stage(text);

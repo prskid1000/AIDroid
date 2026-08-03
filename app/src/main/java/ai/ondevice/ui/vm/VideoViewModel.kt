@@ -13,6 +13,7 @@ import ai.ondevice.engine.DiffusionEngine
 import ai.ondevice.engine.DiffusionEvent
 import ai.ondevice.engine.DiffusionPhase
 import ai.ondevice.engine.LoadCancelled
+import ai.ondevice.engine.record
 import ai.ondevice.engine.VideoRequest
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -43,6 +44,8 @@ import kotlin.random.Random
 class VideoViewModel @Inject constructor(
     private val db: OnDeviceDatabase,
     private val diffusion: DiffusionEngine,
+    private val recorder: ai.ondevice.engine.ResourceRecorder,
+    private val params: ai.ondevice.params.ParamRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(VideoState())
@@ -117,20 +120,98 @@ class VideoViewModel @Inject constructor(
      * then never consulted — `sd_vid_gen_params_t` has nowhere to put the
      * picture it would read.
      */
-    private fun refreshAttachments(all: List<ModelEntity>) {
-        val attachments = all.mapNotNull { entity ->
+    private suspend fun refreshAttachments(all: List<ModelEntity>) {
+        val model = _state.value.model
+        // The keys this architecture's parameter set actually offers, which is
+        // what the image screen has always filtered on. Without it every role
+        // read as usable here, so nothing was ever marked "n/a".
+        val offered = params.applicableKeys(
+            RUNTIME_ID,
+            Modality.DIFFUSION.name.lowercase(),
+            model?.architecture,
+        )
+        // What the loader said, or failing that what the file declares.
+        val family = ai.ondevice.core.DiffusionFamily.forName(
+            _state.value.recognisedAs ?: model?.architecture,
+        )
+        val reads = rolesRead(family)
+
+        val candidates = all.mapNotNull { entity ->
             val role = entity.attachmentRole ?: return@mapNotNull null
             if (role in ROLES_VIDEO_IGNORES) return@mapNotNull null
+            entity to role
+        }
+        val perRole = candidates.groupBy({ it.second }, { it.first })
+
+        val attachments = candidates.map { (entity, role) ->
+            // Armed by role alone was the fault. Every VAE and every prompt
+            // encoder in the library switched itself on against whatever was
+            // loaded, so Wan 2.2 was handed FLUX.2's decoder and FLUX.2's Qwen3
+            // encoder while its own decoder sat installed and unused — and the
+            // load failed on tensor shapes, which names the symptom and not the
+            // cause.
+            //
+            // Three conditions now, and the same ones the image screen applies:
+            // the parameter set has to offer the slot, the family has to read
+            // it, and there has to be exactly one file that could fill it. Two
+            // candidates is a question for the person, not a coin toss — it
+            // shows up under "installed, not chosen".
+            val onlyOne = perRole[role]?.size == 1
+            val wanted = reads == null || role in reads
             ModelAttachment(
                 modelId = entity.id,
                 role = role,
                 path = entity.localPath,
                 displayName = entity.label,
-                enabled = _state.value.attachments.firstOrNull { it.modelId == entity.id }?.enabled
-                    ?: (role in ROLES_ARMED_BY_DEFAULT),
+                enabled = _state.value.availableAttachments
+                    .firstOrNull { it.modelId == entity.id }?.enabled
+                    ?: (role in ROLES_ARMED_BY_DEFAULT && wanted && onlyOne &&
+                        role.paramKey in offered && suits(family, role, entity)),
+                applicable = role.paramKey in offered && wanted,
             )
         }
-        _state.value = _state.value.copy(availableAttachments = attachments)
+
+        val claimed = attachments.filter { it.enabled }.map { it.role }.toSet()
+        _state.value = _state.value.copy(
+            availableAttachments = attachments,
+            installedRoles = all.mapNotNull { it.attachmentRole }.toSet(),
+            unchosenRoles = attachments
+                .map { it.role }
+                .filter { it !in claimed && it.paramKey in offered && (reads == null || it in reads) }
+                .distinct()
+                .sortedBy { it.ordinal },
+        )
+    }
+
+    /**
+     * The slots this family actually reads, or null when the family is unknown.
+     *
+     * Null is not "none": an architecture nothing recognises gets the old
+     * behaviour, because refusing to arm anything for a model we cannot
+     * describe would be worse than the guess.
+     */
+    private fun rolesRead(family: ai.ondevice.core.DiffusionFamily?): Set<AttachmentRole>? {
+        if (family == null) return null
+        val keys = family.encoders + family.optionalEncoders
+        return buildSet {
+            AttachmentRole.entries.filter { it.paramKey in keys }.forEach(::add)
+            if (family.vaeSeparate) add(AttachmentRole.VAE)
+        }
+    }
+
+    /**
+     * Whether this file is the right *kind* for the slot, where the role alone
+     * does not say — which is T5 and only T5. See DiffusionFamily.T5Kind.
+     */
+    private fun suits(
+        family: ai.ondevice.core.DiffusionFamily?,
+        role: AttachmentRole,
+        candidate: ModelEntity,
+    ): Boolean {
+        if (role != AttachmentRole.T5XXL) return true
+        val wanted = family?.t5 ?: return true
+        val kind = ai.ondevice.core.DiffusionFamily.T5Kind.of(candidate.parameterCount) ?: return true
+        return kind == wanted
     }
 
     fun selectModel(model: ModelEntity) {
@@ -247,6 +328,19 @@ class VideoViewModel @Inject constructor(
         )
 
         generationJob = viewModelScope.launch {
+            val started = System.currentTimeMillis()
+            // What a clip costs, sampled while it runs.
+            //
+            // The image tab has had this since the upscaler ran with no graph;
+            // video is the heavier of the two by a wide margin — a clip is the
+            // same denoiser over N frames — and it was the one screen with no
+            // way to see what the phone was doing.
+            val recording = recorder.start(viewModelScope)
+            val liveJob = viewModelScope.launch {
+                recording.live.collect { trace ->
+                    _state.value = _state.value.copy(liveTrace = trace)
+                }
+            }
             try {
                 if (!diffusion.isCurrent(model.id)) {
                     val armed = _state.value.attachments
@@ -305,6 +399,7 @@ class VideoViewModel @Inject constructor(
 
                 _state.value = _state.value.copy(
                     recognisedAs = diffusion.detectedVersion,
+                    bareDenoiser = diffusion.bareDiffusion,
                     supportsVideo = diffusion.supportsVideo,
                     residentComponents = listOfNotNull(diffusion.residentModel) +
                         diffusion.residentComponents.map {
@@ -370,9 +465,10 @@ class VideoViewModel @Inject constructor(
                             // Recorded before playback starts: the frames are
                             // already on disk, and a clip that is not indexed is
                             // a folder nothing will ever find again.
+                            val clipId = java.util.UUID.randomUUID().toString()
                             db.clips().upsert(
                                 ai.ondevice.data.db.GeneratedClipEntity(
-                                    id = java.util.UUID.randomUUID().toString(),
+                                    id = clipId,
                                     directory = event.clip.directory,
                                     frameCount = event.clip.frames.size,
                                     prompt = _state.value.prompt,
@@ -386,6 +482,21 @@ class VideoViewModel @Inject constructor(
                                     fps = event.clip.fps,
                                     audioPath = event.clip.audioPath,
                                     createdAt = System.currentTimeMillis(),
+                                ),
+                            )
+                            // The same record the image tab writes, so a clip's
+                            // cost is on its library page rather than only on
+                            // this screen until the next run clears it.
+                            db.predictionRuns().record(
+                                kind = ai.ondevice.core.PredictionKind.VIDEO,
+                                artifactId = clipId,
+                                modelId = model.id,
+                                startedAt = started,
+                                trace = recording.stop(),
+                                stats = SparseParams.of(
+                                    "steps" to _state.value.steps,
+                                    "frames" to _state.value.frames,
+                                    "seconds_per_step" to _state.value.secondsPerStep,
                                 ),
                             )
                             play()
@@ -405,11 +516,21 @@ class VideoViewModel @Inject constructor(
                 }
             } finally {
                 diffusion.cancel()
+                liveJob.cancel()
+                // Idempotent: a completed run already stopped it, a cancelled
+                // one never reached that point.
+                val trace = recording.stop()
                 _state.value = _state.value.copy(
                     generating = false,
                     cancelling = false,
                     loadingModel = false,
                     previewBitmap = null,
+                    liveTrace = null,
+                    // Kept for a cancelled run too. What the phone was doing
+                    // for the ninety seconds before you gave up is the most
+                    // useful thing on the screen at that point.
+                    lastTrace = trace.takeIf { !it.isEmpty },
+                    elapsedMillis = System.currentTimeMillis() - started,
                 )
             }
         }
@@ -542,6 +663,16 @@ data class VideoState(
     val model: ModelEntity? = null,
     /** Downloads in flight, so an arriving part is not reported as an absent one. */
     val installing: List<ai.ondevice.data.db.InstallingModel> = emptyList(),
+    /** Every role the library can fill, whichever model it belongs to. */
+    val installedRoles: Set<AttachmentRole> = emptySet(),
+    /** Roles with a file installed that fits, and no file chosen. */
+    val unchosenRoles: List<AttachmentRole> = emptyList(),
+    /** The loader's answer after a load, null before one — see the image screen. */
+    val bareDenoiser: Boolean? = null,
+    /** Sampled while the clip renders, and kept after it. */
+    val liveTrace: ai.ondevice.engine.ResourceTrace? = null,
+    val lastTrace: ai.ondevice.engine.ResourceTrace? = null,
+    val elapsedMillis: Long = 0,
     val runtimeInstalled: Boolean = false,
     val prompt: String = "",
     val negativePrompt: String = "",
@@ -613,8 +744,18 @@ data class VideoState(
             ai.ondevice.core.ComponentCheck.forDiffusion(
                 available = availableAttachments,
                 architecture = recognisedAs,
+                installedRoles = installedRoles,
                 arrivingRoles = arrivingRoles,
+                bareDenoiser = bareDenoiser,
             )
+        }
+
+    /** Seconds left at the rate the last step took, or 0 before there is one. */
+    val etaSeconds: Long
+        get() = if (secondsPerStep > 0f && progressSteps > step) {
+            ((progressSteps - step) * secondsPerStep).toLong()
+        } else {
+            0L
         }
 
     /** The slots a download is on its way to filling. */

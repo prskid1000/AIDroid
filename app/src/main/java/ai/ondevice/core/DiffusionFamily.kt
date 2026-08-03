@@ -291,7 +291,23 @@ data class DiffusionFamily(
          */
         fun forName(name: String?): DiffusionFamily? {
             val key = name?.lowercase()?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-            return BY_NAME.firstOrNull { (needle, _) -> key.contains(needle) }?.second
+            BY_NAME.firstOrNull { (needle, _) -> key.contains(needle) }?.let { return it.second }
+            // The name a GGUF declares is the *family*, and every needle here
+            // is a version: a checkpoint saying `wan` matched none of them, so
+            // the one architecture whose parts are least interchangeable was
+            // the one nothing was known about — and "nothing known" means
+            // "claim nothing", which is how a FLUX decoder ended up armed
+            // against Wan.
+            //
+            // Same rule as RuntimeRegistry.namesMatch, and the same floor: a
+            // family long enough to be distinctive that begins a version is
+            // that version's family. It is only reached when the direct match
+            // fails, so no existing name changes meaning.
+            if (key.length < MIN_FAMILY_PREFIX) return null
+            return BY_NAME.firstOrNull { (needle, _) -> needle.startsWith(key) }?.second
         }
+
+        /** Short enough for "wan", long enough that "sd" cannot claim a family. */
+        private const val MIN_FAMILY_PREFIX = 3
     }
 }
