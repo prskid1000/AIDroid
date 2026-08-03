@@ -226,4 +226,15 @@ data class ModelAttachment(
      * with nothing on screen to say so.
      */
     val applicable: Boolean = true,
+    /**
+     * Why this file is the wrong one for the loaded checkpoint, or null.
+     *
+     * Distinct from [applicable], which is about the *role* being useless
+     * here. This is the role being right and the file being wrong: the two
+     * T5-XXLs fill the same slot for different families and neither the name
+     * nor the architecture separates them, so a mismatch is invisible unless
+     * something says it out loud. It does not disarm the attachment — the
+     * choice is the user's, and the runtime will load whatever it is given.
+     */
+    val mismatch: String? = null,
 )

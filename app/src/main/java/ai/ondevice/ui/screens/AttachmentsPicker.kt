@@ -170,6 +170,18 @@ fun AttachmentsPicker(
                         color = NocturneColors.TextMuted,
                         modifier = Modifier.padding(top = 2.dp),
                     )
+                    // The role is right and the file is wrong, which nothing
+                    // else on this row can show: both T5-XXLs are called
+                    // T5-XXL. Said rather than corrected — the choice stays
+                    // the user's, and the loader will pass whatever is here.
+                    attachment.mismatch?.let { note ->
+                        Text(
+                            note,
+                            style = NocturneType.Help,
+                            color = NocturneColors.Accent200,
+                            modifier = Modifier.padding(top = 3.dp),
+                        )
+                    }
                     // Only the roles the runtime actually weights get a dial,
                     // and weight is a per-run thought, so it lives here rather
                     // than beside the choice of file.

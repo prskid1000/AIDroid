@@ -75,7 +75,7 @@ abstract class OnDeviceDatabase : RoomDatabase() {
             arrayOf(
                 MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
                 MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
-                MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12,
+                MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
             )
     }
 }
@@ -265,7 +265,7 @@ private val MIGRATION_9_10 = object : androidx.room.migration.Migration(9, 10) {
     }
 }
 
-internal const val DATABASE_VERSION = 12
+internal const val DATABASE_VERSION = 13
 
 /**
  * v11 — OAuth on `mcp_servers`.
@@ -298,5 +298,21 @@ private val MIGRATION_10_11 = object : androidx.room.migration.Migration(10, 11)
 private val MIGRATION_11_12 = object : androidx.room.migration.Migration(11, 12) {
     override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
         db.execSQL("DROP TABLE IF EXISTS `runtime_bundles`")
+    }
+}
+
+/**
+ * v13 — `parameterCount` on `models`.
+ *
+ * Nullable, and left null for every row already there. It is what tells two
+ * files apart when nothing else does: the two T5-XXLs share a name, an
+ * architecture and a slot, and differ by the size of a vocabulary. A row
+ * installed before this column existed keeps a null, and the readers treat
+ * that as "not known" rather than "does not match" — so nothing that worked
+ * yesterday starts refusing today.
+ */
+private val MIGRATION_12_13 = object : androidx.room.migration.Migration(12, 13) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `models` ADD COLUMN `parameterCount` INTEGER")
     }
 }

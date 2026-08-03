@@ -37,6 +37,17 @@ data class ModelEntity(
     val sha256: String?,
     val modality: Modality,
     val contextLength: Int?,
+    /**
+     * `general.parameter_count`, when the header or the hub carried one.
+     *
+     * Kept because it is the only thing that tells two files apart when their
+     * name, their architecture and their slot all agree — see
+     * [ai.ondevice.core.DiffusionFamily.T5Kind]. Null for every row written
+     * before this column existed, and for anything that never declared it,
+     * which is why every reader has to treat null as "not known" rather than
+     * as "does not match".
+     */
+    val parameterCount: Long? = null,
     /** Read from `gguf.chat_template`. Never hardcoded — SPEC §1.3, Appendix A #2. */
     val chatTemplate: String?,
     val bosToken: String?,

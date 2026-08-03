@@ -430,6 +430,7 @@ class AddModelViewModel @Inject constructor(
                     sha256 = quant.files.firstOrNull()?.sha256,
                     modality = modality,
                     contextLength = resolved.contextLength,
+                    parameterCount = resolved.parameterCount,
                     chatTemplate = resolved.chatTemplate,
                     bosToken = resolved.bosToken,
                     eosToken = resolved.eosToken,

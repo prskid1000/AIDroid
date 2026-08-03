@@ -625,6 +625,7 @@ class ImageViewModel @Inject constructor(
                     enabled = role.paramKey in offered && (before?.enabled ?: true),
                     chosenWeight = pick.weight,
                     applicable = role.paramKey in offered,
+                    mismatch = model?.let { mismatchNote(it, role, entity) },
                 )
             }
         }
@@ -658,6 +659,46 @@ class ImageViewModel @Inject constructor(
      * the user's behalf would be choosing for them, and those stay unchosen
      * until somebody says otherwise.
      */
+    /**
+     * Whether a candidate is the right *kind* of thing for this checkpoint,
+     * where the role alone does not settle it.
+     *
+     * Only T5 has this problem, and it has it badly: FLUX.1 reads T5 v1.1 XXL
+     * and Wan reads UMT5 XXL, both wear the T5-XXL role, both quantise to
+     * `t5encoder`, and both go in the same runtime argument. Whichever is
+     * installed alone was adopted into whatever loaded — so having downloaded
+     * the FLUX encoder once, Wan silently conditioned on a 32k English
+     * vocabulary in place of a 256k multilingual one and returned a bad clip
+     * rather than an error.
+     *
+     * Unknown on either side means yes. A row installed before the parameter
+     * count was recorded has none, and refusing what used to be accepted on
+     * the strength of a missing number would break working setups to fix a
+     * wrong one.
+     */
+    private fun suitsFamily(
+        model: ModelEntity,
+        role: ai.ondevice.core.AttachmentRole,
+        candidate: ModelEntity,
+    ): Boolean = mismatchNote(model, role, candidate) == null
+
+    /**
+     * The sentence for a wrong-file-right-slot, or null when there is nothing
+     * to say — which is the answer whenever either side is unknown.
+     */
+    private fun mismatchNote(
+        model: ModelEntity,
+        role: ai.ondevice.core.AttachmentRole,
+        candidate: ModelEntity?,
+    ): String? {
+        if (role != ai.ondevice.core.AttachmentRole.T5XXL) return null
+        val wanted = ai.ondevice.core.DiffusionFamily.forName(model.architecture)?.t5 ?: return null
+        val kind = ai.ondevice.core.DiffusionFamily.T5Kind.of(candidate?.parameterCount) ?: return null
+        if (kind == wanted) return null
+        return "This is ${kind.label}; ${model.architecture} reads ${wanted.label}. They share " +
+            "the slot and not the vocabulary, so this loads and conditions on the wrong tokens."
+    }
+
     private suspend fun adoptObviousComponents(
         model: ModelEntity,
         installed: List<ModelEntity>,
@@ -693,7 +734,7 @@ class ImageViewModel @Inject constructor(
             if (role.paramKey in chosen) continue
             val candidates = installed.filter {
                 it.attachmentRole == role && java.io.File(it.localPath).isFile
-            }
+            }.filter { suitsFamily(model, role, it) }
             val only = candidates.singleOrNull() ?: continue
             next = next.with(role.paramKey, only.localPath)
             adopted += role.paramKey

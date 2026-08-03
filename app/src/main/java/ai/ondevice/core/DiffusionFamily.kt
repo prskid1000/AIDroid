@@ -53,7 +53,59 @@ data class DiffusionFamily(
      * transformer.
      */
     val unet: Boolean = false,
+    /**
+     * Which T5 this family's conditioner builds, for the families that build
+     * one — and null for the families that build none.
+     *
+     * "T5-XXL" names one slot and two models that are not interchangeable.
+     * FLUX.1, SD 3.x and Chroma read `google/t5-v1_1-xxl`; Wan reads
+     * `google/umt5-xxl`, which is the multilingual one and carries a 256k
+     * vocabulary against the other's 32k. That is nearly a billion parameters
+     * of difference, all of it embedding table.
+     *
+     * Both quantise to a GGUF declaring `general.architecture = t5encoder`,
+     * both classify as [AttachmentRole.T5XXL], and both feed the same runtime
+     * argument, so nothing downstream could tell them apart. Feeding a family
+     * the wrong one does not fail: the tensors load, the token ids mean
+     * something else, and the result is a plausible bad picture.
+     *
+     * One fact per encoder, in the file that already keeps CLIP-L apart from
+     * CLIP-G — not a row per model.
+     */
+    val t5: T5Kind? = null,
 ) {
+    /** The two T5s that share a slot. Told apart by size, not by name. */
+    enum class T5Kind(val label: String, val approxParams: Long) {
+        /** `google/t5-v1_1-xxl` — 32k vocab, English. */
+        T5_V1_1("T5 v1.1 XXL", 4_762_310_656L),
+
+        /** `google/umt5-xxl` — 256k vocab, multilingual. */
+        UMT5("UMT5 XXL", 5_680_910_336L),
+        ;
+
+        companion object {
+            /**
+             * Which of the two a parameter count belongs to, or null.
+             *
+             * Parameter count rather than file size, because it does not move
+             * with the quant, and rather than the repo name, because a name is
+             * whatever someone typed. The gap between the two is 0.92B — the
+             * vocabulary — so a tenth of that is a wide margin, and anything
+             * outside both windows is left unclaimed rather than forced into
+             * the nearer one.
+             */
+            fun of(parameterCount: Long?): T5Kind? {
+                val count = parameterCount?.takeIf { it > 0 } ?: return null
+                return entries.firstOrNull {
+                    kotlin.math.abs(count - it.approxParams) < TOLERANCE
+                }
+            }
+
+            /** A tenth of the gap the vocabulary opens between the two. */
+            private const val TOLERANCE = 92_000_000L
+        }
+    }
+
     companion object {
         /** SD 1.x and SD 2.x: one CLIP, and the decoder in the file. */
         val UNET = DiffusionFamily(
@@ -74,9 +126,10 @@ data class DiffusionFamily(
             // rather than the ability to run.
             encoders = setOf(CLIP_L, CLIP_G),
             optionalEncoders = setOf(T5XXL),
+            t5 = T5Kind.T5_V1_1,
         )
 
-        private val FLUX = DiffusionFamily(encoders = setOf(CLIP_L, T5XXL))
+        private val FLUX = DiffusionFamily(encoders = setOf(CLIP_L, T5XXL), t5 = T5Kind.T5_V1_1)
 
         /**
          * Everything that reads its prompt with a language model rather than
@@ -87,8 +140,8 @@ data class DiffusionFamily(
          */
         private val LLM_CONDITIONED = DiffusionFamily(encoders = setOf(LLM))
 
-        /** T5 alone: Chroma (a de-distilled Flux with CLIP-L dropped), MiniT2I, and Wan's UMT5. */
-        private val T5_ONLY = DiffusionFamily(encoders = setOf(T5XXL))
+        /** T5 alone: Chroma (a de-distilled Flux with CLIP-L dropped) and MiniT2I. */
+        private val T5_ONLY = DiffusionFamily(encoders = setOf(T5XXL), t5 = T5Kind.T5_V1_1)
 
         /**
          * Chroma Radiance decodes straight to pixels, so it has no VAE to
@@ -99,8 +152,14 @@ data class DiffusionFamily(
         /**
          * Wan reads a picture through a CLIP-vision encoder as well as the
          * prompt through UMT5, and runs without one.
+         *
+         * The T5 it wants is *not* the one every other family here wants —
+         * see [T5Kind] — and that is the whole reason the field exists.
          */
-        private val WAN = T5_ONLY.copy(optionalEncoders = setOf(CLIP_VISION))
+        private val WAN = T5_ONLY.copy(
+            optionalEncoders = setOf(CLIP_VISION),
+            t5 = T5Kind.UMT5,
+        )
 
         /** Conditioners that live entirely inside the checkpoint. */
         private val SELF_CONDITIONED = DiffusionFamily(encoders = emptySet())
