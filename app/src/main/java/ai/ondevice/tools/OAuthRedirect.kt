@@ -1,6 +1,7 @@
 package ai.ondevice.tools
 
 import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -65,6 +66,28 @@ class OAuthCallbackActivity : Activity() {
             )
         }
         OAuthRedirects.deliver(result)
+
+        // Bring the app back in front of the browser.
+        //
+        // Finishing alone is not enough and looked exactly like failure: this
+        // activity lives in its own task, so finishing it returns to whatever
+        // was underneath — the browser, still showing the consent page that
+        // was approved seconds ago. The sign-in had completed, the tokens
+        // were stored, and the person was left looking at an Approve button,
+        // reasonably concluding nothing had happened.
+        //
+        // SINGLE_TOP and CLEAR_TOP so the existing task is reordered to the
+        // front rather than a second copy of the app being built on top of
+        // the screen they started from.
+        runCatching {
+            startActivity(
+                Intent(this, ai.ondevice.MainActivity::class.java).addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP,
+                ),
+            )
+        }
 
         finish()
         // No animation: this activity is a seam, and a cross-fade on it looks

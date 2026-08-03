@@ -492,6 +492,7 @@ private fun ProviderRow(
 /** Enough to see what just happened without turning the screen into a terminal. */
 private const val SHELL_LOG_SHOWN = 25
 
+
 @Composable
 private fun ServerCard(
     server: McpServerEntity,
@@ -552,9 +553,6 @@ private fun ServerCard(
             var clientId by rememberSaveable(server.id) {
                 mutableStateOf(server.oauthClientId.orEmpty())
             }
-            var secret by rememberSaveable(server.id) {
-                mutableStateOf(server.oauthClientSecret.orEmpty())
-            }
             Column(
                 Modifier.fillMaxWidth().padding(top = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(7.dp),
@@ -566,18 +564,12 @@ private fun ServerCard(
                     textStyle = NocturneType.MonoCode,
                     minHeight = 42.dp,
                 )
-                NInput(
-                    value = secret,
-                    onValueChange = { secret = it; onSetClientSecret(it) },
-                    placeholder = "OAuth client secret (optional)",
-                    textStyle = NocturneType.MonoCode,
-                    minHeight = 42.dp,
-                )
                 NHelp(
-                    "Leave both empty and the app registers itself. Fill in an ID " +
+                    "Leave the ID empty and the app registers itself. Fill in one " +
                         "you were issued to skip registration — which is what a " +
                         "server that will not let apps register themselves needs. " +
-                        "The secret is usually blank.",
+                        "A secret, if the server issues one, is set when the server is " +
+                        "added and is not shown again.",
                 )
             }
         }
