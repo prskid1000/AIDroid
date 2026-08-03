@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -29,12 +30,14 @@ class ToolsViewModel @Inject constructor(
     private val db: OnDeviceDatabase,
     private val prefs: AppPrefs,
     private val factory: ai.ondevice.tools.ToolProviderFactory,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ToolsState())
     val state: StateFlow<ToolsState> = _state.asStateFlow()
 
     init {
+        _state.value = _state.value.copy(toolSettings = factory.allSettings(context))
         viewModelScope.launch {
             db.mcpServers().observeAll().collect { servers ->
                 _state.value = _state.value.copy(servers = servers)
@@ -46,20 +49,69 @@ class ToolsViewModel @Inject constructor(
         viewModelScope.launch {
             prefs.enabledToolProviders.collect { _state.value = _state.value.copy(enabledProviders = it) }
         }
+        viewModelScope.launch {
+            prefs.fileScopeDevice.collect { _state.value = _state.value.copy(fileScopeDevice = it) }
+        }
+        viewModelScope.launch {
+            ai.ondevice.tools.ShellLog.runs.collect { _state.value = _state.value.copy(shellRuns = it) }
+        }
+        viewModelScope.launch {
+            prefs.toolParams.collect {
+                _state.value = _state.value.copy(tuning = ai.ondevice.core.SparseParams.parse(it))
+            }
+        }
+    }
+
+    /** Which provider's settings are open; only one at a time, like the servers. */
+    fun expandProvider(id: String?) {
+        _state.value = _state.value.copy(expandedProviderId = id)
+    }
+
+    /**
+     * Change one tool setting.
+     *
+     * A null value removes the key rather than storing one, so "back to the
+     * default" stays the *current* default rather than freezing today's number
+     * into the preferences.
+     */
+    fun setToolParam(key: String, value: Any?) {
+        viewModelScope.launch {
+            val current = ai.ondevice.core.SparseParams.parse(prefs.toolParams.first())
+            val next = if (value == null) {
+                ai.ondevice.core.SparseParams(current.values - key)
+            } else {
+                ai.ondevice.core.SparseParams(
+                    current.values + (key to ai.ondevice.core.SparseParams.of(key to value).values.getValue(key)),
+                )
+            }
+            prefs.setToolParams(next.toJsonString())
+        }
     }
 
     fun setEnabled(value: Boolean) {
         viewModelScope.launch { prefs.setToolsEnabled(value) }
     }
 
-    /** The built-in set only. A server's switch is [pauseServer]. */
-    fun toggleBuiltIn() {
+    /** One of the app's own sets — built-in, files, shell. A server's switch is [pauseServer]. */
+    fun toggleProvider(id: String) {
         viewModelScope.launch {
             val current = _state.value.enabledProviders
-            val id = ai.ondevice.tools.BuiltInToolProvider.ID
             prefs.setEnabledToolProviders(if (id in current) current - id else current + id)
         }
     }
+
+    /**
+     * Ask for the whole device rather than the app's own folders.
+     *
+     * Only records the intent. The permission itself is a system screen the
+     * caller opens, and it can be taken away there afterwards, so what is held
+     * is asked of the system at the moment the tools are built.
+     */
+    fun setFileScopeDevice(value: Boolean) {
+        viewModelScope.launch { prefs.setFileScopeDevice(value) }
+    }
+
+    fun clearShellLog() = ai.ondevice.tools.ShellLog.clear()
 
     /** Pause without forgetting. */
     fun pauseServer(server: McpServerEntity, enabled: Boolean) {
@@ -179,13 +231,35 @@ data class ToolsState(
     val draftAuth: String = "",
     val draftError: String? = null,
     val testing: Boolean = false,
+    val fileTools: List<String> = ai.ondevice.tools.FileToolProvider.toolNames(),
+    val shellTools: List<String> = ai.ondevice.tools.ShellToolProvider.toolNames(),
+    /** Whether the whole device was asked for; the grant itself is checked live. */
+    val fileScopeDevice: Boolean = false,
+    val shellRuns: List<ai.ondevice.tools.ShellRun> = emptyList(),
+    /** Every settings row the app's own tools expose, grouped by tool name. */
+    val toolSettings: List<ai.ondevice.params.ParamSpec> = emptyList(),
+    /** What has actually been changed; absent keys mean "still the default". */
+    val tuning: ai.ondevice.core.SparseParams = ai.ondevice.core.SparseParams.EMPTY,
+    val expandedProviderId: String? = null,
 ) {
+    /** The settings belonging to one provider's tools, in declaration order. */
+    fun settingsFor(providerId: String, tools: List<String>): List<ai.ondevice.params.ParamSpec> =
+        toolSettings.filter { it.group in tools }
+
     val builtInEnabled: Boolean
         get() = ai.ondevice.tools.BuiltInToolProvider.ID in enabledProviders
+
+    val filesEnabled: Boolean
+        get() = ai.ondevice.tools.FileToolProvider.ID in enabledProviders
+
+    val shellEnabled: Boolean
+        get() = ai.ondevice.tools.ShellToolProvider.ID in enabledProviders
 
     /** How many tools are actually reaching the model. */
     val liveToolCount: Int
         get() = (if (builtInEnabled) builtInTools.size else 0) +
+            (if (filesEnabled) fileTools.size else 0) +
+            (if (shellEnabled) shellTools.size else 0) +
             servers.filter { it.enabled }.sumOf { server ->
                 val disabled = ai.ondevice.tools.McpTools.disabled(server)
                 ai.ondevice.tools.McpTools.parse(server.lastToolsJson).count { it.name !in disabled }

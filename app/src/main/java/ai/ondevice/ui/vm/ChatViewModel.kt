@@ -419,8 +419,13 @@ class ChatViewModel @Inject constructor(
         val engine = engines.llama ?: return
         val registry = if (prefs.toolsEnabled.first()) {
             toolProviders.registry(
-                builtInEnabled = ai.ondevice.tools.BuiltInToolProvider.ID in
-                    prefs.enabledToolProviders.first(),
+                enabled = prefs.enabledToolProviders.first(),
+                fileScope = if (prefs.fileScopeDevice.first()) {
+                    ai.ondevice.tools.Workspace.Scope.DEVICE
+                } else {
+                    ai.ondevice.tools.Workspace.Scope.SANDBOX
+                },
+                tuning = SparseParams.parse(prefs.toolParams.first()),
             )
         } else {
             null

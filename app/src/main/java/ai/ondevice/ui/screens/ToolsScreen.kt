@@ -27,6 +27,7 @@ import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NCard
 import ai.ondevice.ui.components.NHelp
 import ai.ondevice.ui.components.NInput
+import ai.ondevice.params.ParamRow
 import ai.ondevice.ui.components.NSwitch
 import ai.ondevice.ui.components.NTag
 import ai.ondevice.ui.components.NTagStyle
@@ -86,37 +87,181 @@ fun ToolsScreen(
 
             // — built-ins —
             SectionKicker("Built in", Modifier.padding(top = 20.dp, bottom = 8.dp))
-            val builtInOn = state.builtInEnabled
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .background(
-                        if (builtInOn) NocturneColors.Accent900 else NocturneColors.Surface,
-                        Radius.Md,
+            ProviderRow(
+                title = "Built-in",
+                tools = state.builtInTools,
+                on = state.builtInEnabled,
+                onToggle = { viewModel.toggleProvider(ai.ondevice.tools.BuiltInToolProvider.ID) },
+                settings = state.settingsFor(ai.ondevice.tools.BuiltInToolProvider.ID, state.builtInTools),
+                values = state.tuning,
+                expanded = state.expandedProviderId == ai.ondevice.tools.BuiltInToolProvider.ID,
+                onExpand = {
+                    viewModel.expandProvider(
+                        if (state.expandedProviderId == ai.ondevice.tools.BuiltInToolProvider.ID) null else ai.ondevice.tools.BuiltInToolProvider.ID,
                     )
-                    .ring(if (builtInOn) NocturneColors.Accent else NocturneColors.Divider, Radius.Md)
-                    .nClickableFlat { viewModel.toggleBuiltIn() }
-                    .padding(horizontal = 12.dp, vertical = 11.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Built-in", style = NocturneType.CardTitleSm)
-                    Text(
-                        state.builtInTools.joinToString(" · "),
-                        style = NocturneType.MonoXs,
-                        color = NocturneColors.TextMuted,
-                    )
-                }
-                NTag(if (builtInOn) "on" else "off", style = if (builtInOn) NTagStyle.Accent else NTagStyle.Outline)
-            }
+                },
+                onSetting = viewModel::setToolParam,
+            )
             NHelp(
                 "The clock it cannot read, arithmetic it gets subtly wrong, and the state of the " +
-                    "device it is running on — none of which touches the network. web_search does: " +
-                    "it fetches search.brave.com, and the pages it is asked to open, with no key and " +
-                    "no account. Your query goes out; the conversation does not.",
+                    "device it is running on — none of which touches the network. web_search and " +
+                    "fetch_url do: they fetch search.brave.com, and the pages it is asked to open, " +
+                    "with no key and no account. Your query goes out; the conversation does not.",
                 Modifier.padding(top = 6.dp),
             )
+
+            // — files —
+            SectionKicker("Files", Modifier.padding(top = 20.dp, bottom = 8.dp))
+            ProviderRow(
+                title = "Filesystem",
+                tools = state.fileTools,
+                on = state.filesEnabled,
+                onToggle = { viewModel.toggleProvider(ai.ondevice.tools.FileToolProvider.ID) },
+                settings = state.settingsFor(ai.ondevice.tools.FileToolProvider.ID, state.fileTools),
+                values = state.tuning,
+                expanded = state.expandedProviderId == ai.ondevice.tools.FileToolProvider.ID,
+                onExpand = {
+                    viewModel.expandProvider(
+                        if (state.expandedProviderId == ai.ondevice.tools.FileToolProvider.ID) null else ai.ondevice.tools.FileToolProvider.ID,
+                    )
+                },
+                onSetting = viewModel::setToolParam,
+            )
+            NHelp(
+                "Reading, writing and searching files, the way an editor does — an exact-match edit " +
+                    "rather than a whole-file rewrite, so a change that does not match is refused " +
+                    "instead of guessed at.",
+                Modifier.padding(top = 6.dp),
+            )
+
+            if (state.filesEnabled || state.shellEnabled) {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                val granted = ai.ondevice.tools.Workspace.hasAllFilesAccess(context)
+                NCard(gap = 9.dp, modifier = Modifier.padding(top = 10.dp)) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "Reach the whole device",
+                            style = NocturneType.Row,
+                            modifier = Modifier.weight(1f),
+                        )
+                        NSwitch(state.fileScopeDevice, { want ->
+                            viewModel.setFileScopeDevice(want)
+                            // The switch records the intent; the grant itself is
+                            // a system screen, and there is no way to ask for it
+                            // in-app. Sending them straight there is the only
+                            // thing that makes the switch mean anything.
+                            if (want && !granted) {
+                                runCatching {
+                                    context.startActivity(
+                                        android.content.Intent(
+                                            android.provider.Settings
+                                                .ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                            android.net.Uri.parse("package:${context.packageName}"),
+                                        ),
+                                    )
+                                }
+                            }
+                        })
+                    }
+                    Text(
+                        when {
+                            !state.fileScopeDevice ->
+                                "Off — the tools see this app's own folders only: its workspace, and " +
+                                    "the models, gallery and clips beside them. Nothing else on the " +
+                                    "phone is reachable, and no permission is needed."
+                            granted ->
+                                "On — Downloads, Documents, Pictures and the rest of internal " +
+                                    "storage are readable and writable."
+                            else ->
+                                "Asked for, but Android has not granted it. Open All files access " +
+                                    "for this app in system Settings, or turn this off — until then " +
+                                    "the tools stay in the app's own folders."
+                        },
+                        style = NocturneType.CardBody,
+                        color = if (state.fileScopeDevice && !granted) {
+                            NocturneColors.Accent300
+                        } else {
+                            NocturneColors.Text.copy(alpha = 0.8f)
+                        },
+                    )
+                }
+            }
+
+            // — shell —
+            SectionKicker("Shell", Modifier.padding(top = 20.dp, bottom = 8.dp))
+            ProviderRow(
+                title = "Shell",
+                tools = state.shellTools,
+                on = state.shellEnabled,
+                onToggle = { viewModel.toggleProvider(ai.ondevice.tools.ShellToolProvider.ID) },
+                settings = state.settingsFor(ai.ondevice.tools.ShellToolProvider.ID, state.shellTools),
+                values = state.tuning,
+                expanded = state.expandedProviderId == ai.ondevice.tools.ShellToolProvider.ID,
+                onExpand = {
+                    viewModel.expandProvider(
+                        if (state.expandedProviderId == ai.ondevice.tools.ShellToolProvider.ID) null else ai.ondevice.tools.ShellToolProvider.ID,
+                    )
+                },
+                onSetting = viewModel::setToolParam,
+            )
+            NHelp(
+                "Runs commands with the system shell, in the same folders the file tools use. " +
+                    "Android ships mksh and toybox — sed, grep, find, sort, tar and about 200 more — " +
+                    "and no awk, python or node. Every command is listed below with its exit code.",
+                Modifier.padding(top = 6.dp),
+            )
+
+            if (state.shellRuns.isNotEmpty()) {
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SectionKicker("Last ${state.shellRuns.size} commands", Modifier.weight(1f))
+                    Text(
+                        "clear",
+                        style = NocturneType.MonoXs,
+                        color = NocturneColors.TextMuted,
+                        modifier = Modifier.nClickableFlat { viewModel.clearShellLog() },
+                    )
+                }
+                state.shellRuns.take(SHELL_LOG_SHOWN).forEach { run ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(NocturneColors.Surface, Radius.Md)
+                            .ring(NocturneColors.Divider, Radius.Md)
+                            .padding(horizontal = 12.dp, vertical = 9.dp)
+                            .padding(bottom = 1.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("$ ${run.command}", style = NocturneType.MonoXs)
+                            if (run.summary.isNotBlank()) {
+                                Text(
+                                    run.summary,
+                                    style = NocturneType.MonoXs,
+                                    color = NocturneColors.TextMuted,
+                                )
+                            }
+                        }
+                        Text("${run.millis} ms", style = NocturneType.MonoXs, color = NocturneColors.TextMuted)
+                        NTag(
+                            when (run.exitCode) {
+                                0 -> "ok"
+                                ai.ondevice.tools.ShellToolProvider.TIMED_OUT -> "timeout"
+                                else -> "exit ${run.exitCode}"
+                            },
+                            style = if (run.exitCode == 0) NTagStyle.Outline else NTagStyle.Accent,
+                        )
+                    }
+                    androidx.compose.foundation.layout.Spacer(Modifier.padding(top = 5.dp))
+                }
+            }
 
             // — MCP —
             SectionKicker("MCP servers", Modifier.padding(top = 20.dp, bottom = 8.dp))
@@ -209,6 +354,91 @@ fun ToolsScreen(
 }
 
 /** One server: paused or not, and — when opened — every tool it offers with its own switch. */
+/**
+ * What each of the app's own tool sets looks like: name, its tools, on or off,
+ * and — when it has any — the settings its tools expose.
+ *
+ * The settings are [ai.ondevice.params.ParamSpec] and render through the same
+ * [ParamRow] the model parameters use, so a slider here behaves exactly like a
+ * slider on All Parameters: same clamping, same nudge buttons, same "unset
+ * means the default" rule.
+ */
+@Composable
+private fun ProviderRow(
+    title: String,
+    tools: List<String>,
+    on: Boolean,
+    onToggle: () -> Unit,
+    settings: List<ai.ondevice.params.ParamSpec> = emptyList(),
+    values: ai.ondevice.core.SparseParams = ai.ondevice.core.SparseParams.EMPTY,
+    expanded: Boolean = false,
+    onExpand: () -> Unit = {},
+    onSetting: (String, Any?) -> Unit = { _, _ -> },
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(if (on) NocturneColors.Accent900 else NocturneColors.Surface, Radius.Md)
+            .ring(if (on) NocturneColors.Accent else NocturneColors.Divider, Radius.Md),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .nClickableFlat(onClick = onToggle)
+                .padding(horizontal = 12.dp, vertical = 11.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = NocturneType.CardTitleSm)
+                Text(
+                    tools.joinToString(" · "),
+                    style = NocturneType.MonoXs,
+                    color = NocturneColors.TextMuted,
+                )
+            }
+            if (settings.isNotEmpty()) {
+                // Its own hit target, because tapping the row means "on or
+                // off" and tapping this means "show me the numbers" — one
+                // control doing both would make every settings peek a toggle.
+                Text(
+                    if (expanded) "hide" else "settings",
+                    style = NocturneType.MonoXs,
+                    color = NocturneColors.Accent2,
+                    modifier = Modifier
+                        .nClickableFlat(onClick = onExpand)
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                )
+            }
+            NTag(if (on) "on" else "off", style = if (on) NTagStyle.Accent else NTagStyle.Outline)
+        }
+
+        if (expanded && settings.isNotEmpty()) {
+            Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 11.dp)) {
+                settings.groupBy { it.group }.forEach { (tool, rows) ->
+                    Text(
+                        tool,
+                        style = NocturneType.MonoXs,
+                        color = NocturneColors.TextMuted,
+                        modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
+                    )
+                    rows.forEach { spec ->
+                        ParamRow(
+                            spec = spec,
+                            values = values,
+                            onChange = onSetting,
+                            showKeyLine = false,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Enough to see what just happened without turning the screen into a terminal. */
+private const val SHELL_LOG_SHOWN = 25
+
 @Composable
 private fun ServerCard(
     server: McpServerEntity,

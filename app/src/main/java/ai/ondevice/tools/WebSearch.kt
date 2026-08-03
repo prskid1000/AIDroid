@@ -97,6 +97,17 @@ class WebSearch(client: OkHttpClient) {
      */
     private val rateLimited = java.util.concurrent.atomic.AtomicBoolean(false)
 
+    /**
+     * One page the caller already has the address of, as readable text.
+     *
+     * Separate from [search] because knowing the URL is a different job from
+     * finding it, and going through a search engine to reach a page you can
+     * already name costs a round trip and returns someone else's summary of it.
+     */
+    suspend fun fetch(url: String): String? = withContext(Dispatchers.IO) {
+        get(url)?.let { readableText(it) }?.takeIf { it.isNotBlank() }
+    }
+
     private fun get(url: String): String? {
         val request = Request.Builder()
             .url(url)

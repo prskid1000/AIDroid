@@ -127,8 +127,11 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideToolProviders(db: OnDeviceDatabase, capabilities: DeviceCapabilities) =
-        ai.ondevice.tools.ToolProviderFactory(db, capabilities)
+    fun provideToolProviders(
+        db: OnDeviceDatabase,
+        capabilities: DeviceCapabilities,
+        @ApplicationContext context: Context,
+    ) = ai.ondevice.tools.ToolProviderFactory(db, capabilities, context)
 
     @Provides
     @Singleton

@@ -27,6 +27,8 @@ class AppPrefs(private val context: Context) {
         val exportFolder = stringPreferencesKey("export_folder")
         val toolsEnabled = booleanPreferencesKey("tools_enabled")
         val enabledToolProviders = androidx.datastore.preferences.core.stringSetPreferencesKey("enabled_tool_providers")
+        val fileScopeDevice = booleanPreferencesKey("file_scope_device")
+        val toolParams = stringPreferencesKey("tool_params")
     }
 
     /** Default to performance-core count, not total cores (SPEC §8.1). */
@@ -56,6 +58,30 @@ class AppPrefs(private val context: Context) {
     val enabledToolProviders: Flow<Set<String>> = context.dataStore.data.map {
         it[Keys.enabledToolProviders] ?: setOf(ai.ondevice.tools.BuiltInToolProvider.ID)
     }
+
+    /**
+     * Whether the file tools and the shell may leave the app's own folders.
+     *
+     * Off by default, and deliberately not remembered as "granted": the
+     * all-files permission behind it is revocable from system Settings at any
+     * time, so this records only what was *asked for* and [Workspace] asks the
+     * system what is actually held.
+     */
+    val fileScopeDevice: Flow<Boolean> = context.dataStore.data.map { it[Keys.fileScopeDevice] ?: false }
+
+    suspend fun setFileScopeDevice(v: Boolean) = edit { it[Keys.fileScopeDevice] = v }
+
+    /**
+     * What the tools have been tuned to, as one sparse JSON object.
+     *
+     * Sparse on purpose, and keyed `<tool>.<setting>`: only what was actually
+     * changed is stored, so a default that moves in a later release moves for
+     * everyone who never touched it. The same reasoning as the model
+     * parameters, and the same storage shape.
+     */
+    val toolParams: Flow<String> = context.dataStore.data.map { it[Keys.toolParams] ?: "{}" }
+
+    suspend fun setToolParams(v: String) = edit { it[Keys.toolParams] = v }
 
     suspend fun setThreadCount(v: Int) = edit { it[Keys.threadCount] = v }
     suspend fun setBatteryGuardPercent(v: Int) = edit { it[Keys.batteryGuardPercent] = v }

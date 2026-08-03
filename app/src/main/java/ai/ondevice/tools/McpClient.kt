@@ -264,19 +264,59 @@ object McpTools {
 class ToolProviderFactory(
     private val db: OnDeviceDatabase,
     private val capabilities: ai.ondevice.data.hf.DeviceCapabilities,
+    private val context: android.content.Context,
 ) {
     private val http = McpToolProvider.httpClient()
     private val web = WebSearch(http)
 
-    suspend fun registry(builtInEnabled: Boolean): ToolRegistry {
+    /**
+     * @param enabled the provider ids the user has switched on. The shell is in
+     *   this set only after its own toggle, which is why it is not a parameter
+     *   of its own: one list of what is allowed, checked in one place.
+     * @param fileScope how far the file tools and the shell can reach.
+     */
+    suspend fun registry(
+        enabled: Set<String>,
+        fileScope: Workspace.Scope = Workspace.Scope.SANDBOX,
+        tuning: ai.ondevice.core.SparseParams = ai.ondevice.core.SparseParams.EMPTY,
+    ): ToolRegistry {
         val servers = db.mcpServers().getAll().filter { it.enabled }
+        val workspace by lazy { Workspace(context, fileScope) }
         return ToolRegistry(
             buildList {
-                if (builtInEnabled) add(BuiltInToolProvider(db, capabilities, web))
+                if (BuiltInToolProvider.ID in enabled) add(built(tuning))
+                if (FileToolProvider.ID in enabled) add(FileToolProvider(workspace, settingsFor(files(workspace), tuning)))
+                if (ShellToolProvider.ID in enabled) add(ShellToolProvider(workspace, settingsFor(shell(workspace), tuning)))
                 addAll(servers.map { McpToolProvider(it, http) })
             },
         )
     }
+
+    /**
+     * Every settings row the app's own tools expose, for the screen that
+     * renders them.
+     *
+     * Built from throwaway providers rather than from a second list: the specs
+     * are declared next to the code that reads them, and a list kept here as
+     * well would be the copy that goes stale.
+     */
+    fun allSettings(context: android.content.Context): List<ai.ondevice.params.ParamSpec> {
+        val workspace = Workspace(context, Workspace.Scope.SANDBOX)
+        return built(ai.ondevice.core.SparseParams.EMPTY).settings() +
+            files(workspace).settings() +
+            shell(workspace).settings()
+    }
+
+    private fun built(tuning: ai.ondevice.core.SparseParams) =
+        BuiltInToolProvider(db, capabilities, web).let { bare ->
+            BuiltInToolProvider(db, capabilities, web, settingsFor(bare, tuning))
+        }
+
+    private fun files(workspace: Workspace) = FileToolProvider(workspace)
+    private fun shell(workspace: Workspace) = ShellToolProvider(workspace)
+
+    private fun settingsFor(provider: ToolProvider, tuning: ai.ondevice.core.SparseParams) =
+        ToolSettings(tuning, provider.settings())
 
     fun provider(server: McpServerEntity): McpToolProvider = McpToolProvider(server, http)
 }

@@ -25,11 +25,46 @@ class BuiltInToolProvider(
     private val db: OnDeviceDatabase,
     private val capabilities: DeviceCapabilities,
     private val web: WebSearch? = null,
+    private val settings: ToolSettings = ToolSettings.EMPTY,
 ) : ToolProvider {
 
     override val id: String = ID
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    override fun settings(): List<ai.ondevice.params.ParamSpec> = buildList {
+        if (web != null) {
+            add(
+                ToolSettings.int(
+                    "web_search", "max_results", MAX_RESULTS, 1, 10,
+                    label = "Results",
+                    help = "How many hits come back. More costs context; five answers most questions.",
+                ),
+            )
+            add(
+                ToolSettings.int(
+                    "web_search", "max_pages", MAX_PAGES_READ, 0, 5,
+                    label = "Pages readable",
+                    help = "The ceiling on how many results the model may open in full. " +
+                        "Zero keeps it to snippets, which is far faster.",
+                ),
+            )
+            add(
+                ToolSettings.int(
+                    "fetch_url", "max_chars", 0, 0, 200_000,
+                    label = "Characters kept",
+                    help = "How much of a page is returned. 0 uses the built-in cap.",
+                ),
+            )
+        }
+        add(
+            ToolSettings.int(
+                "device_status", "models_listed", MODELS_LISTED, 0, 100,
+                label = "Models listed",
+                help = "How many installed models are named before the list is cut short.",
+            ),
+        )
+    }
 
     override suspend fun specs(): List<ToolSpec> = listOfNotNull(
         web?.let {
@@ -56,6 +91,24 @@ class BuiltInToolProvider(
                         }
                       },
                       "required": ["query"]
+                    }
+                """.trimIndent(),
+            )
+        },
+        web?.let {
+            ToolSpec(
+                name = "fetch_url",
+                description = "Read one web page you already have the address of, as text. Use " +
+                    "this rather than web_search when the user gives you a link, or when a " +
+                    "search result is worth reading in full. Scripts are not run, so a page " +
+                    "that renders itself in the browser may come back thin.",
+                parametersJson = """
+                    {
+                      "type": "object",
+                      "properties": {
+                        "url": { "type": "string", "description": "Full address, including https://" }
+                      },
+                      "required": ["url"]
                     }
                 """.trimIndent(),
             )
@@ -107,9 +160,11 @@ class BuiltInToolProvider(
                 val search = web ?: return fail("Web search is not available in this build.")
                 val query = args?.get("query")?.jsonPrimitive?.content?.trim().orEmpty()
                 if (query.length < 2) return fail("web_search needs a \"query\" of at least two characters.")
+                val maxPages = settings.int("web_search.max_pages", MAX_PAGES_READ)
                 val pages = (args?.get("read_pages")?.jsonPrimitive?.content?.toIntOrNull() ?: 0)
-                    .coerceIn(0, MAX_PAGES_READ)
-                runCatching { search.search(query, MAX_RESULTS, pages) }.fold(
+                    .coerceIn(0, maxPages)
+                val results = settings.int("web_search.max_results", MAX_RESULTS)
+                runCatching { search.search(query, results, pages) }.fold(
                     onSuccess = { results ->
                         android.util.Log.i(
                             "BuiltInTools",
@@ -120,6 +175,26 @@ class BuiltInToolProvider(
                     // The model is told what failed so it can say so, rather
                     // than filling the gap with something plausible.
                     onFailure = { fail("The web search failed: ${it.message ?: "no connection"}.") },
+                )
+            }
+
+            "fetch_url" -> {
+                val search = web ?: return fail("Web access is not available in this build.")
+                val url = args?.get("url")?.jsonPrimitive?.content?.trim().orEmpty()
+                if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                    return fail("fetch_url needs a full address starting with http:// or https://.")
+                }
+                val cap = settings.int("fetch_url.max_chars", 0)
+                runCatching { search.fetch(url)?.let { if (cap > 0) it.take(cap) else it } }.fold(
+                    onSuccess = { text ->
+                        android.util.Log.i("BuiltInTools", "fetch_url $url → ${text?.length ?: 0} chars")
+                        text?.let { ok("$url\n\n$it") }
+                            ?: fail(
+                                "Nothing readable came back from $url. It may need JavaScript, " +
+                                    "require signing in, or not be a web page at all.",
+                            )
+                    },
+                    onFailure = { fail("Could not read $url: ${it.message ?: "no connection"}.") },
                 )
             }
 
@@ -160,7 +235,7 @@ class BuiltInToolProvider(
                         appendLine("Storage: ${Fmt.bytes(capabilities.freeStorageBytes)} free")
                         appendLine("Performance cores: ${capabilities.performanceCores}")
                         appendLine("Installed models: ${models.size}")
-                        models.take(20).forEach { model ->
+                        models.take(settings.int("device_status.models_listed", MODELS_LISTED)).forEach { model ->
                             appendLine("  - ${model.displayName} (${model.modality.name.lowercase()}, ${Fmt.bytes(model.sizeBytes)})")
                         }
                     }.trim(),
@@ -177,13 +252,24 @@ class BuiltInToolProvider(
     companion object {
         const val ID = "built-in"
 
-        /** Enough to answer from, few enough to fit beside the conversation. */
+        /**
+         * Enough to answer from, few enough to fit beside the conversation.
+         *
+         * These are the shipped defaults, and the only copy of them: the
+         * settings rows above are built from these numbers and the tools read
+         * them back through [ToolSettings], which falls through to the spec's
+         * default when nothing has been set.
+         */
         const val MAX_RESULTS = 5
         const val MAX_PAGES_READ = 3
+        const val MODELS_LISTED = 20
 
         /** What the Tools screen lists, from here rather than from a second copy. */
         fun toolNames(webSearchAvailable: Boolean): List<String> = buildList {
-            if (webSearchAvailable) add("web_search")
+            if (webSearchAvailable) {
+                add("web_search")
+                add("fetch_url")
+            }
             add("get_current_time")
             add("calculate")
             add("device_status")

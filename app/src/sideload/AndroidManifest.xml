@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sideload only, deliberately.
+
+  MANAGE_EXTERNAL_STORAGE backs Settings → Tools → "Reach the whole device",
+  which lets the file tools and the shell work on Downloads and Documents
+  rather than only the app's own folders. Play forbids the permission for
+  anything but a small set of app categories, and a listing that declares it is
+  rejected — so it lives in the sideload flavour and the play build simply does
+  not have it.
+
+  Nothing needs to branch on that. Workspace asks the system whether the grant
+  is actually held, and on the play build the answer is always no, so the scope
+  falls back to the app's own folders on its own.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+
+</manifest>
