@@ -117,7 +117,19 @@ class McpAuthorizer(
             val (id, secret) = if (clientId != null) {
                 clientId to clientSecret
             } else {
-                oauth.register(discovered, McpOAuth.REDIRECT_URI)
+                oauth.register(
+                    server = discovered,
+                    redirectUri = McpOAuth.REDIRECT_URI,
+                    // Whatever was typed into the Authorization field. Before a
+                    // sign-in there is nothing for it to authenticate *to*, so
+                    // a server that wants a registration token is the one place
+                    // it is useful — and the one place it would otherwise sit
+                    // unused while registration failed with a bare 401.
+                    initialAccessToken = server.authHeader
+                        ?.trim()
+                        ?.removePrefix("Bearer ")
+                        ?.takeIf { it.isNotBlank() },
+                )
             }
 
             db.mcpServers().upsert(

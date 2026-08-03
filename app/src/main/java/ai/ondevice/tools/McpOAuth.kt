@@ -176,7 +176,21 @@ class McpOAuth(private val http: OkHttpClient) {
      * issued out of band, and this says so rather than failing at the redirect
      * with something less legible.
      */
-    suspend fun register(server: AuthServer, redirectUri: String): Pair<String, String?> =
+    suspend fun register(
+        server: AuthServer,
+        redirectUri: String,
+        /**
+         * RFC 7591 §3's initial access token, when the endpoint wants one.
+         *
+         * Registration is allowed to be protected, and deployments that guard
+         * it answer 401 to an anonymous POST — which looks like the app being
+         * broken when it is the endpoint being closed. Passing whatever the
+         * server row carries in its Authorization field turns that into
+         * something the person can act on: paste the token their
+         * administrator gave them and registration goes through.
+         */
+        initialAccessToken: String? = null,
+    ): Pair<String, String?> =
         withContext(Dispatchers.IO) {
             val endpoint = server.registrationEndpoint
                 ?: error(
@@ -195,7 +209,23 @@ class McpOAuth(private val http: OkHttpClient) {
                 put("application_type", "native")
             }
 
-            val response = post(endpoint, body.toString().toRequestBody(JSON_MEDIA), null)
+            val response = runCatching {
+                post(endpoint, body.toString().toRequestBody(JSON_MEDIA), initialAccessToken)
+            }.getOrElse { failure ->
+                val unauthorized = failure.message.orEmpty().let {
+                    it.contains("401") || it.contains("Unauthorized", ignoreCase = true) ||
+                        it.contains("invalid_token") || it.contains("Invalid credentials", ignoreCase = true)
+                }
+                if (unauthorized && initialAccessToken == null) {
+                    error(
+                        "$endpoint refused an anonymous registration. This server does not allow " +
+                            "apps to register themselves, so it needs a registration token — put " +
+                            "it in this server's Authorization header field and try again, or ask " +
+                            "for a client id issued to you.",
+                    )
+                }
+                throw failure
+            }
             val clientId = response["client_id"]?.jsonPrimitive?.content
                 ?: error("The registration came back with no client_id.")
             clientId to response["client_secret"]?.jsonPrimitive?.content
