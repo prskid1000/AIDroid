@@ -117,7 +117,7 @@ fun VideoScreen(
             if (!state.runtimeInstalled) {
                 NCard(Modifier.padding(top = 10.dp), ring = NocturneColors.Accent800) {
                     Text("The diffusion runtime is not installed", style = NocturneType.CardTitleSm)
-                    NHelp("Settings → Runtimes, then install stable-diffusion.cpp.")
+                    NHelp("This build carries no diffusion runtime, so there is nothing to load it with.")
                 }
             }
 

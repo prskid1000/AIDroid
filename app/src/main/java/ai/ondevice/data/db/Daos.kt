@@ -336,23 +336,6 @@ interface DownloadDao {
     suspend fun clearFinished()
 }
 
-@Dao
-interface RuntimeDao {
-    @Query("SELECT * FROM runtime_bundles")
-    fun observeAll(): Flow<List<RuntimeBundleEntity>>
-
-    @Query("SELECT * FROM runtime_bundles WHERE engine = :engine")
-    suspend fun get(engine: String): RuntimeBundleEntity?
-
-    @Query("SELECT COUNT(*) FROM runtime_bundles")
-    suspend fun count(): Int
-
-    @Upsert
-    suspend fun upsert(bundle: RuntimeBundleEntity)
-
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertAll(bundles: List<RuntimeBundleEntity>)
-}
 
 @Dao
 interface ParamManifestDao {

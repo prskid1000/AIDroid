@@ -84,7 +84,6 @@ enum class Tier {
 enum class DownloadState { QUEUED, RUNNING, PAUSED, VERIFYING, COMPLETE, FAILED }
 
 /** SPEC §17.3 — a bundle declaring an unsupported contract is refused, never loaded. */
-enum class RuntimeState { NOT_INSTALLED, INSTALLED, UPDATE_AVAILABLE, ROLLED_BACK }
 
 enum class MessageRole { USER, ASSISTANT, SYSTEM, TOOL_CALL, TOOL_RESULT }
 

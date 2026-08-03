@@ -24,7 +24,6 @@ import ai.ondevice.ui.screens.ModelDetailScreen
 import ai.ondevice.ui.screens.ModelsScreen
 import ai.ondevice.ui.screens.PromptInspectorScreen
 import ai.ondevice.ui.screens.ResolveResultsScreen
-import ai.ondevice.ui.screens.RuntimesScreen
 import ai.ondevice.ui.screens.SamplerChainScreen
 import ai.ondevice.ui.screens.SettingsScreen
 import ai.ondevice.ui.screens.ToolsScreen
@@ -71,7 +70,6 @@ object Routes {
     fun libraryItem(kind: PredictionKind, id: String) =
         "library/item/${kind.name}/${android.net.Uri.encode(id)}"
 
-    const val RUNTIMES = "settings/runtimes"
     const val TOOLS = "settings/tools"
 
     /** A model id is `owner/repo:quant`, so it carries both a slash and a colon. */
@@ -135,7 +133,6 @@ fun OnDeviceApp(
                 currentRoute = currentRoute,
                 onNavigate = { navController.navigateToRoot(it) },
                 onOpenMask = { navController.navigate(Routes.MASK_EDITOR) },
-                onOpenRuntimes = { navController.navigate(Routes.RUNTIMES) },
                 onAddModel = { navController.navigate(Routes.ADD_MODEL) },
                 onOpenAdvanced = {
                     navController.navigate(
@@ -182,7 +179,6 @@ fun OnDeviceApp(
                 currentRoute = currentRoute,
                 onNavigate = { navController.navigateToRoot(it) },
                 onOpenModels = { navController.navigate(Routes.MODELS) },
-                onOpenRuntimes = { navController.navigate(Routes.RUNTIMES) },
                 onOpenTools = { navController.navigate(Routes.TOOLS) },
             )
         }
@@ -262,9 +258,6 @@ fun OnDeviceApp(
                 onOpenImage = { openTab(Routes.IMAGE) },
                 onOpenVoice = { openTab(Routes.VOICE) },
             )
-        }
-        composable(Routes.RUNTIMES) {
-            RuntimesScreen(onBack = { navController.popBackStack() })
         }
         composable(Routes.TOOLS) {
             ToolsScreen(onBack = { navController.popBackStack() })

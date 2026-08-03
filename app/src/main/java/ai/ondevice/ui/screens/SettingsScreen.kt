@@ -43,7 +43,6 @@ fun SettingsScreen(
     currentRoute: String?,
     onNavigate: (String) -> Unit,
     onOpenModels: () -> Unit,
-    onOpenRuntimes: () -> Unit,
     onOpenTools: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
@@ -56,13 +55,6 @@ fun SettingsScreen(
                     NIcons.Tools,
                     "Tools and MCP servers",
                     onClick = onOpenTools,
-                    size = 34.dp,
-                    iconSize = 15.dp,
-                )
-                NIconButton(
-                    NIcons.Runtime,
-                    "Runtimes",
-                    onClick = onOpenRuntimes,
                     size = 34.dp,
                     iconSize = 15.dp,
                 )
@@ -146,7 +138,7 @@ fun SettingsScreen(
                 }
             }
 
-            // Tools, Runtimes and Models are toolbar icons, not rows.
+            // Tools and Models are toolbar icons, not rows.
 
             NHelp(
                 "No account, no telemetry, no network after download. The only outbound calls are the " +

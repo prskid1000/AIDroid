@@ -10,7 +10,6 @@ import ai.ondevice.core.MessageRole
 import ai.ondevice.core.Modality
 import ai.ondevice.core.ModelFormat
 import ai.ondevice.core.PredictionKind
-import ai.ondevice.core.RuntimeState
 
 /** Enums are stored by name, not ordinal. */
 class Converters {
@@ -26,8 +25,6 @@ class Converters {
     @TypeConverter fun dlStateTo(v: DownloadState?): String? = v?.name
     @TypeConverter fun dlStateFrom(v: String?): DownloadState? = v?.let { runCatching { DownloadState.valueOf(it) }.getOrNull() }
 
-    @TypeConverter fun rtStateTo(v: RuntimeState?): String? = v?.name
-    @TypeConverter fun rtStateFrom(v: String?): RuntimeState? = v?.let { runCatching { RuntimeState.valueOf(it) }.getOrNull() }
 
     @TypeConverter fun predictionKindTo(v: PredictionKind?): String? = v?.name
     @TypeConverter fun predictionKindFrom(v: String?): PredictionKind? =
@@ -48,7 +45,6 @@ class Converters {
         TranscriptEntity::class,
         SynthesisEntity::class,
         DownloadJobEntity::class,
-        RuntimeBundleEntity::class,
         ParamManifestEntity::class,
         McpServerEntity::class,
         PredictionRunEntity::class,
@@ -66,7 +62,6 @@ abstract class OnDeviceDatabase : RoomDatabase() {
     abstract fun transcripts(): TranscriptDao
     abstract fun syntheses(): SynthesisDao
     abstract fun downloads(): DownloadDao
-    abstract fun runtimes(): RuntimeDao
     abstract fun manifests(): ParamManifestDao
     abstract fun mcpServers(): McpServerDao
     abstract fun predictionRuns(): PredictionRunDao
@@ -80,7 +75,7 @@ abstract class OnDeviceDatabase : RoomDatabase() {
             arrayOf(
                 MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
                 MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
-                MIGRATION_9_10, MIGRATION_10_11,
+                MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12,
             )
     }
 }
@@ -270,7 +265,7 @@ private val MIGRATION_9_10 = object : androidx.room.migration.Migration(9, 10) {
     }
 }
 
-internal const val DATABASE_VERSION = 11
+internal const val DATABASE_VERSION = 12
 
 /**
  * v11 — OAuth on `mcp_servers`.
@@ -287,5 +282,21 @@ private val MIGRATION_10_11 = object : androidx.room.migration.Migration(10, 11)
         ).forEach { column ->
             db.execSQL("ALTER TABLE `mcp_servers` ADD COLUMN `$column` TEXT")
         }
+    }
+}
+
+/**
+ * v12 — `runtime_bundles` goes.
+ *
+ * The table mirrored the generated runtime manifest at first launch and nothing
+ * ever wrote to it again: the engines are compiled into the APK, so an engine
+ * update is an app update. The screen that read it said as much and offered
+ * nothing to press. The one live question — can this build load a diffusion
+ * model — is now asked of the library itself, which is the only thing that
+ * actually knows.
+ */
+private val MIGRATION_11_12 = object : androidx.room.migration.Migration(11, 12) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("DROP TABLE IF EXISTS `runtime_bundles`")
     }
 }

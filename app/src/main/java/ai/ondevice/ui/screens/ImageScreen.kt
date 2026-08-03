@@ -82,7 +82,6 @@ fun ImageScreen(
     currentRoute: String?,
     onNavigate: (String) -> Unit,
     onOpenMask: () -> Unit,
-    onOpenRuntimes: () -> Unit,
     onAddModel: () -> Unit,
     onOpenAdvanced: () -> Unit,
     onOpenVideo: () -> Unit,
@@ -247,8 +246,11 @@ fun ImageScreen(
                     when (state.action) {
                         ImageAction.CANCEL -> viewModel.cancel()
                         ImageAction.GENERATE -> viewModel.generate()
-                        ImageAction.INSTALL_RUNTIME -> onOpenRuntimes()
                         ImageAction.INSTALLING -> Unit
+                        // Nowhere to send anyone: the runtime is compiled in,
+                        // so its absence is a broken build rather than
+                        // something to go and install. The hint says so.
+                        ImageAction.NO_RUNTIME -> Unit
                         ImageAction.ADD_MODEL -> onAddModel()
                         ImageAction.PICK_SOURCE -> pickSource()
                     }

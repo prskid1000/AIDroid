@@ -5,7 +5,6 @@ import androidx.lifecycle.viewModelScope
 import ai.ondevice.core.AttachmentRole
 import ai.ondevice.core.Modality
 import ai.ondevice.core.ModelAttachment
-import ai.ondevice.core.RuntimeState
 import ai.ondevice.core.SparseParams
 import ai.ondevice.data.db.ModelEntity
 import ai.ondevice.data.db.OnDeviceDatabase
@@ -55,7 +54,7 @@ class VideoViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             val runtimeInstalled =
-                db.runtimes().get(RUNTIME_ID)?.state != RuntimeState.NOT_INSTALLED
+                ai.ondevice.engine.SdBridge.available
             _state.value = _state.value.copy(runtimeInstalled = runtimeInstalled)
         }
         viewModelScope.launch {

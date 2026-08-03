@@ -3,7 +3,6 @@ package ai.ondevice.ui.vm
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import ai.ondevice.core.Modality
-import ai.ondevice.core.RuntimeState
 import ai.ondevice.core.SparseParams
 import ai.ondevice.core.TranscriptExport
 import ai.ondevice.core.TranscriptFormat
@@ -64,7 +63,7 @@ class ImageViewModel @Inject constructor(
         viewModelScope.launch {
             // "No runtime" and "no model" are different problems with different
             // fixes, and SPEC §1.2 says a refusal has to name which one it is.
-            val runtimeInstalled = db.runtimes().get(RUNTIME_ID)?.state != RuntimeState.NOT_INSTALLED
+            val runtimeInstalled = ai.ondevice.engine.SdBridge.available
             val model = baseModelsOnly(
                 db.models().observeInstalledByModality(Modality.DIFFUSION).first(),
             ).firstOrNull()
@@ -240,7 +239,7 @@ class ImageViewModel @Inject constructor(
             val model = baseModelsOnly(
                 db.models().observeInstalledByModality(Modality.DIFFUSION).first(),
             ).firstOrNull()
-            val runtimeInstalled = db.runtimes().get(RUNTIME_ID)?.state != RuntimeState.NOT_INSTALLED
+            val runtimeInstalled = ai.ondevice.engine.SdBridge.available
             val p = SparseParams.parse(model?.paramOverridesJson)
             _state.value = _state.value.copy(
                 model = model,
@@ -1004,7 +1003,7 @@ class ImageViewModel @Inject constructor(
 }
 
 /** What the Image screen's primary action should say and do right now. */
-enum class ImageAction { INSTALL_RUNTIME, INSTALLING, ADD_MODEL, PICK_SOURCE, GENERATE, CANCEL }
+enum class ImageAction { NO_RUNTIME, INSTALLING, ADD_MODEL, PICK_SOURCE, GENERATE, CANCEL }
 
 /**
  * What the attached picture is *for*.
@@ -1203,7 +1202,7 @@ data class ImageState(
     val action: ImageAction
         get() = when {
             generating -> ImageAction.CANCEL
-            !runtimeInstalled -> ImageAction.INSTALL_RUNTIME
+            !runtimeInstalled -> ImageAction.NO_RUNTIME
             // A download in flight is not an absence, and "Add a diffusion
             // model" is the wrong instruction for someone already adding one.
             model == null && baseInstalling != null -> ImageAction.INSTALLING
@@ -1219,7 +1218,7 @@ data class ImageState(
     val actionLabel: String
         get() = when (action) {
             ImageAction.CANCEL -> if (cancelling) "Cancelling…" else "Cancel"
-            ImageAction.INSTALL_RUNTIME -> "Install stable-diffusion.cpp first"
+            ImageAction.NO_RUNTIME -> "No diffusion runtime in this build"
             ImageAction.INSTALLING -> baseInstalling?.label ?: "Downloading…"
             ImageAction.ADD_MODEL -> "Add a diffusion model"
             ImageAction.PICK_SOURCE -> "Choose a source image"
@@ -1228,13 +1227,14 @@ data class ImageState(
 
     /** Whether pressing it does anything. A button that silently does nothing is worse than one that is plainly off. */
     val actionEnabled: Boolean
-        get() = action != ImageAction.INSTALLING
+        get() = action != ImageAction.INSTALLING && action != ImageAction.NO_RUNTIME
 
     /** The runtime is installed but there is nothing for it to load. */
     val actionHint: String?
         get() = when (action) {
-            ImageAction.INSTALL_RUNTIME ->
-                "Diffusion is optional and ships separately. Settings → Runtimes installs it."
+            ImageAction.NO_RUNTIME ->
+                "stable-diffusion.cpp is compiled into the app, so this means its library " +
+                    "failed to load on this device — an app update is the only fix."
             ImageAction.INSTALLING ->
                 "It becomes usable here the moment the last byte verifies. Models → Downloads " +
                     "shows the queue."

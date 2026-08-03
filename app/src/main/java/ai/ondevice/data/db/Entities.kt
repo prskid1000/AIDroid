@@ -9,7 +9,6 @@ import ai.ondevice.core.MessageRole
 import ai.ondevice.core.Modality
 import ai.ondevice.core.ModelFormat
 import ai.ondevice.core.PredictionKind
-import ai.ondevice.core.RuntimeState
 
 /** The data model of SPEC §11, one entity per line of that block. */
 
@@ -279,18 +278,6 @@ data class DownloadJobEntity(
  * carried the other story, and no code path could reach the buttons that read
  * them. Seeded from `runtimes.json` at first launch.
  */
-@Entity(tableName = "runtime_bundles")
-data class RuntimeBundleEntity(
-    @PrimaryKey val engine: String,
-    val buildTag: String?,
-    val upstreamCommit: String?,
-    val jniContract: Int,
-    val installedAt: Long?,
-    val sizeBytes: Long,
-    val state: RuntimeState,
-    val architectureCount: Int,
-    val backendsJson: String,
-)
 
 /** An MCP server the user added by hand. */
 @Entity(tableName = "mcp_servers")

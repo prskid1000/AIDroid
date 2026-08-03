@@ -3,11 +3,9 @@ package ai.ondevice.ui.vm
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import ai.ondevice.BuildConfig
-import ai.ondevice.core.RuntimeState
 import ai.ondevice.data.ModelStorage
 import ai.ondevice.data.db.McpServerEntity
 import ai.ondevice.data.db.OnDeviceDatabase
-import ai.ondevice.data.db.RuntimeBundleEntity
 import ai.ondevice.data.hf.DeviceCapabilities
 import ai.ondevice.data.prefs.AppPrefs
 import ai.ondevice.data.secure.TokenStore
@@ -374,13 +372,10 @@ class SettingsViewModel @Inject constructor(
             totalCores = capabilities.totalCores,
             soc = capabilities.socModel,
             storageUsedBytes = storage.usedBytes(),
-            canSelfUpdateRuntimes = BuildConfig.CAN_SELF_UPDATE_RUNTIMES,
             updateChannel = BuildConfig.UPDATE_CHANNEL,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsState())
 
-    val runtimes: StateFlow<List<RuntimeBundleEntity>> = db.runtimes().observeAll()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun setWifiOnly(value: Boolean) = viewModelScope.launch { prefs.setWifiOnly(value) }
 
@@ -403,6 +398,5 @@ data class SettingsState(
     val totalCores: Int = 0,
     val soc: String = "",
     val storageUsedBytes: Long = 0,
-    val canSelfUpdateRuntimes: Boolean = true,
     val updateChannel: String = "SIDELOAD",
 )
