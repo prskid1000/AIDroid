@@ -51,6 +51,7 @@ import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NCard
 import ai.ondevice.ui.components.NDropdown
 import ai.ondevice.ui.components.NField
+import ai.ondevice.ui.components.PickedImageField
 import ai.ondevice.ui.components.NHelp
 import ai.ondevice.ui.components.NInput
 import ai.ondevice.ui.components.NPills
@@ -283,7 +284,7 @@ fun ImageScreen(
 
             // The source image. Optional in Generate — attaching one is what
             // makes it img2img — and required by Inpaint and Extend.
-            SourceImageField(
+            PickedImageField(
                 label = if (state.requiresSource) "Source image" else "Source image · optional",
                 uri = state.sourceImageUri,
                 emptyLabel = if (state.requiresSource) {
@@ -299,7 +300,7 @@ fun ImageScreen(
             // it contributes structure, never pixels. It appears with a
             // ControlNet armed and not otherwise, because nothing else reads it.
             if (state.usesControlImage) {
-                SourceImageField(
+                PickedImageField(
                     label = "Control image · ControlNet",
                     uri = state.controlImageUri,
                     emptyLabel = "Add a pose, depth or edge map to steer composition",
@@ -313,7 +314,7 @@ fun ImageScreen(
             // a ControlNet reads structure and img2img reads pixels. It appears
             // only with an IP-Adapter armed, because it goes nowhere else.
             if (state.usesStyleReference) {
-                SourceImageField(
+                PickedImageField(
                     label = "Style reference · IP-Adapter",
                     uri = state.styleImageUri,
                     emptyLabel = "Add a picture to take the look from",
@@ -328,7 +329,7 @@ fun ImageScreen(
             // listed here — it reads a precomputed embedding file rather than
             // a photograph, and lives in the parameters as a path.
             if (state.usesIdentityImage) {
-                SourceImageField(
+                PickedImageField(
                     label = "Identity · PhotoMaker",
                     uri = state.identityImageUri,
                     emptyLabel = "Add a face for the adapter to keep",
@@ -614,66 +615,6 @@ private fun rememberSourceImagePicker(onPicked: (String) -> Unit): () -> Unit {
         launcher.launch(
             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
         )
-    }
-}
-
-/** The img2img / inpaint source. */
-@Composable
-private fun SourceImageField(
-    label: String,
-    uri: String?,
-    emptyLabel: String,
-    onPick: () -> Unit,
-    onClear: () -> Unit,
-) {
-    NField(label, Modifier.padding(top = 12.dp)) {
-        if (uri == null) {
-            NButton(
-                emptyLabel,
-                onClick = onPick,
-                style = NButtonStyle.Secondary,
-                block = true,
-            )
-        } else {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                AsyncImage(
-                    model = uri,
-                    contentDescription = "Source image",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(56.dp)
-                        .clip(Radius.Sm)
-                        .background(NocturneColors.Neutral900)
-                        .ring(NocturneColors.Divider, Radius.Sm),
-                )
-                Column(Modifier.weight(1f)) {
-                    Text("Picked", style = NocturneType.Row)
-                    Text(
-                        uri.substringAfterLast('/'),
-                        style = NocturneType.MonoXs,
-                        color = NocturneColors.TextMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Text(
-                    "Replace",
-                    style = NocturneType.Meta,
-                    color = NocturneColors.Accent,
-                    modifier = Modifier.nClickableFlat(onClick = onPick).padding(6.dp),
-                )
-                Text(
-                    "Remove",
-                    style = NocturneType.Meta,
-                    color = NocturneColors.TextMuted,
-                    modifier = Modifier.nClickableFlat(onClick = onClear).padding(6.dp),
-                )
-            }
-        }
     }
 }
 

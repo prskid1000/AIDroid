@@ -31,6 +31,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import ai.ondevice.core.Fmt
 import ai.ondevice.ui.BottomDestinations
+import ai.ondevice.ui.components.PickedImageField
 import ai.ondevice.ui.components.ResourceBlock
 import ai.ondevice.ui.components.NBottomBar
 import ai.ondevice.ui.components.NButton
@@ -115,6 +116,27 @@ fun VideoScreen(
 
             ClipStage(state, viewModel)
 
+            // — go —
+            //
+            // Under the preview, where the still screen keeps it. It used to
+            // sit at the very bottom, past the prompt, both frame pickers, the
+            // control frame and the length sliders — so starting a clip meant
+            // scrolling past every setting, and Cancel was somewhere off-screen
+            // for the whole run.
+            val busy = state.generating || state.loadingModel
+            NButton(
+                when {
+                    state.cancelling -> "Stopping…"
+                    busy -> "Cancel"
+                    else -> "Generate clip"
+                },
+                onClick = { if (busy) viewModel.cancel() else viewModel.generate() },
+                style = if (busy) NButtonStyle.Secondary else NButtonStyle.Primary,
+                enabled = state.model != null && (busy || state.runtimeInstalled),
+                block = true,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+
             if (!state.runtimeInstalled) {
                 NCard(Modifier.padding(top = 10.dp), ring = NocturneColors.Accent800) {
                     Text("The diffusion runtime is not installed", style = NocturneType.CardTitleSm)
@@ -186,30 +208,28 @@ fun VideoScreen(
                     "both, the model travels from one to the other.",
                 Modifier.padding(bottom = 8.dp),
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                FrameSlot(
-                    label = "First frame",
-                    uri = state.firstFrameUri,
-                    modifier = Modifier.weight(1f),
-                    onPick = {
-                        pickFirst.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                        )
-                    },
-                    onClear = { viewModel.setFirstFrame(null) },
-                )
-                FrameSlot(
-                    label = "Last frame",
-                    uri = state.lastFrameUri,
-                    modifier = Modifier.weight(1f),
-                    onPick = {
-                        pickLast.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                        )
-                    },
-                    onClear = { viewModel.setLastFrame(null) },
-                )
-            }
+            PickedImageField(
+                label = "First frame",
+                uri = state.firstFrameUri,
+                emptyLabel = "Start the clip from a picture",
+                onPick = {
+                    pickFirst.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                    )
+                },
+                onClear = { viewModel.setFirstFrame(null) },
+            )
+            PickedImageField(
+                label = "Last frame",
+                uri = state.lastFrameUri,
+                emptyLabel = "End the clip on a picture",
+                onPick = {
+                    pickLast.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                    )
+                },
+                onClear = { viewModel.setLastFrame(null) },
+            )
 
             // The pose or depth map the motion follows.
             //
@@ -218,10 +238,10 @@ fun VideoScreen(
             // that weights it — sat behind a ControlNet row that a clip never
             // reads. VACE is what a clip uses instead, and it reads this.
             SectionKicker("Control frame", Modifier.padding(top = 18.dp, bottom = 6.dp))
-            FrameSlot(
+            PickedImageField(
                 label = "Control",
                 uri = state.controlImageUri,
-                modifier = Modifier.fillMaxWidth(0.5f),
+                emptyLabel = "Add a pose, depth or edge map to steer the motion",
                 onPick = {
                     pickControl.launch(
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
@@ -245,30 +265,17 @@ fun VideoScreen(
                 Modifier.padding(top = 4.dp),
             )
 
-            // — length —
-
-            SectionKicker("Length", Modifier.padding(top = 18.dp, bottom = 6.dp))
-            LabelledSlider(
-                label = "Frames",
-                value = "${state.frames}",
-                position = state.frames.toFloat(),
-                range = 1f..129f,
-                onChange = { viewModel.setFrames(Math.round(it)) },
-            )
-            LabelledSlider(
-                label = "Frames per second",
-                value = "${state.fps}",
-                position = state.fps.toFloat(),
-                range = 1f..60f,
-                onChange = { viewModel.setFps(Math.round(it)) },
-            )
-            // The number that decides whether the run is possible. It grows with
-            // three things at once, which is why it is stated rather than left
-            // to be worked out from the three sliders above.
+            // Length lives in the settings sheet now, with the size and the
+            // sampler — the three sliders are set once for a run and then read,
+            // and they were standing between the prompt and the button.
+            //
+            // What stays here is the consequence, because it is the number that
+            // decides whether the run is possible at all and it is not derivable
+            // from any one slider.
             NHelp(
-                "${String.format("%.1f", state.requestedSeconds)} s · about " +
+                "${String.format("%.1f", state.requestedSeconds)} s at ${state.fps} fps · about " +
                     "${state.estimatedFrameMegabytes} MB of frames held while it finishes",
-                Modifier.padding(top = 4.dp),
+                Modifier.padding(top = 12.dp),
                 color = if (state.estimatedFrameMegabytes > 1500) {
                     NocturneColors.Accent300
                 } else {
@@ -276,21 +283,6 @@ fun VideoScreen(
                 },
             )
 
-            // — go —
-
-            val busy = state.generating || state.loadingModel
-            NButton(
-                when {
-                    state.cancelling -> "Stopping…"
-                    busy -> "Cancel"
-                    else -> "Generate clip"
-                },
-                onClick = { if (busy) viewModel.cancel() else viewModel.generate() },
-                style = if (busy) NButtonStyle.Secondary else NButtonStyle.Primary,
-                enabled = state.model != null && (busy || state.runtimeInstalled),
-                block = true,
-                modifier = Modifier.padding(top = 14.dp),
-            )
         }
     }
 
@@ -427,49 +419,6 @@ private fun ClipStage(state: VideoState, viewModel: VideoViewModel) {
 }
 
 @Composable
-private fun FrameSlot(
-    label: String,
-    uri: String?,
-    modifier: Modifier = Modifier,
-    onPick: () -> Unit,
-    onClear: () -> Unit,
-) {
-    Column(modifier) {
-        Text(label, style = NocturneType.Help, color = NocturneColors.TextMuted)
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .padding(top = 4.dp)
-                .clip(Radius.Sm)
-                .background(NocturneColors.Surface)
-                .ring(NocturneColors.Divider, Radius.Sm)
-                .nClickableFlat { onPick() },
-            contentAlignment = Alignment.Center,
-        ) {
-            if (uri == null) {
-                Text("Choose…", style = NocturneType.Help, color = NocturneColors.TextMuted)
-            } else {
-                AsyncImage(
-                    model = uri,
-                    contentDescription = label,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                )
-            }
-        }
-        if (uri != null) {
-            Text(
-                "Remove",
-                style = NocturneType.Help,
-                color = NocturneColors.Accent,
-                modifier = Modifier.padding(top = 3.dp).nClickableFlat { onClear() },
-            )
-        }
-    }
-}
-
-@Composable
 private fun LabelledSlider(
     label: String,
     value: String,
@@ -561,6 +510,32 @@ private fun VideoSettingsSheet(
                     }
                 }
             }
+
+            SectionKicker("Length", Modifier.padding(top = 18.dp, bottom = 6.dp))
+            LabelledSlider(
+                label = "Frames",
+                value = "${state.frames}",
+                position = state.frames.toFloat(),
+                range = 1f..129f,
+                onChange = { viewModel.setFrames(Math.round(it)) },
+            )
+            LabelledSlider(
+                label = "Frames per second",
+                value = "${state.fps}",
+                position = state.fps.toFloat(),
+                range = 1f..60f,
+                onChange = { viewModel.setFps(Math.round(it)) },
+            )
+            NHelp(
+                "${String.format("%.1f", state.requestedSeconds)} s · about " +
+                    "${state.estimatedFrameMegabytes} MB of frames held while it finishes",
+                Modifier.padding(top = 4.dp),
+                color = if (state.estimatedFrameMegabytes > 1500) {
+                    NocturneColors.Accent300
+                } else {
+                    NocturneColors.TextMuted
+                },
+            )
 
             SectionKicker("Sampling", Modifier.padding(top = 18.dp, bottom = 6.dp))
             LabelledSlider(
