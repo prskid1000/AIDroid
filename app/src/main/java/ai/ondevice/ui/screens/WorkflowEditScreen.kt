@@ -94,16 +94,36 @@ fun WorkflowEditScreen(
                 modifier = Modifier.padding(top = 12.dp),
             )
 
+            // What is unfinished, said here rather than discovered four
+            // minutes into a load. The same reasoning the media tabs use for
+            // their component warnings: a run on this hardware is long enough
+            // that finding out late is the expensive way to find out.
+            val problems = remember(graph) { problemsIn(graph) }
+            if (problems.isNotEmpty() && !state.running) {
+                NCard(
+                    Modifier.fillMaxWidth().padding(top = 12.dp),
+                    ring = NocturneColors.Accent800,
+                ) {
+                    Text(
+                        if (problems.size == 1) "One step is not ready" else "${problems.size} steps are not ready",
+                        style = NocturneType.CardTitleSm,
+                        color = NocturneColors.Accent200,
+                    )
+                    problems.forEach { NHelp(it, Modifier.padding(top = 4.dp)) }
+                }
+            }
+
+            // While something is running this opens it rather than greying
+            // out. A disabled button is the least useful thing to show
+            // somebody who came here *because* a run is going.
             NButton(
-                "Run",
+                if (state.running) "Open the run" else "Run",
                 onClick = onRun,
+                style = if (state.running) NButtonStyle.Secondary else NButtonStyle.Primary,
                 block = true,
-                enabled = graph.nodes.any { it.enabled } && !state.running,
+                enabled = state.running || (graph.nodes.any { it.enabled } && problems.isEmpty()),
                 modifier = Modifier.padding(top = 12.dp),
             )
-            if (state.running) {
-                NHelp("A run is already going. Open it from the button above.", Modifier.padding(top = 4.dp))
-            }
 
             SectionKicker("Steps", Modifier.padding(top = 20.dp, bottom = 8.dp))
 
@@ -124,6 +144,7 @@ fun WorkflowEditScreen(
                     node = node,
                     graph = graph,
                     viewModel = viewModel,
+                    models = state.models,
                     onBindSlot = { slot -> slotFor = "${node.id}/$slot" },
                     onMoveUp = { viewModel.moveNode(index, index - 1) }.takeIf { index > 0 },
                     onMoveDown = { viewModel.moveNode(index, index + 1) }
@@ -138,12 +159,39 @@ fun WorkflowEditScreen(
                 block = true,
                 modifier = Modifier.padding(top = 12.dp),
             )
+
+            // Two-step, like every other delete in this app: a workflow is
+            // easier to lose than to rebuild.
+            var confirmingDelete by rememberSaveable { mutableStateOf(false) }
+            NButton(
+                if (confirmingDelete) "Delete for good" else "Delete this workflow",
+                onClick = {
+                    if (confirmingDelete) {
+                        state.editing?.let { viewModel.delete(it.id) }
+                        onBack()
+                    } else {
+                        confirmingDelete = true
+                    }
+                },
+                style = NButtonStyle.Ghost,
+                block = true,
+                enabled = state.editing != null && !state.running,
+                modifier = Modifier.padding(top = 18.dp),
+            )
         }
     }
 
     if (addOpen) {
         AddStepSheet(onDismiss = { addOpen = false }) { kind ->
             viewModel.addNode(kind)
+            // A bracket without its closing half runs to the end of the list,
+            // which is never what anybody meant. Both halves go in together
+            // and the steps to repeat are dragged between them.
+            when (kind) {
+                NodeKind.RepeatStart, NodeKind.Batch -> viewModel.addNode(NodeKind.RepeatEnd)
+                NodeKind.ForEachStart -> viewModel.addNode(NodeKind.ForEachEnd)
+                else -> Unit
+            }
             addOpen = false
         }
     }
@@ -166,6 +214,37 @@ fun WorkflowEditScreen(
     }
 }
 
+/**
+ * Everything that would stop this graph part-way, found before it starts.
+ *
+ * Not a type check — the editor already makes an invalid connection
+ * unrepresentable. These are the things it cannot prevent: a required slot
+ * nobody filled, a model step pointed at nothing, and a step written by a
+ * build that knew a type this one does not.
+ */
+private fun problemsIn(graph: WorkflowGraph): List<String> = buildList {
+    graph.nodes.filter { it.enabled }.forEachIndexed { index, node ->
+        val kind = NodeKind.of(node.type)
+        val name = node.label.ifBlank { kind.title }
+
+        if (kind is NodeKind.Unknown) {
+            add("Step ${index + 1}, $name — saved by a newer version and cannot run here.")
+            return@forEachIndexed
+        }
+        if (kind == NodeKind.Processor &&
+            (node.params["model"] as? kotlinx.serialization.json.JsonPrimitive)?.content.isNullOrBlank()
+        ) {
+            add("Step ${index + 1}, $name — no model chosen.")
+            return@forEachIndexed
+        }
+        kind.slots(contextFor(node)).filter { it.required }.forEach { spec ->
+            if (node.slots[spec.name].isNullOrBlank()) {
+                add("Step ${index + 1}, $name — ${spec.label.lowercase()} is empty.")
+            }
+        }
+    }
+}
+
 /** One step. The index leads, because the order is the meaning. */
 @Composable
 private fun StepCard(
@@ -173,6 +252,7 @@ private fun StepCard(
     node: NodeRecord,
     graph: WorkflowGraph,
     viewModel: WorkflowViewModel,
+    models: List<ai.ondevice.data.db.ModelEntity>,
     onBindSlot: (String) -> Unit,
     onMoveUp: (() -> Unit)?,
     onMoveDown: (() -> Unit)?,
@@ -234,7 +314,7 @@ private fun StepCard(
             }
         }
 
-        StepSettings(node, kind, viewModel)
+        StepSettings(node, kind, viewModel, models)
 
         Row(
             Modifier.fillMaxWidth().padding(top = 12.dp),
@@ -308,7 +388,12 @@ private fun SlotRow(
 
 /** The handful of settings a step has that are not model parameters. */
 @Composable
-private fun StepSettings(node: NodeRecord, kind: NodeKind, viewModel: WorkflowViewModel) {
+private fun StepSettings(
+    node: NodeRecord,
+    kind: NodeKind,
+    viewModel: WorkflowViewModel,
+    models: List<ai.ondevice.data.db.ModelEntity>,
+) {
     fun value(key: String, fallback: String = "") =
         (node.params[key] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: fallback
 
@@ -409,17 +494,54 @@ private fun StepSettings(node: NodeRecord, kind: NodeKind, viewModel: WorkflowVi
 
         NodeKind.Processor -> {
             SectionKicker("Model", Modifier.padding(top = 12.dp, bottom = 4.dp))
-            NInput(
-                value = value("model"),
-                onValueChange = { viewModel.setParam(node.id, "model", it) },
-                placeholder = "owner/repo:quant",
-            )
+            var picking by remember { mutableStateOf(false) }
+            val chosen = models.firstOrNull { it.id == value("model") }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(NocturneColors.Bg, Radius.Md)
+                    .ring(
+                        if (chosen == null) NocturneColors.Accent800 else NocturneColors.Divider,
+                        Radius.Md,
+                    )
+                    .nClickableFlat { picking = true }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        chosen?.label ?: "Choose a model",
+                        style = NocturneType.Row,
+                        color = if (chosen == null) NocturneColors.Accent200 else NocturneColors.Text,
+                    )
+                    Text(
+                        chosen?.let {
+                            listOfNotNull(it.quant, it.architecture).joinToString(" · ")
+                        } ?: "nothing chosen",
+                        style = NocturneType.MonoXs,
+                        color = NocturneColors.TextMuted,
+                    )
+                }
+                chosen?.let { NTag(it.modality.name.lowercase(), style = NTagStyle.Outline) }
+            }
             NHelp(
                 "What this step takes and gives follows from the model — a transcription model " +
                     "takes a recording and gives text, a diffusion model takes a prompt and " +
                     "gives a picture.",
                 Modifier.padding(top = 4.dp),
             )
+            if (picking) {
+                ModelPickerSheet(
+                    models = models,
+                    chosenId = value("model"),
+                    onDismiss = { picking = false },
+                    onPick = {
+                        viewModel.chooseModel(node.id, it)
+                        picking = false
+                    },
+                )
+            }
         }
 
         else -> Unit
@@ -431,7 +553,11 @@ private fun StepSettings(node: NodeRecord, kind: NodeKind, viewModel: WorkflowVi
 private fun AddStepSheet(onDismiss: () -> Unit, onPick: (NodeKind) -> Unit) {
     NBottomSheet("Add a step", onDismiss) {
         NodeFamily.entries.forEach { family ->
-            val kinds = NodeKind.ALL.filter { it.family == family }
+            // The closing brackets are added with their openers, never alone.
+            val kinds = NodeKind.ALL.filter {
+                it.family == family &&
+                    it != NodeKind.RepeatEnd && it != NodeKind.ForEachEnd
+            }
             if (kinds.isEmpty()) return@forEach
             SectionKicker(family.label, Modifier.padding(top = 14.dp, bottom = 6.dp))
             kinds.forEach { kind ->
@@ -545,6 +671,70 @@ private fun BindSlotSheet(
 }
 
 /**
+ * Every installed model, grouped by what it does.
+ *
+ * Grouped rather than listed flat because the group is the useful fact: a step
+ * pointed at a transcription model is a different step from one pointed at a
+ * diffusion model, and the heading says so before the name does.
+ */
+@Composable
+private fun ModelPickerSheet(
+    models: List<ai.ondevice.data.db.ModelEntity>,
+    chosenId: String,
+    onDismiss: () -> Unit,
+    onPick: (ai.ondevice.data.db.ModelEntity) -> Unit,
+) {
+    NBottomSheet("Choose a model", onDismiss, note = "${'$'}{models.size} installed") {
+        if (models.isEmpty()) {
+            NCard(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                Text("No models installed", style = NocturneType.CardTitleSm)
+                NHelp(
+                    "A step needs something to run. Add one under Settings → Models.",
+                    Modifier.padding(top = 4.dp),
+                )
+            }
+            return@NBottomSheet
+        }
+        models.groupBy { it.modality }.forEach { (modality, group) ->
+            SectionKicker(modality.name.lowercase(), Modifier.padding(top = 14.dp, bottom = 6.dp))
+            group.forEach { model ->
+                val selected = model.id == chosenId
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 6.dp)
+                        .background(
+                            if (selected) NocturneColors.Accent900 else NocturneColors.Bg,
+                            Radius.Md,
+                        )
+                        .ring(
+                            if (selected) NocturneColors.Accent else NocturneColors.Divider,
+                            Radius.Md,
+                        )
+                        .nClickableFlat { onPick(model) }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            model.label,
+                            style = NocturneType.Row,
+                            color = if (selected) NocturneColors.Accent200 else NocturneColors.Text,
+                        )
+                        Text(
+                            listOfNotNull(model.quant, model.architecture).joinToString(" · "),
+                            style = NocturneType.MonoXs,
+                            color = NocturneColors.TextMuted,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
  * What the editor knows when asking a step for its shape.
  *
  * A Processor's slots depend on the model it points at, which the editor does
@@ -556,9 +746,13 @@ private fun contextFor(node: NodeRecord): NodeContext {
     val declared = (node.params["portType"] as? kotlinx.serialization.json.JsonPrimitive)?.content
     val shape = (node.params["shape"] as? kotlinx.serialization.json.JsonPrimitive)?.content
     return NodeContext(
+        // NONE until a model is chosen, rather than guessing at image. A step
+        // that has not been pointed at anything yet takes nothing, and saying
+        // it takes a prompt and a picture is a promise about a decision
+        // nobody has made.
         shape = shape?.let {
             runCatching { ai.ondevice.core.workflow.ProcessorShape.valueOf(it) }.getOrNull()
-        } ?: ai.ondevice.core.workflow.ProcessorShape.IMAGE,
+        } ?: ai.ondevice.core.workflow.ProcessorShape.NONE,
         declaredType = declared?.let { runCatching { PortType.valueOf(it) }.getOrNull() }
             ?: PortType.TEXT,
     )

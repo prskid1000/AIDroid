@@ -146,6 +146,14 @@ fun WorkflowRunScreen(
                     Modifier.padding(bottom = 8.dp),
                 )
                 state.choices.forEach { option ->
+                    // Shown as what it is. A list of transcript pieces
+                    // rendered through an image loader is four blank boxes,
+                    // and the step that exists to let somebody choose is the
+                    // worst place to make them guess.
+                    val isPicture = option.endsWith(".png", true) ||
+                        option.endsWith(".jpg", true) ||
+                        option.endsWith(".jpeg", true) ||
+                        option.endsWith(".webp", true)
                     Box(
                         Modifier
                             .fillMaxWidth()
@@ -153,12 +161,20 @@ fun WorkflowRunScreen(
                             .ring(NocturneColors.Divider, Radius.Md)
                             .nClickableFlat { viewModel.choose(option) },
                     ) {
-                        AsyncImage(
-                            model = option,
-                            contentDescription = null,
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+                        if (isPicture) {
+                            AsyncImage(
+                                model = option,
+                                contentDescription = null,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        } else {
+                            Text(
+                                option,
+                                style = NocturneType.CardBody,
+                                modifier = Modifier.padding(12.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -217,6 +233,7 @@ fun WorkflowRunScreen(
                 when {
                     state.cancelling -> "Stopping…"
                     state.running -> "Cancel"
+                    state.finishedAt != null || state.error != null -> "Run again"
                     else -> "Run"
                 },
                 onClick = { if (state.running) viewModel.cancel() else viewModel.run() },

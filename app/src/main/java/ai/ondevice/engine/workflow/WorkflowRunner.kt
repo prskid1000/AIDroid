@@ -24,6 +24,7 @@ import ai.ondevice.speech.SpeechRequest
 import ai.ondevice.speech.SpeechSynthesizer
 import ai.ondevice.speech.SynthProvider
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.JsonPrimitive
 import java.io.File
 import javax.inject.Inject
@@ -87,6 +88,8 @@ class WorkflowRunner @Inject constructor(
     private val transcriber: Transcriber,
     private val synthesizer: SpeechSynthesizer,
     private val storage: ModelStorage,
+    private val toolProviders: ai.ondevice.tools.ToolProviderFactory,
+    private val prefs: ai.ondevice.data.prefs.AppPrefs,
 ) {
 
     /** Which runtime is holding weights right now, so we know when to let go. */
@@ -297,6 +300,67 @@ class WorkflowRunner @Inject constructor(
                 }
 
                 NodeKind.Processor -> runProcessor(node, graph, outputs, outDir, models, reporter)
+
+                /*
+                 * The cheap ones — no model, no load, milliseconds each.
+                 *
+                 * They carry more of this feature's weight than they look
+                 * like they should. Fitting a picture to the size the next
+                 * model wants is the difference between a scene and a smear;
+                 * pulling one frame out of a clip is the only way video
+                 * composes with anything; and splitting long text is what
+                 * makes an hour of transcript fit a context window at all.
+                 */
+                NodeKind.Resize -> {
+                    val source = resolve(node, "image", outputs, graph)?.path
+                        ?: throw IllegalStateException("No picture was given to this step.")
+                    val width = node.params.int("width", 0)
+                    val height = node.params.int("height", 0)
+                    val mode = node.params.string("mode", "fit")
+                    val file = File(outDir, "${'$'}{node.id}.png")
+                    resizeTo(File(source), file, width, height, mode)
+                    put(outputs, node, "image", PortValue.file(PortType.IMAGE, file.absolutePath))
+                }
+
+                NodeKind.FrameExtract -> {
+                    val clip = resolve(node, "clip", outputs, graph)
+                        ?: throw IllegalStateException("No clip was given to this step.")
+                    val frames = clip.paths
+                    if (frames.isEmpty()) throw IllegalStateException("That clip has no frames.")
+                    // Negative counts back from the end, so "the last frame"
+                    // does not need to know how long the clip turned out.
+                    val asked = node.params.int("index", 0)
+                    val at = (if (asked < 0) frames.size + asked else asked)
+                        .coerceIn(0, frames.lastIndex)
+                    val file = File(outDir, "${'$'}{node.id}.png")
+                    File(frames[at]).copyTo(file, overwrite = true)
+                    put(outputs, node, "image", PortValue.file(PortType.IMAGE, file.absolutePath))
+                }
+
+                NodeKind.Assemble -> {
+                    val images = resolve(node, "images", outputs, graph)?.paths.orEmpty()
+                    if (images.isEmpty()) throw IllegalStateException("No pictures to assemble.")
+                    val dir = File(outDir, node.id).apply { mkdirs() }
+                    val frames = images.mapIndexed { i, path ->
+                        val target = File(dir, String.format("frame_%04d.png", i))
+                        File(path).copyTo(target, overwrite = true)
+                        target.absolutePath
+                    }
+                    outputs["${'$'}{node.id}:clip"] = PortValue(PortType.CLIP, paths = frames)
+                }
+
+                NodeKind.Tool -> {
+                    val name = node.params.string("tool")
+                    if (name.isBlank()) throw IllegalStateException("No tool chosen for this step.")
+                    val arguments = resolve(node, "arguments", outputs, graph)?.text
+                        ?: node.params.string("arguments", "{}")
+                    val registry = toolProviders.registry(
+                        enabled = prefs.enabledToolProviders.first(),
+                    )
+                    val result = registry.call(name, arguments.ifBlank { "{}" })
+                    if (result.isError) throw IllegalStateException(result.text)
+                    put(outputs, node, "text", PortValue.text(result.text))
+                }
 
                 is NodeKind.Unknown -> throw IllegalStateException(
                     "This step was saved by a newer version of the app and cannot be run here.",
@@ -563,6 +627,54 @@ class WorkflowRunner @Inject constructor(
             destination,
         ).getOrThrow()
         put(outputs, node, "audio", PortValue.file(PortType.AUDIO, destination.absolutePath))
+    }
+
+    /**
+     * Fit a picture to a size, by one of three readings of "fit".
+     *
+     * `fit` keeps the whole picture and lets the shape change; `cover` keeps
+     * the shape and loses the edges; `stretch` keeps neither. Which one is
+     * wanted depends on whether the next model cares more about seeing
+     * everything or about being handed the aspect ratio it was trained on,
+     * and that is not something this code can guess.
+     */
+    private fun resizeTo(source: File, target: File, width: Int, height: Int, mode: String) {
+        val bitmap = android.graphics.BitmapFactory.decodeFile(source.absolutePath)
+            ?: throw IllegalStateException("That file is not a picture this device can read.")
+        val w = if (width > 0) width else bitmap.width
+        val h = if (height > 0) height else bitmap.height
+
+        val out = when (mode) {
+            "stretch" -> android.graphics.Bitmap.createScaledBitmap(bitmap, w, h, true)
+            "cover" -> {
+                val scale = maxOf(w.toFloat() / bitmap.width, h.toFloat() / bitmap.height)
+                val scaled = android.graphics.Bitmap.createScaledBitmap(
+                    bitmap,
+                    (bitmap.width * scale).toInt().coerceAtLeast(w),
+                    (bitmap.height * scale).toInt().coerceAtLeast(h),
+                    true,
+                )
+                android.graphics.Bitmap.createBitmap(
+                    scaled,
+                    ((scaled.width - w) / 2).coerceAtLeast(0),
+                    ((scaled.height - h) / 2).coerceAtLeast(0),
+                    w.coerceAtMost(scaled.width),
+                    h.coerceAtMost(scaled.height),
+                )
+            }
+            else -> {
+                val scale = minOf(w.toFloat() / bitmap.width, h.toFloat() / bitmap.height)
+                android.graphics.Bitmap.createScaledBitmap(
+                    bitmap,
+                    (bitmap.width * scale).toInt().coerceAtLeast(1),
+                    (bitmap.height * scale).toInt().coerceAtLeast(1),
+                    true,
+                )
+            }
+        }
+        target.outputStream().use {
+            out.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+        }
     }
 
     // ── plumbing ─────────────────────────────────────────────────────────

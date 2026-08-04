@@ -53,6 +53,8 @@ class WorkflowSession @Inject constructor() {
 /** S15 — workflows: the list, the one being edited, and the run in flight. */
 data class WorkflowState(
     val workflows: List<WorkflowEntity> = emptyList(),
+    /** Every installed model, so a step can be pointed at one by tapping. */
+    val models: List<ai.ondevice.data.db.ModelEntity> = emptyList(),
     /** The graph on the editor, which is not saved until it is. */
     val editing: WorkflowEntity? = null,
     val graph: WorkflowGraph = WorkflowGraph(),

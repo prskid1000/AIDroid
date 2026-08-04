@@ -55,6 +55,13 @@ class WorkflowViewModel @Inject constructor(
                 _state.value = _state.value.copy(workflows = list)
             }
         }
+        runScope.launch {
+            db.models().observeInstalled().collect { models ->
+                _state.value = _state.value.copy(
+                    models = models.filter { it.attachmentRole == null },
+                )
+            }
+        }
     }
 
     /** Every installed model, so a step can be pointed at one. */
@@ -120,6 +127,29 @@ class WorkflowViewModel @Inject constructor(
         val slots = node.slots.toMutableMap()
         if (reference == null) slots.remove(slot) else slots[slot] = reference
         node.copy(slots = slots)
+    }
+
+    /**
+     * Point a step at a model, and record what that makes it.
+     *
+     * The shape is stored beside the id rather than looked up when drawing,
+     * because the editor asks a node for its slots while composing and a
+     * database read there would be a suspend call in the middle of a frame.
+     */
+    fun chooseModel(nodeId: String, model: ai.ondevice.data.db.ModelEntity) {
+        val makesVideo = ai.ondevice.core.DiffusionFamily.isVideo(
+            model.architecture ?: model.label,
+        ) == true
+        val shape = ai.ondevice.core.workflow.ProcessorShape.of(
+            model.modality,
+            makesVideo,
+            isUpscaler = model.attachmentRole == ai.ondevice.core.AttachmentRole.UPSCALER,
+        )
+        setParam(nodeId, "model", model.id)
+        setParam(nodeId, "shape", shape.name)
+        updateNode(nodeId) { node ->
+            if (node.label.isBlank()) node.copy(label = model.label) else node
+        }
     }
 
     fun setParam(nodeId: String, key: String, value: String?) = updateNode(nodeId) { node ->
