@@ -177,14 +177,40 @@ data class MessageEntity(
  * neither could be told from the other by its role.
  *
  * Repo identity, not a name: nothing here knows what Wan or FLUX are, only that
- * these two files arrived together and those two did not. Where it does not
- * narrow to exactly one, the list comes back untouched and the question stands.
+ * these two files arrived together and those two did not.
+ *
+ * Architecture is the second question, asked when the first does not settle it,
+ * and it is the one a re-quantised checkpoint needs. A distilled Wan published
+ * by somebody other than the original packager ships the denoiser alone and
+ * says so on its card: use the same decoder and the same encoder as the model
+ * it was distilled from. Nothing arrived beside it, so the repo test can never
+ * fire — but its architecture is recorded, and so is the decoder's, and only
+ * one decoder in the library claims to be a Wan.
+ *
+ * Still not a name: `wan` here is read off the file's own header and compared
+ * against another file's, by the one matching rule the app has. Where neither
+ * question narrows to exactly one, the list comes back untouched and the choice
+ * stays the user's.
  */
 fun List<ModelEntity>.fromSameRepoAs(model: ModelEntity?): List<ModelEntity> {
-    val repo = model?.hfRepo?.takeIf { it.isNotBlank() } ?: return this
-    if (size <= 1) return this
-    val together = filter { it.hfRepo == repo }
-    return if (together.size == 1) together else this
+    if (size <= 1 || model == null) return this
+
+    model.hfRepo?.takeIf { it.isNotBlank() }?.let { repo ->
+        val together = filter { it.hfRepo == repo }
+        if (together.size == 1) return together
+    }
+
+    model.architecture?.takeIf { it.isNotBlank() }?.let { arch ->
+        val kin = filter { candidate ->
+            candidate.architecture?.takeIf { it.isNotBlank() }?.let { theirs ->
+                ai.ondevice.engine.RuntimeRegistry.namesMatch(theirs, arch) ||
+                    ai.ondevice.engine.RuntimeRegistry.namesMatch(arch, theirs)
+            } == true
+        }
+        if (kin.size == 1) return kin
+    }
+
+    return this
 }
 
 @Entity(tableName = "generated_images", indices = [Index("createdAt")])
