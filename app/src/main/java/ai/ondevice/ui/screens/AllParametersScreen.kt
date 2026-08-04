@@ -47,11 +47,15 @@ fun AllParametersScreen(
     onBack: () -> Unit,
     onOpenSamplerChain: () -> Unit,
     initialRuntime: String = RuntimeRegistry.LLAMA,
+    /** Whose overrides to edit; null lets the screen pick the one in use. */
+    initialModelId: String? = null,
     // Activity-scoped: the sampler-chain screen edits the same parameter set, so
     // the two must see one instance rather than each loading its own copy.
     viewModel: ParamsViewModel = activityParamsViewModel(),
 ) {
-    LaunchedEffect(initialRuntime) { viewModel.setRuntime(initialRuntime) }
+    LaunchedEffect(initialRuntime, initialModelId) {
+        viewModel.setRuntime(initialRuntime, initialModelId)
+    }
 
     val state by viewModel.state.collectAsStateWithLifecycle()
 
@@ -59,7 +63,13 @@ fun AllParametersScreen(
         toolbar = {
             PushToolbar(
                 title = "Parameters",
-                subtitle = "${state.runtimeId} ${state.buildTag} · manifest v${state.manifestVersion}",
+                subtitle = listOfNotNull(
+                    // The model leads: it is what these values are being saved
+                    // against, and the screen never used to say.
+                    state.modelLabel,
+                    "${state.runtimeId} ${state.buildTag}",
+                    "manifest v${state.manifestVersion}",
+                ).joinToString(" · "),
                 onBack = onBack,
                 trailing = {
                     Icon(

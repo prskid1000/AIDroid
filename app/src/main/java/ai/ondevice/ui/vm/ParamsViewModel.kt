@@ -61,15 +61,30 @@ class ParamsViewModel @Inject constructor(
         loadJob = viewModelScope.launch { load(runtimeId) }
     }
 
-    /** The screen is not llama-only. */
-    fun setRuntime(runtimeId: String) {
-        if (_state.value.runtimeId == runtimeId && _state.value.allSpecs.isNotEmpty()) return
+    /**
+     * The screen is not llama-only, and is no longer model-blind.
+     *
+     * [modelId] is whose overrides to edit. Null keeps the old guess, which is
+     * right for a caller with no particular model in mind and wrong for every
+     * caller that has one — see Routes.parameters.
+     */
+    fun setRuntime(runtimeId: String, modelId: String? = null) {
+        if (_state.value.runtimeId == runtimeId &&
+            _state.value.allSpecs.isNotEmpty() &&
+            (modelId == null || modelId == _state.value.modelId)
+        ) {
+            return
+        }
+        boundModelId = modelId
         startLoad(runtimeId)
     }
 
+    /** Whose overrides the caller asked for, as against whose we would guess. */
+    private var boundModelId: String? = null
+
     private suspend fun load(runtimeId: String) {
         val manifest = repository.manifest()
-        val model = modelFor(runtimeId)
+        val model = boundModelId?.let { db.models().get(it) } ?: modelFor(runtimeId)
         _state.value = _state.value.copy(
             manifestVersion = manifest.manifestVersion,
             bundledVersion = repository.bundledVersion(),
@@ -80,6 +95,7 @@ class ParamsViewModel @Inject constructor(
             modality = (model?.modality ?: modalityOf(runtimeId)).name.lowercase(),
             architecture = model?.architecture,
             modelId = model?.id,
+            modelLabel = model?.label,
             query = "",
         )
         _state.value = _state.value.copy(pathChoices = installedFiles())
@@ -364,6 +380,14 @@ data class ParamsState(
     val modality: String = "text",
     val architecture: String? = null,
     val modelId: String? = null,
+    /**
+     * What to call the model these values are saved against.
+     *
+     * The screen named the runtime and the manifest and never the model, so a
+     * page editing one model's overrides looked exactly like a page editing
+     * another's.
+     */
+    val modelLabel: String? = null,
     val pendingReloadKeys: Set<String> = emptySet(),
     /** Every sampler, in display order — including any switched off. */
     val samplerOrder: List<String> = emptyList(),

@@ -84,7 +84,7 @@ import ai.ondevice.ui.vm.VoiceViewModel
 fun VoiceScreen(
     currentRoute: String?,
     onNavigate: (String) -> Unit,
-    onOpenAdvanced: (String) -> Unit,
+    onOpenAdvanced: (String, String?) -> Unit,
     viewModel: VoiceViewModel = activityVoiceViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -764,7 +764,7 @@ private fun VoiceSettingsSheet(
     state: ai.ondevice.ui.vm.VoiceState,
     viewModel: VoiceViewModel,
     onDismiss: () -> Unit,
-    onOpenAdvanced: (String) -> Unit,
+    onOpenAdvanced: (String, String?) -> Unit,
 ) {
     NBottomSheet("Voice settings", onDismiss, note = "applies to the next run") {
         if (state.mode == VoiceMode.TRANSCRIBE) {
@@ -973,6 +973,9 @@ private fun VoiceSettingsSheet(
                             ai.ondevice.engine.RuntimeRegistry.OMNIVOICE
                         else -> ai.ondevice.engine.RuntimeRegistry.KOKORO
                     },
+                    // This tab's own voice model, for the same reason the
+                    // other tabs pass theirs.
+                    state.ttsModel?.id,
                 )
             },
             style = NButtonStyle.Secondary,

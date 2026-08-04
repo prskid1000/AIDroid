@@ -58,12 +58,27 @@ object Routes {
     const val RESOLVE_RESULTS = "models/resolve"
     const val MODEL_DETAIL = "models/detail/{modelId}"
     const val DOWNLOADS = "models/downloads"
-    const val ALL_PARAMETERS = "params/all?runtime={runtime}"
+    const val ALL_PARAMETERS = "params/all?runtime={runtime}&modelId={modelId}"
     const val SAMPLER_CHAIN = "params/samplers"
 
-    /** One parameter screen, told which runtime to render. */
-    fun parameters(runtime: String) =
-        "params/all?runtime=${android.net.Uri.encode(runtime)}"
+    /**
+     * One parameter screen, told which runtime to render and whose overrides
+     * to edit.
+     *
+     * The model used to be left out, and the screen guessed: the first
+     * installed model of the runtime's modality, most recently used first. So
+     * with two diffusion models installed, opening Parameters from one model's
+     * page edited the other's row whenever that other one had been used more
+     * recently — silently, because nothing on the screen named what it was
+     * editing. Per-model settings could not be relied on to reach the model
+     * they were set from.
+     *
+     * Null keeps the guess, which is right for the screens that have no
+     * particular model in mind.
+     */
+    fun parameters(runtime: String, modelId: String? = null) =
+        "params/all?runtime=${android.net.Uri.encode(runtime)}" +
+            "&modelId=${android.net.Uri.encode(modelId.orEmpty())}"
     const val PROMPT_INSPECTOR = "chat/prompt"
     const val MASK_EDITOR = "image/mask"
 
@@ -133,9 +148,11 @@ fun OnDeviceApp(
             ChatScreen(
                 currentRoute = currentRoute,
                 onNavigate = { navController.navigateToRoot(it) },
-                onOpenParameters = {
+                // The conversation's own model, so the screen edits what
+                // this tab is talking to rather than whatever was used last.
+                onOpenParameters = { modelId ->
                     navController.navigate(
-                        Routes.parameters(ai.ondevice.engine.RuntimeRegistry.LLAMA),
+                        Routes.parameters(ai.ondevice.engine.RuntimeRegistry.LLAMA, modelId),
                     )
                 },
                 onOpenPromptInspector = { navController.navigate(Routes.PROMPT_INSPECTOR) },
@@ -148,9 +165,12 @@ fun OnDeviceApp(
                 onNavigate = { navController.navigateToRoot(it) },
                 onOpenMask = { navController.navigate(Routes.MASK_EDITOR) },
                 onAddModel = { navController.navigate(Routes.ADD_MODEL) },
-                onOpenAdvanced = {
+                onOpenAdvanced = { modelId ->
                     navController.navigate(
-                        Routes.parameters(ai.ondevice.engine.RuntimeRegistry.STABLE_DIFFUSION),
+                        Routes.parameters(
+                            ai.ondevice.engine.RuntimeRegistry.STABLE_DIFFUSION,
+                            modelId,
+                        ),
                     )
                 },
                 onOpenVideo = { navController.navigate(Routes.VIDEO) },
@@ -171,9 +191,12 @@ fun OnDeviceApp(
                 onNavigate = { navController.navigateToRoot(it) },
                 onBack = { navController.popBackStack() },
                 onAddModel = { navController.navigate(Routes.ADD_MODEL) },
-                onOpenAdvanced = {
+                onOpenAdvanced = { modelId ->
                     navController.navigate(
-                        Routes.parameters(ai.ondevice.engine.RuntimeRegistry.STABLE_DIFFUSION),
+                        Routes.parameters(
+                            ai.ondevice.engine.RuntimeRegistry.STABLE_DIFFUSION,
+                            modelId,
+                        ),
                     )
                 },
                 viewModel = androidx.hilt.navigation.compose.hiltViewModel(graph),
@@ -183,11 +206,10 @@ fun OnDeviceApp(
             VoiceScreen(
                 currentRoute = currentRoute,
                 onNavigate = { navController.navigateToRoot(it) },
-                // The engine decides which parameter set opens.
-                onOpenAdvanced = { runtime ->
-                    navController.navigate(
-                        Routes.parameters(runtime),
-                    )
+                // The engine decides which parameter set opens, and the tab
+                // decides whose overrides it edits.
+                onOpenAdvanced = { runtime, modelId ->
+                    navController.navigate(Routes.parameters(runtime, modelId))
                 },
             )
         }
@@ -232,11 +254,15 @@ fun OnDeviceApp(
             ResolveResultsScreen(onBack = { navController.popBackStack() })
         }
         composable(Routes.MODEL_DETAIL) { entry ->
+            val modelId = entry.arguments?.getString("modelId").orEmpty()
             ModelDetailScreen(
-                modelId = entry.arguments?.getString("modelId").orEmpty(),
+                modelId = modelId,
                 onBack = { navController.popBackStack() },
+                // This model's parameters, named. Opening them from a model's
+                // own page and landing on another model's overrides is the
+                // whole of the bug this argument fixes.
                 onOpenParameters = { runtime ->
-                    navController.navigate(Routes.parameters(runtime))
+                    navController.navigate(Routes.parameters(runtime, modelId))
                 },
             )
         }
@@ -250,6 +276,10 @@ fun OnDeviceApp(
                     type = NavType.StringType
                     defaultValue = ai.ondevice.engine.RuntimeRegistry.LLAMA
                 },
+                navArgument("modelId") {
+                    type = NavType.StringType
+                    defaultValue = ""
+                },
             ),
         ) { entry ->
             AllParametersScreen(
@@ -257,6 +287,10 @@ fun OnDeviceApp(
                 onOpenSamplerChain = { navController.navigate(Routes.SAMPLER_CHAIN) },
                 initialRuntime = entry.arguments?.getString("runtime")
                     ?: ai.ondevice.engine.RuntimeRegistry.LLAMA,
+                // Blank is "no particular model" — the screens that open this
+                // without one in mind still get the old behaviour.
+                initialModelId = entry.arguments?.getString("modelId")
+                    ?.takeIf { it.isNotBlank() },
             )
         }
         composable(Routes.SAMPLER_CHAIN) {

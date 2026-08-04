@@ -86,7 +86,7 @@ fun ImageScreen(
     onNavigate: (String) -> Unit,
     onOpenMask: () -> Unit,
     onAddModel: () -> Unit,
-    onOpenAdvanced: () -> Unit,
+    onOpenAdvanced: (String?) -> Unit,
     onOpenVideo: () -> Unit,
     viewModel: ImageViewModel = activityImageViewModel(),
 ) {
@@ -442,7 +442,9 @@ fun ImageScreen(
             state = state,
             viewModel = viewModel,
             onDismiss = { settingsOpen = false },
-            onOpenAdvanced = onOpenAdvanced,
+            // The model this screen has selected, so Advanced edits it
+            // rather than whichever diffusion model was used last.
+            onOpenAdvanced = { onOpenAdvanced(state.model?.id) },
         )
     }
 }

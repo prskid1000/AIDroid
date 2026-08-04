@@ -79,7 +79,7 @@ fun VideoScreen(
     onNavigate: (String) -> Unit,
     onBack: () -> Unit,
     onAddModel: () -> Unit,
-    onOpenAdvanced: () -> Unit,
+    onOpenAdvanced: (String?) -> Unit,
     viewModel: VideoViewModel = activityVideoViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -279,7 +279,7 @@ fun VideoScreen(
         VideoSettingsSheet(
             state = state,
             viewModel = viewModel,
-            onOpenAdvanced = { settingsOpen = false; onOpenAdvanced() },
+            onOpenAdvanced = { settingsOpen = false; onOpenAdvanced(state.model?.id) },
             onAddModel = { settingsOpen = false; onAddModel() },
             onClose = { settingsOpen = false },
         )
