@@ -531,7 +531,13 @@ private fun VideoSettingsSheet(
                 value = "${state.width}",
                 position = state.width.toFloat(),
                 range = 64f..1536f,
-                step = 64f,
+                // Sixteen, not sixty-four. Wan's decoder downsamples by 16, so
+                // a multiple of 16 is a whole latent — and 64 could not express
+                // 16:9 at the sizes this device can afford. 512x288 is the one
+                // people report working for this model; on a step of 64 the
+                // nearest reachable heights are 256 and 320, and 256 is close
+                // to the 416x240 that upstream's own users call a garbled mess.
+                step = 16f,
                 onChange = { viewModel.setWidth(Math.round(it)) },
             )
             LabelledSlider(
@@ -539,14 +545,14 @@ private fun VideoSettingsSheet(
                 value = "${state.height}",
                 position = state.height.toFloat(),
                 range = 64f..1536f,
-                step = 64f,
+                step = 16f,
                 onChange = { viewModel.setHeight(Math.round(it)) },
             )
             NHelp(
-                "Wan is trained at 1280×704 and 704×1280. Further from that in either " +
-                    "direction costs coherence before it costs anything else — and both " +
-                    "dimensions multiply the work, so this is the setting that decides how " +
-                    "long a clip takes.",
+                "Wan wants 16:9 — 512×288 and 640×360 are the small sizes reported to " +
+                    "work, and square or near-square comes out as texture rather than a " +
+                    "scene. Both dimensions multiply the work, so this is also the setting " +
+                    "that decides how long a clip takes.",
                 Modifier.padding(top = 2.dp, bottom = 4.dp),
             )
             LabelledSlider(
