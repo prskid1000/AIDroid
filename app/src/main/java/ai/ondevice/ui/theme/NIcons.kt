@@ -187,6 +187,22 @@ object NIcons {
     /** Token-probability inspector. */
     val Activity: ImageVector by lazy { icon(1.7f, stroked = listOf("M4 12h5l2-4 3 8 2-4h4")) }
 
+    /**
+     * Workflow: three steps and the line between them.
+     *
+     * Not the Activity trace, which is close and already means "what the
+     * device is doing" — a tab icon that means two things means neither.
+     */
+    val Flow: ImageVector by lazy {
+        icon(
+            1.7f,
+            stroked = listOf(
+                "M6 5h5v4H6zM13 15h5v4h-5z",
+                "M8.5 9v3.5h7V15",
+            ),
+        )
+    }
+
     /** Read-aloud. */
     val Speaker: ImageVector by lazy {
         icon(1.7f, stroked = listOf("M4 9v6h3l5 4V5L7 9zM16 8.5a5 5 0 0 1 0 7"))

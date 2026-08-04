@@ -48,6 +48,8 @@ class Converters {
         ParamManifestEntity::class,
         McpServerEntity::class,
         PredictionRunEntity::class,
+        WorkflowEntity::class,
+        WorkflowRunEntity::class,
     ],
     version = DATABASE_VERSION,
     exportSchema = true,
@@ -66,6 +68,8 @@ abstract class OnDeviceDatabase : RoomDatabase() {
     abstract fun mcpServers(): McpServerDao
     abstract fun predictionRuns(): PredictionRunDao
 
+    abstract fun workflows(): WorkflowDao
+
     /** Versions, with a guard so a bump stays deliberate. */
     companion object {
         const val NAME = "ondevice.db"
@@ -76,6 +80,7 @@ abstract class OnDeviceDatabase : RoomDatabase() {
                 MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
                 MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
                 MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
+                MIGRATION_13_14,
             )
     }
 }
@@ -265,7 +270,7 @@ private val MIGRATION_9_10 = object : androidx.room.migration.Migration(9, 10) {
     }
 }
 
-internal const val DATABASE_VERSION = 13
+internal const val DATABASE_VERSION = 14
 
 /**
  * v11 — OAuth on `mcp_servers`.
@@ -314,5 +319,50 @@ private val MIGRATION_11_12 = object : androidx.room.migration.Migration(11, 12)
 private val MIGRATION_12_13 = object : androidx.room.migration.Migration(12, 13) {
     override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE `models` ADD COLUMN `parameterCount` INTEGER")
+    }
+}
+
+/**
+ * Workflows, and the runs they produced.
+ *
+ * Additive only: two new tables and their indices, nothing existing touched.
+ * A migration that rewrites a table the user's whole history lives in is a
+ * risk worth taking only when there is no other way, and here there is.
+ */
+private val MIGRATION_13_14 = object : androidx.room.migration.Migration(13, 14) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `workflows` (
+                `id` TEXT NOT NULL,
+                `name` TEXT NOT NULL,
+                `notes` TEXT NOT NULL,
+                `graphJson` TEXT NOT NULL,
+                `createdAt` INTEGER NOT NULL,
+                `updatedAt` INTEGER NOT NULL,
+                `lastRunAt` INTEGER,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_workflows_updatedAt` ON `workflows` (`updatedAt`)")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `workflow_runs` (
+                `id` TEXT NOT NULL,
+                `workflowId` TEXT NOT NULL,
+                `graphJson` TEXT NOT NULL,
+                `state` TEXT NOT NULL,
+                `startedAt` INTEGER NOT NULL,
+                `finishedAt` INTEGER,
+                `error` TEXT,
+                `errorHint` TEXT,
+                `nodeStatesJson` TEXT NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_workflow_runs_workflowId` ON `workflow_runs` (`workflowId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_workflow_runs_startedAt` ON `workflow_runs` (`startedAt`)")
     }
 }

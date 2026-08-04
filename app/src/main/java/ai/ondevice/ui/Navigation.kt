@@ -31,6 +31,9 @@ import ai.ondevice.ui.screens.SettingsScreen
 import ai.ondevice.ui.screens.ToolsScreen
 import ai.ondevice.ui.screens.VideoScreen
 import ai.ondevice.ui.screens.VoiceScreen
+import ai.ondevice.ui.screens.WorkflowEditScreen
+import ai.ondevice.ui.screens.WorkflowRunScreen
+import ai.ondevice.ui.screens.WorkflowScreen
 import ai.ondevice.ui.theme.NIcons
 
 /** Routes. */
@@ -53,6 +56,9 @@ object Routes {
     const val LIBRARY = "library"
     const val MODELS = "models"
     const val SETTINGS = "settings"
+
+    /** S15 — the sixth tab, which this file has been holding a slot for. */
+    const val WORKFLOW = "workflow"
 
     // pushes
     const val ADD_MODEL = "models/add"
@@ -101,6 +107,17 @@ object Routes {
 
     const val TOOLS = "settings/tools"
 
+    const val WORKFLOW_EDIT = "workflow/edit"
+
+    /**
+     * A run, scoped to the graph rather than to this entry.
+     *
+     * The same reasoning as Video: a workflow is several generations end to
+     * end, and an entry-scoped view model would take the run with it the
+     * moment somebody went back to the editor.
+     */
+    const val WORKFLOW_RUN = "workflow/run"
+
     /** A model id is `owner/repo:quant`, so it carries both a slash and a colon. */
     fun modelDetail(modelId: String) = "models/detail/${android.net.Uri.encode(modelId)}"
 }
@@ -121,6 +138,7 @@ val BottomDestinations = listOf(
     NavDestination("Chat", NIcons.Chat, Routes.CHAT),
     NavDestination("Visuals", NIcons.Image, Routes.IMAGE),
     NavDestination("Sounds", NIcons.Voice, Routes.VOICE),
+    NavDestination("Workflow", NIcons.Flow, Routes.WORKFLOW),
     NavDestination("Library", NIcons.Library, Routes.LIBRARY),
     NavDestination("Settings", NIcons.Settings, Routes.SETTINGS),
 )
@@ -226,6 +244,25 @@ fun OnDeviceApp(
                     navController.navigate(Routes.parameters(runtime, modelId))
                 },
             )
+        }
+        composable(Routes.WORKFLOW) {
+            WorkflowScreen(
+                currentRoute = currentRoute,
+                onNavigate = { navController.navigateToRoot(it) },
+                // The id is not a route argument: the session holds one
+                // workflow at a time, the way the media tabs hold one model,
+                // and the screen loads it before pushing the editor.
+                onOpen = { navController.navigate(Routes.WORKFLOW_EDIT) },
+            )
+        }
+        composable(Routes.WORKFLOW_EDIT) {
+            WorkflowEditScreen(
+                onBack = { navController.popBackStack() },
+                onRun = { navController.navigate(Routes.WORKFLOW_RUN) },
+            )
+        }
+        composable(Routes.WORKFLOW_RUN) {
+            WorkflowRunScreen(onBack = { navController.popBackStack() })
         }
         composable(Routes.LIBRARY) {
             LibraryScreen(

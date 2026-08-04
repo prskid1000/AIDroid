@@ -54,3 +54,11 @@ private fun Context.findActivity(): ViewModelStoreOwner {
     }
     error("No Activity ViewModelStoreOwner in this context")
 }
+
+/**
+ * A workflow run outlives the screen that started it, like every other run —
+ * and more so, because a graph is several generations end to end.
+ */
+@Composable
+fun activityWorkflowViewModel(): ai.ondevice.ui.vm.WorkflowViewModel =
+    hiltViewModel(viewModelStoreOwner = LocalContext.current.findActivity())
