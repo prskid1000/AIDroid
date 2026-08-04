@@ -294,7 +294,14 @@ class ImageViewModel @Inject constructor(
             val recording = recorder.start(viewModelScope)
             val liveJob = viewModelScope.launch {
                 recording.live.collect { trace ->
-                    _state.value = _state.value.copy(liveTrace = trace)
+                    // The runtime's buffer figures arrive during the run rather
+                    // than at the end of the load — the decoder reserves
+                    // nothing until the decode — so they are read at the
+                    // trace's rate.
+                    _state.value = _state.value.copy(
+                        liveTrace = trace,
+                        runtimeBuffers = diffusion.buffers,
+                    )
                 }
             }
             // Everything this run actually loads, not only the base model. A
@@ -890,7 +897,10 @@ class ImageViewModel @Inject constructor(
             val recording = recorder.start(viewModelScope)
             val liveJob = viewModelScope.launch {
                 recording.live.collect { trace ->
-                    _state.value = _state.value.copy(liveTrace = trace)
+                    _state.value = _state.value.copy(
+                        liveTrace = trace,
+                        runtimeBuffers = diffusion.buffers,
+                    )
                 }
             }
             try {
@@ -1026,9 +1036,19 @@ class ImageViewModel @Inject constructor(
                 }
         }
 
+    /**
+     * What these files weigh on disk.
+     *
+     * It used to read "≈X GB of weights", next to a heading saying "In
+     * memory", which made a statement about storage look like one about
+     * memory. It is not: the weights are memory-mapped, and how much of them
+     * is resident is a different question with a different — usually much
+     * smaller — answer. The card shows the measured figure above this one now,
+     * and this says what it is.
+     */
     private fun residentSize(): String? = diffusion.residentBytes
         .takeIf { it > 0L }
-        ?.let { "≈${String.format("%.2f", it / 1_000_000_000.0)} GB of weights" }
+        ?.let { "${String.format("%.2f", it / 1_000_000_000.0)} GB of files on disk" }
 
     private companion object {
         const val STEP_MILLIS = 3100L // the canvas' 3.1 s/it on CPU
@@ -1179,6 +1199,8 @@ data class ImageState(
      * nothing about.
      */
     val residentComponents: List<String> = emptyList(),
+    /** The runtime's own working-memory reservations — see RuntimeBuffer. */
+    val runtimeBuffers: List<ai.ondevice.engine.RuntimeBuffer> = emptyList(),
     /** Roughly what the above is costing, already formatted, or null when nothing is loaded. */
     val residentSize: String? = null,
     /** Why the app dropped the context on the user's behalf, when it did. */

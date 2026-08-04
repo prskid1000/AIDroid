@@ -360,6 +360,29 @@ class DiffusionEngine(
             }
     }.getOrDefault(emptyList())
 
+    /**
+     * The runtime's working-memory reservations, one line per module.
+     *
+     * Read fresh rather than cached: the decode's buffers are not reserved
+     * until the decode, so a value captured at load time would report half the
+     * run and call it the run.
+     */
+    val buffers: List<RuntimeBuffer>
+        get() = runCatching {
+            (json.parseToJsonElement(SdBridge.nativeBuffers()) as kotlinx.serialization.json.JsonArray)
+                .map { it.jsonObject }
+                .mapNotNull { row ->
+                    val what = row["what"]?.jsonPrimitive?.content.orEmpty().trim()
+                    if (what.isBlank()) return@mapNotNull null
+                    RuntimeBuffer(
+                        what = what,
+                        computeMb = row["computeMb"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: 0.0,
+                        cacheMb = row["cacheMb"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: 0.0,
+                    )
+                }
+                .filter { it.computeMb > 0.0 || it.cacheMb > 0.0 }
+        }.getOrDefault(emptyList())
+
     /** The loader's own account of where it has got to, or null between loads. */
     val loadStage: String?
         get() = if (SdBridge.available) SdBridge.nativeLoadStage().takeIf { it.isNotBlank() } else null
@@ -983,6 +1006,25 @@ data class ResidentPart(
     val role: AttachmentRole,
     val fileName: String,
     val bytes: Long,
+)
+
+/**
+ * One module's working memory, as the runtime reported it.
+ *
+ * Two figures because ggml reserves two things and reports them separately.
+ * [computeMb] is the graph allocator's reservation for a graph's intermediate
+ * tensors. [cacheMb] is a module's own persistent cache — for Wan's decoder,
+ * the feature maps a causal 3D convolution carries from one frame to the next,
+ * which is why it grows with frame count and the graph buffer does not.
+ *
+ * Neither includes the weights, the latents or the decoded frames, so neither
+ * is "what the run is using" and the pair does not become that by being added.
+ */
+data class RuntimeBuffer(
+    /** The module, in the runtime's own spelling — `wan_vae`, `t5`. */
+    val what: String,
+    val computeMb: Double,
+    val cacheMb: Double,
 )
 
 /** Which part of the run is happening. */

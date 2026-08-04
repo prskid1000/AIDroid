@@ -493,6 +493,15 @@ void note_phase(const std::string & line) {
 std::mutex g_loaded_mutex;
 std::vector<std::pair<std::string, std::string>> g_loaded;
 
+/** One module's two reservations — see note_buffer. */
+struct od_buffer {
+    std::string desc;
+    double compute_mb;
+    double cache_mb;
+};
+std::mutex g_buffers_mutex;
+std::vector<od_buffer> g_buffers;
+
 /** The runtime's word for a component, mapped to the app's role name. */
 const std::pair<const char *, const char *> COMPONENT_WORDS[] = {
     // Longest first: "llm vision" must not be read as "llm".
@@ -543,6 +552,60 @@ void note_component(const std::string & line) {
     else g_loaded.emplace_back(role, path);
 }
 
+/**
+ * The working memory the runtime reserves, kept rather than flashed past.
+ *
+ * ggml reports two allocations per module and reports each of them once, at
+ * reserve time, as a DEBUG line:
+ *
+ *     wan_vae compute buffer size: 851.60 MB(RAM)
+ *     wan_vae cache backend buffer size = 1893.12 MB(RAM) (34 tensors)
+ *
+ * Both reached the app already — every line goes through `note_stage`,
+ * whatever its level — but only as the *latest* line, so whichever happened to
+ * arrive last is the one that stuck on screen and the other was never seen.
+ * That is how a decode observed taking three gigabytes came to be described by
+ * a lone "851.60 MB": the graph allocator's reservation is one of four things
+ * in that figure, and the largest of the others was the one being overwritten.
+ *
+ * The cache is the interesting one for video. Wan's decoder is causal in time
+ * and carries a feature map forward across frames — thirty-four convolutions'
+ * worth for 2.2 — so it grows with frame count while the graph buffer does
+ * not.
+ *
+ * Keyed by module, so a second reserve for the same module replaces rather
+ * than accumulates.
+ *
+ * Returns whether the line was one of these, so the caller can keep it out of
+ * the stage text: a line kept as a figure of its own does not also need to be
+ * the sentence under it, and showing both put "qwen3 · graph 65 MB" directly
+ * above "qwen3 compute buffer size: 65.00 MB(RAM)".
+ */
+bool note_buffer(const std::string & line) {
+    // "<desc> compute buffer size: <n> MB(RAM)"
+    // "<desc> cache backend buffer size = <n> MB(RAM) (<k> tensors)"
+    const bool cache = line.find(" cache backend buffer size") != std::string::npos;
+    const auto at = cache ? line.find(" cache backend buffer size")
+                          : line.find(" compute buffer size");
+    if (at == std::string::npos || at == 0) return false;
+
+    const auto mb = line.find_first_of("0123456789", at);
+    if (mb == std::string::npos) return false;
+    const double megabytes = std::strtod(line.c_str() + mb, nullptr);
+    if (megabytes <= 0.0) return false;
+
+    const std::string desc = line.substr(0, at);
+    std::lock_guard<std::mutex> lock(g_buffers_mutex);
+    auto found = std::find_if(g_buffers.begin(), g_buffers.end(),
+                              [&](const od_buffer & e) { return e.desc == desc; });
+    if (found == g_buffers.end()) {
+        g_buffers.push_back(od_buffer{ desc, 0.0, 0.0 });
+        found = std::prev(g_buffers.end());
+    }
+    (cache ? found->cache_mb : found->compute_mb) = megabytes;
+    return true;
+}
+
 void note_stage(const char * text) {
     if (text == nullptr) return;
     std::string line(text);
@@ -557,6 +620,9 @@ void note_stage(const char * text) {
         line = line.substr(dash + 3);
     }
     if (line.empty()) return;
+    // Kept as a figure rather than as a sentence, so it does not also become
+    // the stage line and appear twice.
+    if (note_buffer(line)) return;
     {
         std::lock_guard<std::mutex> lock(g_stage_mutex);
         g_stage = line;
@@ -1250,6 +1316,29 @@ Java_ai_ondevice_engine_SdBridge_nativeLoadedComponents(JNIEnv * env, jobject) {
     return jni_from_string(env, dump_json(out));
 }
 
+/**
+ * The runtime's own working-memory reservations, as `[{"what","computeMb","cacheMb"}]`.
+ *
+ * Reported rather than estimated: every figure here is one the runtime
+ * printed. It is deliberately not summed with the weight sizes beside it —
+ * these are reservations per module, made and released at different points in
+ * a run, and adding them to the weights would produce a number nothing ever
+ * held at once.
+ */
+JNIEXPORT jstring JNICALL
+Java_ai_ondevice_engine_SdBridge_nativeBuffers(JNIEnv * env, jobject) {
+    std::lock_guard<std::mutex> lock(g_buffers_mutex);
+    json out = json::array();
+    for (const auto & b : g_buffers) {
+        out.push_back(json{
+            { "what",      b.desc      },
+            { "computeMb", b.compute_mb },
+            { "cacheMb",   b.cache_mb   },
+        });
+    }
+    return jni_from_string(env, dump_json(out));
+}
+
 JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeLoadStage(JNIEnv * env, jobject) {
     std::lock_guard<std::mutex> lock(g_stage_mutex);
@@ -1341,6 +1430,7 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
     { std::lock_guard<std::mutex> lock(g_version_mutex); g_version.clear(); }
     { std::lock_guard<std::mutex> lock(g_stage_mutex); g_stage.clear(); }
     { std::lock_guard<std::mutex> lock(g_loaded_mutex); g_loaded.clear(); }
+    { std::lock_guard<std::mutex> lock(g_buffers_mutex); g_buffers.clear(); }
     g_bare_diffusion.store(false);
 
     static std::once_flag once;

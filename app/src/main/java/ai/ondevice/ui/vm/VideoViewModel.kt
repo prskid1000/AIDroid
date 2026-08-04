@@ -459,7 +459,16 @@ class VideoViewModel @Inject constructor(
             val recording = recorder.start(viewModelScope)
             val liveJob = viewModelScope.launch {
                 recording.live.collect { trace ->
-                    _state.value = _state.value.copy(liveTrace = trace)
+                    // The buffers come along with the trace because they arrive
+                    // during the run, not at the end of the load: the decoder
+                    // reserves nothing until the decode. Read at the sampling
+                    // rate, which is slow enough to be free and often enough
+                    // that the decode's figures appear while the decode is
+                    // still the thing on screen.
+                    _state.value = _state.value.copy(
+                        liveTrace = trace,
+                        runtimeBuffers = diffusion.buffers,
+                    )
                 }
             }
             try {
@@ -647,6 +656,10 @@ class VideoViewModel @Inject constructor(
                     loadingModel = false,
                     previewBitmap = null,
                     liveTrace = null,
+                    // Read once more at the end: the decode's reservations are
+                    // made last, and a run that finished quickly could stop
+                    // before any live sample caught them.
+                    runtimeBuffers = diffusion.buffers,
                     // Kept for a cancelled run too. What the phone was doing
                     // for the ninety seconds before you gave up is the most
                     // useful thing on the screen at that point.
@@ -822,6 +835,8 @@ data class VideoState(
     val loadingWhat: List<String> = emptyList(),
     val loadingStage: String? = null,
     val residentComponents: List<String> = emptyList(),
+    /** The runtime's own working-memory reservations — see RuntimeBuffer. */
+    val runtimeBuffers: List<ai.ondevice.engine.RuntimeBuffer> = emptyList(),
     val step: Int = 0,
     val progressSteps: Int = 0,
     val secondsPerStep: Float = 0f,

@@ -45,6 +45,7 @@ import ai.ondevice.ui.BottomDestinations
 import ai.ondevice.ui.labelFor
 import ai.ondevice.ui.pickerLabels
 import ai.ondevice.ui.components.NBottomBar
+import ai.ondevice.ui.components.ResidentCard
 import ai.ondevice.ui.components.NBottomSheet
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
@@ -151,54 +152,22 @@ fun ImageScreen(
             // upscaler drops the denoiser, and the next generate spends minutes
             // reloading with nothing having said why.
             if (loadingNow || resident.isNotEmpty() || state.unloadReason != null) {
-                NCard(
-                    // NCard wraps its content, and this one holds short
-                    // monospace lines, so it drew narrower than everything
-                    // around it and read as a different kind of thing.
-                    Modifier.fillMaxWidth().padding(top = 10.dp),
-                    ring = if (loadingNow) NocturneColors.Accent800 else NocturneColors.Neutral700,
-                ) {
-                    Text(
-                        when {
-                            loadingNow -> "Loading into memory"
-                            resident.isEmpty() -> "Unloaded"
-                            else -> "In memory"
-                        },
-                        style = NocturneType.CardTitleSm,
-                    )
-                    (if (loadingNow) state.loadingWhat else resident).forEach {
-                        Text(it, style = NocturneType.MonoXs, color = NocturneColors.Accent300)
-                    }
-                    // Roughly, and said so: the weights dominate by enough that
-                    // their size on disk is the honest answer, and the runtime
-                    // reports no figure of its own to prefer over it.
-                    if (!loadingNow) {
-                        state.residentSize?.let {
-                            Text(it, style = NocturneType.MonoXs, color = NocturneColors.TextMuted)
-                        }
-                    }
-                    if (resident.isEmpty()) {
-                        state.unloadReason?.let {
-                            Text(
-                                it,
-                                style = NocturneType.Help,
-                                color = NocturneColors.TextMuted,
-                            )
-                        }
-                    }
+                ResidentCard(
+                    loadingNow = loadingNow,
+                    loadingWhat = state.loadingWhat,
+                    resident = resident,
+                    buffers = state.runtimeBuffers,
+                    // Measured first, file sizes second — see ResidentCard.
+                    measured = (state.liveTrace ?: state.lastTrace)
+                        ?.takeIf { !it.isEmpty }?.heldSummary,
+                    weightsTotal = state.residentSize,
+                    unloadReason = state.unloadReason,
                     // While loading this is the loader's progress; during a run
                     // it is the sampler's or the decoder's. Either way it is the
                     // runtime's own sentence and not a guess at one.
-                    (state.loadingStage ?: state.runStage)?.let {
-                        Text(
-                            it,
-                            style = NocturneType.Help,
-                            color = NocturneColors.TextMuted,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
+                    stage = state.loadingStage ?: state.runStage,
+                    modifier = Modifier.padding(top = 10.dp),
+                )
             }
 
             // A LoRA can fail without failing: it loads, costs its time and

@@ -44,6 +44,22 @@ object SdBridge {
     external fun nativeLoadStage(): String
 
     /**
+     * The runtime's own working-memory reservations, as
+     * `[{"what","computeMb","cacheMb"}]`.
+     *
+     * ggml prints these once each, at reserve time, and the app only ever kept
+     * the most recent line — so one module's graph buffer would sit on screen
+     * while the cache buffer that dwarfed it was overwritten and lost. Kept
+     * per module now, both figures, because a decode observed taking three
+     * gigabytes described by a lone "851.60 MB" is the app hiding the answer
+     * rather than reporting it.
+     *
+     * Not a total, and never to be added to the weight sizes: these are
+     * reserved and released at different points in a run.
+     */
+    external fun nativeBuffers(): String
+
+    /**
      * How many of each LoRA's tensors the last run actually applied, as
      * `[{"file","applied","total"}]`.
      *

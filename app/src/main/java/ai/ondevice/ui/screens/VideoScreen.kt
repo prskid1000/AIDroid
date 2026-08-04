@@ -33,6 +33,7 @@ import ai.ondevice.core.Fmt
 import ai.ondevice.ui.BottomDestinations
 import ai.ondevice.ui.components.GenerationProgress
 import ai.ondevice.ui.components.PickedImageField
+import ai.ondevice.ui.components.ResidentCard
 import ai.ondevice.ui.components.ResourceBlock
 import ai.ondevice.ui.components.NBottomBar
 import ai.ondevice.ui.components.NButton
@@ -148,27 +149,16 @@ fun VideoScreen(
             // What is in memory, and what the loader is doing while it fills.
             val loadingNow = state.loadingModel && state.loadingWhat.isNotEmpty()
             if (loadingNow || state.residentComponents.isNotEmpty()) {
-                NCard(
-                    Modifier.fillMaxWidth().padding(top = 10.dp),
-                    ring = if (loadingNow) NocturneColors.Accent800 else NocturneColors.Neutral700,
-                ) {
-                    Text(
-                        if (loadingNow) "Loading into memory" else "In memory",
-                        style = NocturneType.CardTitleSm,
-                    )
-                    (if (loadingNow) state.loadingWhat else state.residentComponents).forEach {
-                        Text(it, style = NocturneType.MonoXs, color = NocturneColors.Accent300)
-                    }
-                    (state.loadingStage ?: state.runStage)?.let {
-                        Text(
-                            it,
-                            style = NocturneType.Help,
-                            color = NocturneColors.TextMuted,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
+                ResidentCard(
+                    loadingNow = loadingNow,
+                    loadingWhat = state.loadingWhat,
+                    resident = state.residentComponents,
+                    buffers = state.runtimeBuffers,
+                    measured = (state.liveTrace ?: state.lastTrace)
+                        ?.takeIf { !it.isEmpty }?.heldSummary,
+                    stage = state.loadingStage ?: state.runStage,
+                    modifier = Modifier.padding(top = 10.dp),
+                )
             }
 
             state.loraOutcome.forEach { note ->
