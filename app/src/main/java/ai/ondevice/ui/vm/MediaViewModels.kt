@@ -241,24 +241,41 @@ class ImageViewModel @Inject constructor(
             ).firstOrNull()
             val runtimeInstalled = ai.ondevice.engine.SdBridge.available
             val p = SparseParams.parse(model?.paramOverridesJson)
+            // What this model starts at, before anyone has changed anything.
+            //
+            // Three sources, in order: what was stored against this model,
+            // what the manifest says for its architecture, and the screen's
+            // own fallback. Only the first is a decision somebody made; the
+            // middle one is what stops the app asserting a number nobody chose
+            // — a distilled checkpoint that wants CFG 1 was being handed the
+            // generic 7, which is both a worse picture and twice the work,
+            // because 7 makes the sampler run an unconditional pass as well.
+            val d = params.defaultsFor(
+                RUNTIME_ID,
+                Modality.DIFFUSION.name.lowercase(),
+                model?.architecture,
+            )
             _state.value = _state.value.copy(
                 model = model,
                 runtimeInstalled = runtimeInstalled,
                 bareDenoiser = _state.value.bareDenoiser ?: presumedBare(model),
-                steps = p.int("steps") ?: _state.value.steps,
-                cfgScale = p.float("cfg_scale") ?: _state.value.cfgScale,
-                width = p.int("width") ?: _state.value.width,
-                height = p.int("height") ?: _state.value.height,
-                strength = p.float("strength") ?: _state.value.strength,
-                samplingMethod = p.string("sampling_method") ?: _state.value.samplingMethod,
-                schedule = p.string("schedule") ?: _state.value.schedule,
-                clipSkip = p.int("clip_skip") ?: _state.value.clipSkip,
-                vaeTiling = p.bool("vae_tiling") ?: _state.value.vaeTiling,
+                steps = p.int("steps") ?: d.int("steps") ?: _state.value.steps,
+                cfgScale = p.float("cfg_scale") ?: d.float("cfg_scale") ?: _state.value.cfgScale,
+                width = p.int("width") ?: d.int("width") ?: _state.value.width,
+                height = p.int("height") ?: d.int("height") ?: _state.value.height,
+                strength = p.float("strength") ?: d.float("strength") ?: _state.value.strength,
+                samplingMethod = p.string("sampling_method")
+                    ?: d.string("sampling_method") ?: _state.value.samplingMethod,
+                schedule = p.string("schedule") ?: d.string("schedule") ?: _state.value.schedule,
+                clipSkip = p.int("clip_skip") ?: d.int("clip_skip") ?: _state.value.clipSkip,
+                vaeTiling = p.bool("vae_tiling") ?: d.bool("vae_tiling") ?: _state.value.vaeTiling,
                 // Both are editable on All Parameters as well, so the sheet has
                 // to start from what that screen last wrote rather than from
                 // the built-in default.
-                controlStrength = p.float("control_strength") ?: _state.value.controlStrength,
-                styleStrength = p.float("ip_adapter_strength") ?: _state.value.styleStrength,
+                controlStrength = p.float("control_strength")
+                    ?: d.float("control_strength") ?: _state.value.controlStrength,
+                styleStrength = p.float("ip_adapter_strength")
+                    ?: d.float("ip_adapter_strength") ?: _state.value.styleStrength,
             )
             checkEnvelope()
         }
@@ -411,7 +428,19 @@ class ImageViewModel @Inject constructor(
                     }
                 }
 
-                val params = currentParams(seed)
+                // What is stored against this model, with the sheet's own
+                // values on top.
+                //
+                // The sheet used to be the whole of it, so every parameter it
+                // does not itself render was dropped on the way to the runtime:
+                // flow shift, eta, the guidance settings, the skip-layer ones —
+                // everything All Parameters can set and this screen has no
+                // control for. They were saved to the model, shown as saved,
+                // and never sent. The sheet still wins for what it does render,
+                // because it was seeded from the same store and is where a
+                // change made this minute lands.
+                val params = SparseParams.parse(_state.value.model?.paramOverridesJson)
+                    .overlaidWith(currentParams(seed))
                 diffusion.generate(
                     ai.ondevice.engine.DiffusionRequest(
                         params = params,

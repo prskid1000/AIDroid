@@ -91,6 +91,7 @@ class VideoViewModel @Inject constructor(
                     models.firstOrNull { it.id == current.id }
                 } ?: models.firstOrNull()
                 _state.value = _state.value.copy(models = models, model = chosen)
+                seedFrom(chosen)
                 refreshAttachments(all)
             }
         }
@@ -110,6 +111,41 @@ class VideoViewModel @Inject constructor(
                 )
             }
         }
+    }
+
+    /**
+     * Where this model's form starts, before anyone has touched it.
+     *
+     * This screen had no such thing: every slider came up at the number
+     * written into [VideoState] and stayed there, so a model with settings
+     * saved against it showed twenty steps because twenty is what the Kotlin
+     * default says — the stored value was on the model, visible on All
+     * Parameters, and ignored here.
+     *
+     * Three sources, most specific first: what was stored against this model,
+     * what the manifest says for its architecture, and the state's own
+     * fallback. Only the first is somebody's decision; the second is what
+     * keeps the app from asserting numbers it does not own.
+     */
+    private suspend fun seedFrom(model: ModelEntity?) {
+        val p = SparseParams.parse(model?.paramOverridesJson)
+        val d = params.defaultsFor(
+            RUNTIME_ID,
+            Modality.DIFFUSION.name.lowercase(),
+            model?.architecture,
+        )
+        val s = _state.value
+        _state.value = s.copy(
+            steps = p.int("steps") ?: d.int("steps") ?: s.steps,
+            cfgScale = p.float("cfg_scale") ?: d.float("cfg_scale") ?: s.cfgScale,
+            width = p.int("width") ?: d.int("width") ?: s.width,
+            height = p.int("height") ?: d.int("height") ?: s.height,
+            frames = p.int("video_frames") ?: d.int("video_frames") ?: s.frames,
+            fps = p.int("fps") ?: d.int("fps") ?: s.fps,
+            vaeTiling = p.bool("vae_tiling") ?: d.bool("vae_tiling") ?: s.vaeTiling,
+            controlStrength = p.float("vace_strength")
+                ?: d.float("vace_strength") ?: s.controlStrength,
+        )
     }
 
     /**
@@ -345,7 +381,11 @@ class VideoViewModel @Inject constructor(
             clip = null,
             recognisedAs = null,
         )
-        viewModelScope.launch { db.models().touch(model.id, System.currentTimeMillis()) }
+        viewModelScope.launch {
+            // The new model's own settings, not the last one's left on screen.
+            seedFrom(model)
+            db.models().touch(model.id, System.currentTimeMillis())
+        }
     }
 
     /**
@@ -561,7 +601,12 @@ class VideoViewModel @Inject constructor(
 
                 diffusion.generateVideo(
                     VideoRequest(
-                        params = currentParams(seed),
+                        // Stored first, the sheet on top — see the still
+                        // screen's copy. Flow shift is the one that bit here:
+                        // saved against the model, shown as saved, and never
+                        // sent, because this screen has no control for it.
+                        params = SparseParams.parse(model.paramOverridesJson)
+                            .overlaidWith(currentParams(seed)),
                         initImageUri = _state.value.firstFrameUri,
                         endImageUri = _state.value.lastFrameUri,
                         controlImageUri = _state.value.controlImageUri,

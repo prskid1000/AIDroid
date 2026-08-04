@@ -105,6 +105,34 @@ class ParamRepository(
         .toSet()
 
     /**
+     * What each parameter starts at for *this* model, before anyone changes it.
+     *
+     * The same `appliesTo` gate as [applicableKeys], read for its defaults
+     * rather than its keys — so a value that differs by architecture is
+     * expressed where every other per-architecture fact already lives, and not
+     * as a constant in a view model. The manifest can already carry two entries
+     * for one key under different gates; this is what makes the second one
+     * count.
+     *
+     * It sits between the model's own overrides and the screen's built-in
+     * fallback: a stored value is a decision somebody made and always wins,
+     * this is the starting point, and the fallback catches a key the manifest
+     * says nothing about. Nothing here moves a setting after the fact — the
+     * defaults apply to a form nobody has touched, which is the difference
+     * between starting right and changing under you.
+     */
+    suspend fun defaultsFor(
+        runtimeId: String,
+        modality: String?,
+        architecture: String?,
+    ): SparseParams = SparseParams(
+        specsFor(manifest(), runtimeId)
+            .filter { appliesToMatches(it, modality, architecture) }
+            .mapNotNull { spec -> spec.default?.let { spec.key to it } }
+            .toMap(),
+    )
+
+    /**
      * The parameter set for a screen, each row carrying why it cannot be
      * edited — or null, when it can.
      *
