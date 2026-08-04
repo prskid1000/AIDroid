@@ -867,7 +867,17 @@ data class VideoState(
     val lastTrace: ai.ondevice.engine.ResourceTrace? = null,
     val elapsedMillis: Long = 0,
     val runtimeInstalled: Boolean = false,
-    val prompt: String = "",
+    /**
+     * Something to press Generate on, the way the still screen has one.
+     *
+     * A clip is described by its motion as much as its subject — the help
+     * under this field says so and the screen then opened empty, leaving the
+     * one instruction that matters unillustrated. So the default names a
+     * subject, a movement and a camera, which is the shape a prompt for this
+     * model wants.
+     */
+    val prompt: String = "a hot-air balloon rising through morning mist over a green valley, " +
+        "camera tilting slowly up to follow it",
     val negativePrompt: String = "",
     /** Upstream's default: a second at 16 fps, which is the shortest clip worth watching. */
     val frames: Int = 16,
