@@ -229,6 +229,7 @@ class DiffusionEngine(
             // variants disagree: a T2V one drops a first frame in silence.
             val desc = SdBridge.nativeModelDesc(newHandle).takeIf { it.isNotBlank() }
             modelDesc = desc
+            android.util.Log.i(TAG, "model desc read: '${desc ?: ""}'")
             supportsStartFrame = supportsVideo && VideoConditioning.supportsStartFrame(desc)
             supportsEndFrame = supportsVideo && VideoConditioning.supportsEndFrame(desc)
             // What the loader decided this checkpoint is, now that it has read

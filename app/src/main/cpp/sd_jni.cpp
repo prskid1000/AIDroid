@@ -710,6 +710,7 @@ void note_model_desc(const std::string & line) {
 
     std::lock_guard<std::mutex> lock(g_model_desc_mutex);
     g_model_desc = line;
+    SLOGI("model desc noted: '%s'", line.c_str());
 }
 
 void set_last_error(const char * text) {
