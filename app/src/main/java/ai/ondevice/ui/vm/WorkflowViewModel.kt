@@ -209,7 +209,7 @@ class WorkflowViewModel @Inject constructor(
         /** Settings that are prose, whatever they happen to look like. */
         val TEXT_KEYS = setOf(
             "text", "template", "pattern", "path", "model", "shape",
-            "voice", "provider", "separator", "by", "condition", "mode", "tool",
+            "voice", "provider", "separator", "by", "condition", "mode", "tool", "script",
             "arguments", "portType",
         )
     }

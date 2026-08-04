@@ -252,10 +252,34 @@ class WorkflowRunner @Inject constructor(
                 }
 
                 NodeKind.Script -> {
-                    val rendered = WorkflowTemplate.render(node.params.string("template", "")) { ref ->
-                        outputs[ref]?.let { it.text.ifBlank { it.path.orEmpty() } }
+                    /*
+                     * Two languages, and which one is used is the author's
+                     * choice rather than a guess at their intent.
+                     *
+                     * The template covers what most steps want — put this
+                     * step's answer inside that sentence — and reads as the
+                     * text it produces, which a person editing a prompt can
+                     * see at a glance. JavaScript covers the rest: anything
+                     * with a loop, a condition, or a shape to build.
+                     *
+                     * Keeping both is not indecision. A template that has to
+                     * be written as a program to interpolate one value is a
+                     * worse template, and a program that has to be written as
+                     * a template to branch is not a program at all.
+                     */
+                    val script = node.params.string("script")
+                    val text = if (script.isNotBlank()) {
+                        ai.ondevice.engine.QuickJsBridge.eval(
+                            source = script,
+                            steps = stepsFor(outputs),
+                            timeoutMillis = node.params.int("timeout_ms", 2_000).toLong(),
+                        ).getOrThrow()
+                    } else {
+                        WorkflowTemplate.render(node.params.string("template", "")) { ref ->
+                            outputs[ref]?.let { it.text.ifBlank { it.path.orEmpty() } }
+                        }
                     }
-                    put(outputs, node, "text", PortValue.text(rendered))
+                    put(outputs, node, "text", PortValue.text(text))
                 }
 
                 NodeKind.Extract -> {
@@ -724,6 +748,29 @@ class WorkflowRunner @Inject constructor(
         outputs[node.id] = value
     }
 
+    /**
+     * Everything produced so far, in the shape a script sees it.
+     *
+     * `steps["2"].text` and `steps["2"].path`, keyed by the step's own id and
+     * by `id:output` both, so a script can name a value the same way a slot
+     * binding does. Paths and not bytes, for the reason PortType gives.
+     */
+    private fun stepsFor(outputs: Map<String, PortValue>): kotlinx.serialization.json.JsonObject =
+        kotlinx.serialization.json.JsonObject(
+            outputs.mapValues { (_, value) ->
+                kotlinx.serialization.json.JsonObject(
+                    mapOf(
+                        "type" to kotlinx.serialization.json.JsonPrimitive(value.type.name),
+                        "text" to kotlinx.serialization.json.JsonPrimitive(value.text),
+                        "path" to kotlinx.serialization.json.JsonPrimitive(value.path.orEmpty()),
+                        "paths" to kotlinx.serialization.json.JsonArray(
+                            value.paths.map { kotlinx.serialization.json.JsonPrimitive(it) },
+                        ),
+                    ),
+                )
+            },
+        )
+
     /** What is bound to a slot, or null when nothing is. */
     private fun resolve(
         node: NodeRecord,
@@ -755,6 +802,6 @@ class WorkflowRunner @Inject constructor(
         const val MAX_REPEATS = 32
 
         /** Editor-only keys, kept out of what reaches an engine. */
-        val BOOKKEEPING = setOf("model", "shape", "portType", "times", "by", "separator", "template", "pattern", "condition", "mode", "tool")
+        val BOOKKEEPING = setOf("model", "shape", "portType", "times", "by", "separator", "template", "pattern", "condition", "mode", "tool", "script", "timeout_ms")
     }
 }

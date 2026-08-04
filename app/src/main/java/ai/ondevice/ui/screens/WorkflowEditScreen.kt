@@ -431,16 +431,45 @@ private fun StepSettings(
         }
 
         NodeKind.Script -> {
-            SectionKicker("Template", Modifier.padding(top = 12.dp, bottom = 4.dp))
+            // Two ways to write this step, and the editor says which is in
+            // force rather than deciding for you: a script, when there is one,
+            // otherwise the template.
+            val usingScript = value("script").isNotBlank()
+            SectionKicker(
+                if (usingScript) "Script" else "Template",
+                Modifier.padding(top = 12.dp, bottom = 4.dp),
+            )
+            if (!usingScript) {
+                NTextArea(
+                    value = value("template"),
+                    onValueChange = { viewModel.setParam(node.id, "template", it) },
+                    placeholder = "A summary of {{ 1.text }}",
+                    minHeight = 96.dp,
+                )
+                NHelp(
+                    "Put an earlier step's answer inside a sentence — {{ 2.text }}. There is " +
+                        "trim, join, split, replace, match, slice, upper, lower and length, " +
+                        "and arithmetic.",
+                    Modifier.padding(top = 4.dp),
+                )
+            }
             NTextArea(
-                value = value("template"),
-                onValueChange = { viewModel.setParam(node.id, "template", it) },
-                placeholder = "A summary of {{ 1.text }}",
-                minHeight = 96.dp,
+                value = value("script"),
+                onValueChange = { viewModel.setParam(node.id, "script", it) },
+                placeholder = "steps[\"2\"].text.split(\".\")[0]",
+                minHeight = if (usingScript) 140.dp else 84.dp,
+                modifier = Modifier.padding(top = if (usingScript) 0.dp else 10.dp),
             )
             NHelp(
-                "Refer to an earlier step by its number — {{ 2.text }}. There is trim, join, " +
-                    "split, replace, match, slice, upper, lower and length, and arithmetic.",
+                if (ai.ondevice.engine.QuickJsBridge.available) {
+                    "JavaScript, for anything with a loop or a condition in it. Earlier steps " +
+                        "are in `steps` — steps[\"2\"].text, steps[\"2\"].path. The last " +
+                        "expression is the answer; an object or a list comes back as JSON. " +
+                        "There is no filesystem and no network: the code that would reach them " +
+                        "is not in this build. Anything here overrides the template above."
+                } else {
+                    "This build has no script engine, so only the template above runs."
+                },
                 Modifier.padding(top = 4.dp),
             )
         }

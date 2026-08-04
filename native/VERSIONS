@@ -18,8 +18,9 @@ llama.cpp             https://github.com/ggml-org/llama.cpp              b10175 
 whisper.cpp           https://github.com/ggml-org/whisper.cpp            v1.9.1  f049fff95a089aa9969deb009cdd4892b3e74916
 stable-diffusion.cpp  https://github.com/leejet/stable-diffusion.cpp     master  22516991cbdf725e69b0b4a87e52ca16cce07c2d
 espeak-ng             https://github.com/espeak-ng/espeak-ng             1.52.0  4870adfa25b1a32b4361592f1be8a40337c58d6c
+quickjs               https://github.com/quickjs-ng/quickjs              v0.16.0 10b99693cdc3f37cdf05114bc2d5225de495c4a3
 
-# These four are the whole list. OpenCL-Headers and OpenCL-ICD-Loader were
+# These five are the whole list. OpenCL-Headers and OpenCL-ICD-Loader were
 # vendored here too, for ggml's GPU backend; the app is CPU-only now and both
 # are gone. `native/OpenCL-*` left behind by an older checkout can be deleted.
 #
@@ -33,3 +34,19 @@ espeak-ng             https://github.com/espeak-ng/espeak-ng             1.52.0 
 # Kokoro's weights are not vendored at all. They are an ONNX graph downloaded
 # through the in-app resolver like any other model, and ONNX Runtime arrives as
 # a Maven AAR rather than a source checkout.
+#
+# quickjs is the workflow Script step's language, and the reason it is here
+# rather than a Java-side engine is that it is the only option that gives a
+# real language *and* a bound on what it can do. It has a memory limit, an
+# interrupt callback that can stop a runaway loop between opcodes, and — the
+# part that matters most — its standard library is a separate translation unit.
+# Four sources are compiled here: dtoa, libregexp, libunicode and quickjs. The
+# fifth, quickjs-libc.c, is where reading files, spawning processes and opening
+# sockets live, and leaving it out is not an optimisation. It is the sandbox.
+# A script in a workflow gets arithmetic, strings, regular expressions, JSON
+# and the outputs of earlier steps, and there is no API surface through which
+# it could get anything else.
+#
+# quickjs-ng rather than Bellard's original: it is the maintained fork, it
+# cross-compiles to Android without patching, and its CMake names the four
+# sources above as the library, which is what this build lists.

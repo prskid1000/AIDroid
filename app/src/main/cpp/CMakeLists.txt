@@ -229,6 +229,53 @@ target_link_libraries(ondevice_whisper PRIVATE whisper android log)
 target_link_options(ondevice_whisper PRIVATE -Wl,--gc-sections)
 
 # ---------------------------------------------------------------------------
+# QuickJS — the workflow Script step's language.
+#
+# Built from an explicit source list rather than through upstream's CMake, for
+# the same reason espeak-ng below is: their project builds a good deal we do
+# not want — an interpreter binary, a compiler, a test runner — and listing the
+# library's four files is both smaller and clearer about what ships.
+#
+# Those four are exactly what upstream's own `qjs_sources` names. The fifth
+# file in that directory, quickjs-libc.c, is the standard library: files,
+# processes, sockets, a module loader. It is not compiled here, and that
+# omission is the sandbox. There is no API through which a script could reach
+# the filesystem, because the code that would do it is not linked in.
+#
+# What bounds it beyond that: a memory limit set on the runtime, and an
+# interrupt callback QuickJS invokes between opcodes, which is what makes a
+# runaway `while (true)` stoppable rather than fatal.
+set(QUICKJS_DIR "${VENDOR_DIR}/quickjs")
+
+add_library(quickjs STATIC
+    "${QUICKJS_DIR}/quickjs.c"
+    "${QUICKJS_DIR}/libregexp.c"
+    "${QUICKJS_DIR}/libunicode.c"
+    "${QUICKJS_DIR}/dtoa.c"
+)
+
+target_include_directories(quickjs PUBLIC "${QUICKJS_DIR}")
+target_compile_definitions(quickjs PRIVATE _GNU_SOURCE)
+target_compile_options(quickjs PRIVATE
+    -Wno-implicit-fallthrough
+    -Wno-sign-compare
+    -Wno-unused-but-set-variable
+    -Wno-unused-parameter
+    -ffunction-sections
+    -fdata-sections
+)
+
+add_library(ondevice_quickjs SHARED quickjs_jni.cpp jni_util.cpp)
+
+target_include_directories(ondevice_quickjs PRIVATE
+    "${QUICKJS_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+target_link_libraries(ondevice_quickjs PRIVATE quickjs android log)
+target_link_options(ondevice_quickjs PRIVATE -Wl,--gc-sections)
+
+# ---------------------------------------------------------------------------
 # espeak-ng — the grapheme-to-phoneme front end Kokoro needs.
 #
 # Upstream's own CMake is not usable here. Its `data.cmake` compiles the
