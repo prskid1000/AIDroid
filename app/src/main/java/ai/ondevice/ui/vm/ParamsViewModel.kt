@@ -99,9 +99,22 @@ class ParamsViewModel @Inject constructor(
      * Image screen, which reads them off the base model, never saw them.
      */
     private suspend fun modelFor(runtimeId: String) = when (runtimeId) {
+        // A vision model is a text model that can also see, and llama.cpp is
+        // what runs it — which the fallback did not know. Asking only for
+        // TEXT meant a device whose one chat model was a vision model had no
+        // model for this runtime at all: the screen said none was installed
+        // and refused to save, while the Chat tab was talking to it. Chat has
+        // always asked for both.
+        //
+        // Add-ons are excluded here as they are for every other runtime. A
+        // projector is a row in this table with a modality of its own, and
+        // "the first text model" could be one.
         RuntimeRegistry.LLAMA ->
             engines.state.value.loaded?.modelId?.let { db.models().get(it) }
-                ?: db.models().observeInstalledByModality(Modality.TEXT).first().firstOrNull()
+                ?: db.models().getInstalled().firstOrNull {
+                    it.attachmentRole == null &&
+                        (it.modality == Modality.TEXT || it.modality == Modality.VISION)
+                }
         else -> db.models().observeInstalledByModality(modalityOf(runtimeId)).first()
             .firstOrNull { it.attachmentRole == null }
     }
