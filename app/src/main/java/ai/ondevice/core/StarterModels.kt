@@ -538,12 +538,30 @@ object StarterModels {
         // LTX-2.3 had a card and a bundle here and no longer does.
         //
         // It is the only architecture that makes sound, which is the whole
-        // reason it was worth trying, and it wants about 14 GB of weights
-        // before a single buffer is allocated — against roughly 9.9 GB free on
-        // the phone this was measured on. A starter card is a recommendation,
-        // and recommending a download that ends in "won't fit" after seven
-        // gigabytes is not one. Nothing stops anyone pasting the repo id; what
-        // is gone is the app suggesting it.
+        // reason it was worth trying.
+        //
+        // The reason first written here was that its weights sum to about
+        // 14 GB against roughly 9.9 GB free, and that reasoning was wrong.
+        // Weights are memory-mapped, so the sum is never committed: they are
+        // clean file-backed pages the kernel reclaims as soon as nothing needs
+        // them. Measured on this device, Wan reports 10.7 GB of params and
+        // sampled at 3.94 GB resident, because the 6.1 GB encoder is finished
+        // with after conditioning and quietly goes away. Staged the same way,
+        // LTX-2.3 peaks around 9-10 GB and would fit.
+        //
+        // What it does not survive is the re-reading. Eviction is free only
+        // for a page nothing wants again, and the denoiser is read every step:
+        // 7.9 GB of it at the one quant small enough to consider, against
+        // 15.6 GB shared with the rest of Android. The pages dropped between
+        // steps are the pages the next step needs, so each step turns into a
+        // multi-gigabyte read from flash. That is on top of a 22B model at
+        // Q2_K, and a native resolution several times the one this phone
+        // manages for a 5B.
+        //
+        // So it stays out, on speed rather than on capacity — and it is worth
+        // measuring rather than assuming, because the first answer here was
+        // arithmetic rather than a measurement. Nothing stops anyone pasting
+        // the repo id; what is gone is the app suggesting it.
     )
 
     /** Every add-on, flattened, for whatever still wants one list. */
