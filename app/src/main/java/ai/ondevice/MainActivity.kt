@@ -1,6 +1,7 @@
 package ai.ondevice
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -9,6 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import ai.ondevice.ui.OnDeviceApp
@@ -48,16 +50,33 @@ class MainActivity : ComponentActivity() {
             askForNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
-        val startDestination = intent?.getStringExtra(EXTRA_DESTINATION)
+        destination.value = intent?.getStringExtra(EXTRA_DESTINATION)
 
         setContent {
             NocturneTheme {
                 OnDeviceApp(
                     modifier = Modifier.fillMaxSize().background(NocturneColors.Bg),
-                    initialDestination = startDestination,
+                    initialDestination = destination.value,
                 )
             }
         }
+    }
+
+    /**
+     * Where a notification asked us to go, as state rather than a start value.
+     *
+     * The activity is `singleTask` now, so a tap on a notification reuses the
+     * running instance and `onCreate` does not run again — which is the point,
+     * because rebuilding it destroyed the view models holding a generation and
+     * cancelled it. The cost is that an extra read once at startup would stop
+     * working: the intent arrives here instead.
+     */
+    private val destination = mutableStateOf<String?>(null)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.getStringExtra(EXTRA_DESTINATION)?.let { destination.value = it }
     }
 
     companion object {

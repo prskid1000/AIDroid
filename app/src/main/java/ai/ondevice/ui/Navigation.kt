@@ -1,6 +1,7 @@
 package ai.ondevice.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -133,6 +134,19 @@ fun OnDeviceApp(
 ) {
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
+
+    // A notification tapped while the app is already open arrives as a change
+    // to this value rather than as a start destination: the activity is
+    // singleTask, so the running instance is reused and the NavHost was built
+    // with its start route minutes ago. Without this the download notification
+    // would open the app and land wherever it was left.
+    LaunchedEffect(initialDestination) {
+        if (initialDestination == ai.ondevice.MainActivity.DEST_DOWNLOADS &&
+            currentRoute != null && currentRoute != Routes.DOWNLOADS
+        ) {
+            navController.navigate(Routes.DOWNLOADS)
+        }
+    }
 
     NavHost(
         navController = navController,

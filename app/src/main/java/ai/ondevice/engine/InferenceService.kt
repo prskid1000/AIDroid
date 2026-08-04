@@ -97,7 +97,14 @@ class InferenceService : LifecycleService() {
         val open = PendingIntent.getActivity(
             this,
             0,
-            Intent(this, MainActivity::class.java),
+            // Reuse the running instance rather than stacking a new one.
+            // With the activity's default launch mode a tap built a second
+            // MainActivity and destroyed the first, which cleared the
+            // activity-scoped view models and cancelled the generation they
+            // were holding — so opening the app from the notification that
+            // said it was generating is what stopped it generating.
+            Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         return Notification.Builder(this, CHANNEL_ID)
