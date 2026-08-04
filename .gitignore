@@ -17,6 +17,7 @@ native/llama.cpp/
 native/whisper.cpp/
 native/stable-diffusion.cpp/
 native/espeak-ng/
+native/quickjs/
 
 # No longer fetched — the app is CPU-only. Still ignored so an older checkout
 # does not suddenly offer 200 MB of Khronos source and Qualcomm DSP images for
