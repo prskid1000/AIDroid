@@ -88,9 +88,21 @@ data class ResourceTrace(
             if (peakRssMb > currentRssMb) append(" · Peak ${gb(peakRssMb)}")
             // Which way it is going, named rather than signed: a minus in front
             // of a memory figure reads as an error more often than as a fall.
+            //
+            // A rise is only worth saying when there was something to rise
+            // from. Said unconditionally it produced "Holding 6.63 GB · Adding
+            // 6.40 GB" — two large numbers a fifth of a gigabyte apart, which
+            // is the same fact twice and reads as the two disagreeing. When the
+            // app was idle before the run, "Holding" has already said it.
+            //
+            // A fall always earns its place. It is the one thing about this
+            // screen that surprises people: the process holding less part-way
+            // through a run than at the start of it, because the weights are
+            // memory-mapped and the encoder's pages went back to the kernel.
             when {
-                netRssMb > 0 -> append(" · Adding ${gb(netRssMb)}")
                 netRssMb < 0 -> append(" · Removing ${gb(-netRssMb)}")
+                netRssMb > 0 && baselineRssMb * 5 >= currentRssMb ->
+                    append(" · Adding ${gb(netRssMb)}")
             }
         }
 
