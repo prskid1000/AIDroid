@@ -21,6 +21,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -35,6 +36,8 @@ class WorkflowViewModel @Inject constructor(
     private val db: OnDeviceDatabase,
     private val runner: WorkflowRunner,
     private val recorder: ai.ondevice.engine.ResourceRecorder,
+    private val toolProviders: ai.ondevice.tools.ToolProviderFactory,
+    private val prefs: ai.ondevice.data.prefs.AppPrefs,
 ) : ViewModel() {
 
     private val _state get() = session.state
@@ -67,6 +70,17 @@ class WorkflowViewModel @Inject constructor(
     /** Every installed model, so a step can be pointed at one. */
     suspend fun installedModels(): List<ModelEntity> =
         db.models().getInstalled().filter { it.attachmentRole == null }
+
+    /**
+     * The tools a Tool step may call — the same set chat is offered.
+     *
+     * Asked of the registry rather than listed here, so a step can call an
+     * MCP server's tool the moment that server is connected, with nothing in
+     * this file to keep in step.
+     */
+    suspend fun availableTools(): List<ai.ondevice.engine.ToolSpec> = runCatching {
+        toolProviders.registry(enabled = prefs.enabledToolProviders.first()).specs()
+    }.getOrDefault(emptyList())
 
     // ── editing ──────────────────────────────────────────────────────────
 

@@ -5,6 +5,7 @@ import ai.ondevice.core.SparseParams
 import ai.ondevice.core.workflow.NodeKind
 import ai.ondevice.core.workflow.NodeRecord
 import ai.ondevice.core.workflow.PortType
+import ai.ondevice.core.workflow.Spans
 import ai.ondevice.core.workflow.WorkflowGraph
 import ai.ondevice.core.workflow.WorkflowTemplate
 import ai.ondevice.data.ModelStorage
@@ -31,13 +32,48 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /** One value travelling along an edge. Paths, never pixels — see PortType. */
-data class PortValue(val type: PortType, val text: String = "", val paths: List<String> = emptyList()) {
+data class PortValue(
+    val type: PortType,
+    val text: String = "",
+    val paths: List<String> = emptyList(),
+    /**
+     * For a LIST, what one of its items is.
+     *
+     * A list carries its items in [paths] whatever they are, because a list of
+     * four file paths and a list of four paragraphs are the same shape. They
+     * are not the same *kind*, though, and nothing downstream could tell them
+     * apart: a for-each over split text handed each paragraph on as a file
+     * path, so the model reading it got an empty prompt and said so in a way
+     * that sounded like a different problem entirely. The element type travels
+     * with the value — a port that takes "many of whatever this is" is the only
+     * kind this app needs, so the distinction cannot live on the port.
+     */
+    val elementType: PortType = PortType.FILE,
+) {
     val path: String? get() = paths.firstOrNull()
+
+    /**
+     * What this is worth as text, whichever half it arrived in.
+     *
+     * A list reads as all of it. Taking the first item was the obvious
+     * reading of "the path", and it meant a template naming a list quietly
+     * showed one entry of four with nothing to say the rest had been dropped.
+     */
+    val asText: String get() = when {
+        text.isNotBlank() -> text
+        type == PortType.LIST -> paths.joinToString(", ")
+        else -> path.orEmpty()
+    }
+
+    /** One item of a list, as the kind of value it actually is. */
+    fun item(value: String): PortValue =
+        if (elementType == PortType.TEXT) text(value) else file(elementType, value)
 
     companion object {
         fun text(value: String) = PortValue(PortType.TEXT, text = value)
         fun file(type: PortType, path: String) = PortValue(type, paths = listOf(path))
-        fun list(paths: List<String>) = PortValue(PortType.LIST, paths = paths)
+        fun list(paths: List<String>, elementType: PortType = PortType.FILE) =
+            PortValue(PortType.LIST, paths = paths, elementType = elementType)
     }
 }
 
@@ -100,6 +136,20 @@ class WorkflowRunner @Inject constructor(
     var activeCancel: (() -> Unit)? = null
         private set
 
+    /** The seed a Batch has set for the pass being run, if one has. */
+    private var batchSeed: Long? = null
+
+    /** Everything one run needs, so the recursion carries one parameter. */
+    private class RunContext(
+        val graph: WorkflowGraph,
+        val outputs: MutableMap<String, PortValue>,
+        val outDir: File,
+        val models: Map<String, ModelEntity>,
+        val reporter: RunReporter,
+    ) {
+        val types: List<String> = graph.nodes.map { it.type }
+    }
+
     suspend fun run(
         runId: String,
         graph: WorkflowGraph,
@@ -108,9 +158,35 @@ class WorkflowRunner @Inject constructor(
         val models = db.models().getInstalled().associateBy { it.id }
         val outputs = LinkedHashMap<String, PortValue>()
         val outDir = File(storage.root(), "workflows/$runId").apply { mkdirs() }
+        batchSeed = null
+        execute(RunContext(graph, outputs, outDir, models, reporter), 0, graph.nodes.size, "")
+        outputs
+    }
 
-        var index = 0
-        while (index < graph.nodes.size) {
+    /**
+     * Run the steps in `[from, toExclusive)` — the whole graph at the top, and
+     * one loop's body inside it.
+     *
+     * Recursive, and that is the point. A loop body used to be run by a flat
+     * `for` that handed every step to the step runner, so a Repeat inside a
+     * For-each matched no arm there and did nothing at all: the inner loop's
+     * body never ran, and the run reported success. A body is a graph, so the
+     * thing that runs a graph is the thing that runs a body.
+     */
+    private suspend fun execute(
+        c: RunContext,
+        from: Int,
+        toExclusive: Int,
+        passLabel: String,
+    ) {
+        val graph = c.graph
+        val outputs = c.outputs
+        val outDir = c.outDir
+        val models = c.models
+        val reporter = c.reporter
+
+        var index = from
+        while (index < toExclusive) {
             val node = graph.nodes[index]
             if (!node.enabled) {
                 reporter.onNode(node.id, NodeProgress(NodeRunState.SKIPPED))
@@ -124,109 +200,153 @@ class WorkflowRunner @Inject constructor(
                 // the phone, so the count is required and the condition may
                 // only cut it short.
                 NodeKind.RepeatStart -> {
-                    val end = spanEnd(graph, index, NodeKind.RepeatEnd.type)
+                    val end = Spans.end(c.types, index, toExclusive)
                     val times = node.params.int("times", 2).coerceIn(1, MAX_REPEATS)
+                    val gathered = mutableListOf<String>()
+                    var itemType = PortType.FILE
                     repeat(times) { pass ->
                         outputs["${node.id}:pass"] = PortValue.text((pass + 1).toString())
-                        runSpan(graph, index + 1, end, node.id, outputs, outDir, models, reporter)
+                        execute(c, index + 1, end, "$passLabel.${pass + 1}")
+                        collectPass(c, end, gathered)?.let { itemType = it }
                     }
+                    publishGathered(c, end, gathered, itemType)
+                    markDone(c, index, end)
                     index = end + 1
                 }
 
                 NodeKind.ForEachStart -> {
-                    val end = spanEnd(graph, index, NodeKind.ForEachEnd.type)
-                    val items = resolve(node, "items", outputs, graph)?.paths.orEmpty()
-                    val collected = mutableListOf<String>()
-                    items.take(MAX_REPEATS).forEach { item ->
-                        outputs["${node.id}:item"] = PortValue.file(PortType.FILE, item)
-                        runSpan(graph, index + 1, end, node.id, outputs, outDir, models, reporter)
-                        graph.nodes.getOrNull(end)?.let { endNode ->
-                            resolve(endNode, "collect", outputs, graph)?.path?.let(collected::add)
-                        }
+                    val end = Spans.end(c.types, index, toExclusive)
+                    val list = resolve(node, "items", outputs, graph)
+                    val items = list?.paths.orEmpty()
+                    val gathered = mutableListOf<String>()
+                    var itemType = PortType.FILE
+                    if (items.size > MAX_REPEATS) {
+                        // Said, not swallowed. A loop that quietly does 32 of
+                        // 200 reads as "it worked" and is found much later.
+                        reporter.onNode(
+                            node.id,
+                            NodeProgress(
+                                NodeRunState.RUNNING,
+                                message = "Only the first $MAX_REPEATS of ${items.size} items " +
+                                    "will be run — that is this app's ceiling on a loop.",
+                            ),
+                        )
                     }
-                    graph.nodes.getOrNull(end)?.let { outputs["${it.id}:items"] = PortValue.list(collected) }
+                    items.take(MAX_REPEATS).forEachIndexed { pass, item ->
+                        // As the kind of value it is. A list of paragraphs and
+                        // a list of file paths are the same shape and not the
+                        // same thing; see PortValue.elementType.
+                        outputs["${node.id}:item"] = (list ?: PortValue.list(emptyList())).item(item)
+                        execute(c, index + 1, end, "$passLabel.${pass + 1}")
+                        collectPass(c, end, gathered)?.let { itemType = it }
+                    }
+                    publishGathered(c, end, gathered, itemType)
+                    markDone(c, index, end)
                     index = end + 1
                 }
 
                 NodeKind.Batch -> {
-                    val end = spanEnd(graph, index, NodeKind.RepeatEnd.type)
+                    val end = Spans.end(c.types, index, toExclusive)
                     val times = node.params.int("times", 2).coerceIn(1, MAX_REPEATS)
+                    val gathered = mutableListOf<String>()
+                    var itemType = PortType.FILE
                     repeat(times) { pass ->
                         // A fresh seed per pass, and the model stays resident
                         // across all of them — the whole point of this node.
-                        outputs["${node.id}:seed"] =
-                            PortValue.text((System.currentTimeMillis() + pass).toString())
-                        runSpan(graph, index + 1, end, node.id, outputs, outDir, models, reporter)
+                        //
+                        // Set on the runner rather than only published as an
+                        // output: nothing binds a slot to a seed, so a value
+                        // sitting in the map was a promise the run never kept
+                        // and every pass sampled identically.
+                        batchSeed = System.currentTimeMillis() + pass
+                        outputs["${node.id}:seed"] = PortValue.text(batchSeed.toString())
+                        execute(c, index + 1, end, "$passLabel.${pass + 1}")
+                        collectPass(c, end, gathered)?.let { itemType = it }
                     }
+                    batchSeed = null
+                    publishGathered(c, end, gathered, itemType)
+                    markDone(c, index, end)
                     index = end + 1
                 }
 
                 NodeKind.Branch -> {
                     val condition = node.params.string("condition", "")
                     val rendered = WorkflowTemplate.render(condition) { reference ->
-                        outputs[reference]?.let { it.text.ifBlank { it.path.orEmpty() } }
+                        lookup(outputs, reference)
                     }
                     if (!WorkflowTemplate.truthy(rendered)) {
                         // Skip to the matching end, marking what was skipped.
-                        val end = spanEnd(graph, index, NodeKind.RepeatEnd.type)
-                        (index..end).forEach {
+                        val end = Spans.end(c.types, index, toExclusive)
+                        (index..end.coerceAtMost(graph.nodes.lastIndex)).forEach {
                             graph.nodes.getOrNull(it)?.let { n ->
                                 reporter.onNode(n.id, NodeProgress(NodeRunState.SKIPPED))
                             }
                         }
                         index = end + 1
                     } else {
+                        // Taken. Said so, rather than left looking unvisited.
+                        markDone(c, index)
                         index++
                     }
                 }
 
-                NodeKind.RepeatEnd, NodeKind.ForEachEnd, NodeKind.Note -> index++
+                // Not steps, but they are rows in the list and a row that
+                // never changes reads as one that did not run.
+                NodeKind.RepeatEnd, NodeKind.ForEachEnd, NodeKind.Note -> {
+                    markDone(c, index)
+                    index++
+                }
 
                 else -> {
-                    runNode(node, graph, outputs, outDir, models, reporter)
+                    runNode(node, graph, outputs, outDir, models, reporter, passLabel)
                     index++
                 }
             }
         }
-        outputs
     }
 
-    private suspend fun runSpan(
-        graph: WorkflowGraph,
-        from: Int,
-        toExclusive: Int,
-        @Suppress("UNUSED_PARAMETER") owner: String,
-        outputs: MutableMap<String, PortValue>,
-        outDir: File,
-        models: Map<String, ModelEntity>,
-        reporter: RunReporter,
+    /**
+     * What one pass of a loop kept, taken from the closing step's slot.
+     *
+     * As text *or* as a path, whichever the value carries. It used to read the
+     * path only, so a loop collecting anything a model said gathered nothing
+     * and handed on an empty list — a failure that looks exactly like a loop
+     * that never ran.
+     */
+    private fun collectPass(c: RunContext, end: Int, into: MutableList<String>): PortType? {
+        val closer = c.graph.nodes.getOrNull(end) ?: return null
+        val value = resolve(closer, "collect", c.outputs, c.graph) ?: return null
+        val piece = value.asText
+        if (piece.isBlank()) return null
+        into += piece
+        return value.type
+    }
+
+    /** Hand the whole harvest to the closing step, for whatever comes after. */
+    private fun publishGathered(
+        c: RunContext,
+        end: Int,
+        gathered: List<String>,
+        itemType: PortType,
     ) {
-        for (i in from until toExclusive) {
-            val node = graph.nodes.getOrNull(i) ?: return
-            if (!node.enabled) continue
-            when (NodeKind.of(node.type)) {
-                NodeKind.RepeatEnd, NodeKind.ForEachEnd, NodeKind.Note -> Unit
-                else -> runNode(node, graph, outputs, outDir, models, reporter)
-            }
-        }
+        val closer = c.graph.nodes.getOrNull(end) ?: return
+        c.outputs["${closer.id}:items"] = PortValue.list(gathered, itemType)
     }
 
-    /** Where a bracket closes, or the end of the list when it never does. */
-    private fun spanEnd(graph: WorkflowGraph, from: Int, endType: String): Int {
-        var depth = 0
-        for (i in (from + 1) until graph.nodes.size) {
-            val type = graph.nodes[i].type
-            if (type == NodeKind.RepeatStart.type || type == NodeKind.ForEachStart.type ||
-                type == NodeKind.Batch.type || type == NodeKind.Branch.type
-            ) {
-                depth++
-            }
-            if (type == endType || type == NodeKind.RepeatEnd.type || type == NodeKind.ForEachEnd.type) {
-                if (depth == 0) return i
-                depth--
+    /**
+     * Say that a bracket finished.
+     *
+     * The brackets are not steps and were never reported on, so they sat at
+     * "waiting" for the whole run and the tally counted them against it: a
+     * for-each that did everything asked of it finished at "5 of 7 done",
+     * which reads as two steps quietly failing rather than as success.
+     */
+    private fun markDone(c: RunContext, vararg indices: Int) {
+        indices.forEach { at ->
+            c.graph.nodes.getOrNull(at)?.let {
+                c.reporter.onNode(it.id, NodeProgress(NodeRunState.DONE))
             }
         }
-        return graph.nodes.size - 1
     }
 
     private suspend fun runNode(
@@ -236,6 +356,16 @@ class WorkflowRunner @Inject constructor(
         outDir: File,
         models: Map<String, ModelEntity>,
         reporter: RunReporter,
+        /**
+         * Which pass of which loop this is, as a suffix for anything written.
+         *
+         * Empty outside a loop. Every file a step writes was named after the
+         * step alone, so the second pass of a loop overwrote the first — and
+         * the first pass's value, already gathered into a list, went on
+         * pointing at a file whose contents had changed underneath it. Four
+         * pictures from a Batch were one picture, four times over.
+         */
+        passLabel: String = "",
     ) {
         reporter.onNode(node.id, NodeProgress(NodeRunState.RUNNING))
         runCatching {
@@ -276,7 +406,7 @@ class WorkflowRunner @Inject constructor(
                         ).getOrThrow()
                     } else {
                         WorkflowTemplate.render(node.params.string("template", "")) { ref ->
-                            outputs[ref]?.let { it.text.ifBlank { it.path.orEmpty() } }
+                            lookup(outputs, ref)
                         }
                     }
                     put(outputs, node, "text", PortValue.text(text))
@@ -301,8 +431,10 @@ class WorkflowRunner @Inject constructor(
                         else -> source.split(Regex("\\n\\s*\\n"))
                     }.map { it.trim() }.filter { it.isNotEmpty() }
                     // Pieces travel as a list of inline strings; a list of text
-                    // needs no files behind it.
-                    outputs["${node.id}:pieces"] = PortValue(PortType.LIST, paths = pieces)
+                    // needs no files behind it. Marked as text, so a for-each
+                    // over them hands each one on as prose rather than as a
+                    // path to a file that was never written.
+                    outputs["${node.id}:pieces"] = PortValue.list(pieces, PortType.TEXT)
                 }
 
                 NodeKind.TextJoin -> {
@@ -312,18 +444,58 @@ class WorkflowRunner @Inject constructor(
                 }
 
                 NodeKind.Pick -> {
-                    val options = resolve(node, "options", outputs, graph)?.paths.orEmpty()
+                    val list = resolve(node, "options", outputs, graph)
+                    val options = list?.paths.orEmpty()
+                    if (options.isEmpty()) {
+                        throw IllegalStateException(
+                            "There is nothing to choose between — the step above produced an " +
+                                "empty list.",
+                        )
+                    }
                     val chosen = reporter.awaitChoice(node.id, options)
                         ?: throw IllegalStateException("Nothing was chosen.")
-                    put(outputs, node, "chosen", PortValue.file(PortType.FILE, chosen))
+                    // As the kind of thing it was in the list. Choosing between
+                    // four sentences used to hand on a *file path* that read
+                    // "the first sentence", and the step after it went looking
+                    // for a file by that name.
+                    put(outputs, node, "chosen", (list ?: PortValue.list(emptyList())).item(chosen))
                 }
 
+                /*
+                 * Keep — which until now kept nothing.
+                 *
+                 * It recorded the value in the run's own map and stopped
+                 * there, so the one step whose whole purpose is to put a
+                 * result where the rest of the app can find it left the
+                 * gallery empty. Everything a workflow made lived in a
+                 * per-run scratch folder named after a UUID and was findable
+                 * only by knowing that UUID.
+                 *
+                 * Where a thing goes is decided by what it is, using the same
+                 * folders the tabs already write to, so a picture made by a
+                 * graph and a picture made by the Stills tab sit together.
+                 */
                 NodeKind.Output -> {
                     val value = resolve(node, "value", outputs, graph)
-                    outputs["${node.id}:kept"] = value ?: PortValue.text("")
+                        ?: throw IllegalStateException("Nothing was given to this step to keep.")
+                    val kept = keep(value)
+                    outputs["${node.id}:kept"] = kept
+                    outputs[node.id] = kept
+                    reporter.onNode(
+                        node.id,
+                        NodeProgress(
+                            NodeRunState.RUNNING,
+                            message = when {
+                                kept.paths.size > 1 -> "Kept ${kept.paths.size} files."
+                                kept.path != null -> "Kept ${File(kept.path!!).name}."
+                                else -> "Kept."
+                            },
+                        ),
+                    )
                 }
 
-                NodeKind.Processor -> runProcessor(node, graph, outputs, outDir, models, reporter)
+                NodeKind.Processor ->
+                    runProcessor(node, graph, outputs, outDir, models, reporter, passLabel)
 
                 /*
                  * The cheap ones — no model, no load, milliseconds each.
@@ -341,7 +513,7 @@ class WorkflowRunner @Inject constructor(
                     val width = node.params.int("width", 0)
                     val height = node.params.int("height", 0)
                     val mode = node.params.string("mode", "fit")
-                    val file = File(outDir, "${'$'}{node.id}.png")
+                    val file = File(outDir, "${node.id}$passLabel.png")
                     resizeTo(File(source), file, width, height, mode)
                     put(outputs, node, "image", PortValue.file(PortType.IMAGE, file.absolutePath))
                 }
@@ -356,7 +528,7 @@ class WorkflowRunner @Inject constructor(
                     val asked = node.params.int("index", 0)
                     val at = (if (asked < 0) frames.size + asked else asked)
                         .coerceIn(0, frames.lastIndex)
-                    val file = File(outDir, "${'$'}{node.id}.png")
+                    val file = File(outDir, "${node.id}$passLabel.png")
                     File(frames[at]).copyTo(file, overwrite = true)
                     put(outputs, node, "image", PortValue.file(PortType.IMAGE, file.absolutePath))
                 }
@@ -364,20 +536,32 @@ class WorkflowRunner @Inject constructor(
                 NodeKind.Assemble -> {
                     val images = resolve(node, "images", outputs, graph)?.paths.orEmpty()
                     if (images.isEmpty()) throw IllegalStateException("No pictures to assemble.")
-                    val dir = File(outDir, node.id).apply { mkdirs() }
+                    val dir = File(outDir, "${node.id}$passLabel").apply { mkdirs() }
                     val frames = images.mapIndexed { i, path ->
                         val target = File(dir, String.format("frame_%04d.png", i))
                         File(path).copyTo(target, overwrite = true)
                         target.absolutePath
                     }
-                    outputs["${'$'}{node.id}:clip"] = PortValue(PortType.CLIP, paths = frames)
+                    // Under the step's own id. This key was written as a
+                    // literal `${node.id}:clip` — an over-escaped template that
+                    // Kotlin took at its word — so nothing downstream could
+                    // ever bind to it and the step was, in effect, not there.
+                    val clip = PortValue(PortType.CLIP, paths = frames)
+                    outputs["${node.id}:clip"] = clip
+                    outputs[node.id] = clip
                 }
 
                 NodeKind.Tool -> {
                     val name = node.params.string("tool")
                     if (name.isBlank()) throw IllegalStateException("No tool chosen for this step.")
+                    // A bound slot wins; otherwise what was typed, with earlier
+                    // steps substituted into it the same way a template does —
+                    // a tool call whose query is the previous step's answer is
+                    // the ordinary case, not the clever one.
                     val arguments = resolve(node, "arguments", outputs, graph)?.text
-                        ?: node.params.string("arguments", "{}")
+                        ?: WorkflowTemplate.render(node.params.string("arguments", "{}")) { ref ->
+                            lookup(outputs, ref)
+                        }
                     val registry = toolProviders.registry(
                         enabled = prefs.enabledToolProviders.first(),
                     )
@@ -412,6 +596,7 @@ class WorkflowRunner @Inject constructor(
         outDir: File,
         models: Map<String, ModelEntity>,
         reporter: RunReporter,
+        passLabel: String,
     ) {
         val model = ResidencyPlanner.modelFor(node, models)
             ?: throw IllegalStateException("No model chosen for this step.")
@@ -427,17 +612,25 @@ class WorkflowRunner @Inject constructor(
         // runtime parameter. Passing them through would have every run report
         // a handful of rejected keys it could do nothing about.
         val settings = node.params.toMap().filterKeys { it !in BOOKKEEPING }
-        val params = stored.overlaidWith(SparseParams(settings))
+        val base = stored.overlaidWith(SparseParams(settings))
+        // A Batch's whole promise is a different picture each pass, and it can
+        // only keep it if the seed reaches the sampler. A step that pins its
+        // own seed still wins — asking for the same seed every pass is a
+        // strange thing to want, but it is a thing the author said.
+        val params = batchSeed
+            ?.takeIf { !settings.containsKey("seed") }
+            ?.let { base.with("seed", it.toString()) }
+            ?: base
 
         when (model.modality) {
             Modality.TEXT, Modality.VISION ->
                 runText(node, graph, outputs, model, params, reporter)
             Modality.DIFFUSION ->
-                runDiffusion(node, graph, outputs, outDir, model, params, reporter)
+                runDiffusion(node, graph, outputs, outDir, model, params, reporter, passLabel)
             Modality.SPEECH_TO_TEXT ->
-                runTranscribe(node, graph, outputs, outDir, model, params, reporter)
+                runTranscribe(node, graph, outputs, outDir, model, params, reporter, passLabel)
             Modality.TEXT_TO_SPEECH ->
-                runSpeak(node, graph, outputs, outDir, model, params)
+                runSpeak(node, graph, outputs, outDir, model, params, passLabel)
             else -> throw IllegalStateException("This model cannot be run as a step.")
         }
         resident = runtimeId
@@ -518,7 +711,7 @@ class WorkflowRunner @Inject constructor(
             // Said here, where it happened, rather than two steps later.
             throw IllegalStateException(
                 if (thought > 0) {
-                    "This model reasoned for ${'$'}thought characters and then answered with " +
+                    "This model reasoned for $thought characters and then answered with " +
                         "nothing — the whole budget went to thinking. Raise the token limit, " +
                         "or turn thinking off in the model's parameters."
                 } else {
@@ -537,6 +730,7 @@ class WorkflowRunner @Inject constructor(
         model: ModelEntity,
         params: SparseParams,
         reporter: RunReporter,
+        passLabel: String,
     ) {
         diffusion.load(model.id, model.localPath, emptyList(), params = SparseParams.parse(model.paramOverridesJson))
             .getOrThrow()
@@ -599,7 +793,7 @@ class WorkflowRunner @Inject constructor(
                             ),
                         )
                         is DiffusionEvent.Completed -> {
-                            val file = File(outDir, "${node.id}.png")
+                            val file = File(outDir, "${node.id}$passLabel.png")
                             file.outputStream().use { out ->
                                 event.image.toBitmap()
                                     .compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
@@ -628,6 +822,7 @@ class WorkflowRunner @Inject constructor(
         model: ModelEntity,
         params: SparseParams,
         @Suppress("UNUSED_PARAMETER") reporter: RunReporter,
+        passLabel: String,
     ) {
         if (!transcriber.isCurrent(model.id)) {
             transcriber.load(model.id, model.localPath, params).getOrThrow()
@@ -643,7 +838,7 @@ class WorkflowRunner @Inject constructor(
         val text = segments.joinToString(" ") { it.text }.trim()
         put(outputs, node, "text", PortValue.text(text))
 
-        val subtitles = File(outDir, "${node.id}.srt")
+        val subtitles = File(outDir, "${node.id}$passLabel.srt")
         subtitles.writeText(ai.ondevice.core.TranscriptSegments.encode(segments))
         outputs["${node.id}:subtitles"] = PortValue.file(PortType.FILE, subtitles.absolutePath)
     }
@@ -655,12 +850,13 @@ class WorkflowRunner @Inject constructor(
         outDir: File,
         model: ModelEntity,
         params: SparseParams,
+        passLabel: String,
     ) {
         val text = resolve(node, "text", outputs, graph)?.text.orEmpty()
         val directory = File(model.localPath).let { if (it.isDirectory) it else it.parentFile }
         synthesizer.useKokoroModel(directory)
         synthesizer.useOmniVoiceModel(directory)
-        val destination = File(outDir, "${node.id}.wav")
+        val destination = File(outDir, "${node.id}$passLabel.wav")
         // Which engine, asked of the folder rather than assumed.
         //
         // This defaulted to Kokoro whatever was chosen, so pointing a step at
@@ -686,6 +882,80 @@ class WorkflowRunner @Inject constructor(
             destination,
         ).getOrThrow()
         put(outputs, node, "audio", PortValue.file(PortType.AUDIO, destination.absolutePath))
+    }
+
+    /**
+     * Put a value where the rest of the app looks for that kind of thing.
+     *
+     * The folders are the ones the tabs already use — no new place to look,
+     * and no registry to keep in step, because the library in this app is the
+     * filesystem. A copy rather than a move: the run's own folder stays intact
+     * so a graph that keeps something halfway through can go on using it.
+     */
+    private fun keep(value: PortValue): PortValue {
+        val stamp = System.currentTimeMillis()
+        fun copyInto(directory: File, path: String, index: Int): String {
+            val source = File(path)
+            val extension = source.extension.ifBlank { "bin" }
+            val target = File(
+                directory.apply { mkdirs() },
+                "workflow_$stamp${if (index > 0) "_$index" else ""}.$extension",
+            )
+            source.copyTo(target, overwrite = true)
+            return target.absolutePath
+        }
+
+        return when (value.type) {
+            PortType.TEXT -> {
+                val target = File(storage.transcriptsDir(), "workflow_$stamp.txt")
+                target.writeText(value.text)
+                PortValue.file(PortType.FILE, target.absolutePath)
+            }
+            PortType.IMAGE ->
+                PortValue.file(
+                    PortType.IMAGE,
+                    copyInto(storage.galleryDir(), value.path.orEmpty(), 0),
+                )
+            PortType.AUDIO ->
+                PortValue.file(
+                    PortType.AUDIO,
+                    copyInto(storage.speechDir(), value.path.orEmpty(), 0),
+                )
+            // A clip is its frames, and they belong together — one folder in
+            // the gallery rather than N loose stills that no longer read as a
+            // sequence.
+            PortType.CLIP -> {
+                val dir = File(storage.galleryDir(), "workflow_$stamp").apply { mkdirs() }
+                val frames = value.paths.mapIndexed { i, path ->
+                    val target = File(dir, String.format("frame_%04d.png", i))
+                    File(path).copyTo(target, overwrite = true)
+                    target.absolutePath
+                }
+                PortValue(PortType.CLIP, paths = frames)
+            }
+            PortType.LIST -> {
+                if (value.elementType == PortType.TEXT) {
+                    val target = File(storage.transcriptsDir(), "workflow_$stamp.txt")
+                    target.writeText(value.paths.joinToString("\n\n"))
+                    PortValue.file(PortType.FILE, target.absolutePath)
+                } else {
+                    val directory = if (value.elementType == PortType.AUDIO) {
+                        storage.speechDir()
+                    } else {
+                        storage.galleryDir()
+                    }
+                    PortValue.list(
+                        value.paths.mapIndexed { i, path -> copyInto(directory, path, i) },
+                        value.elementType,
+                    )
+                }
+            }
+            PortType.FILE ->
+                PortValue.file(
+                    PortType.FILE,
+                    copyInto(storage.galleryDir(), value.path.orEmpty(), 0),
+                )
+        }
     }
 
     /**
@@ -770,6 +1040,27 @@ class WorkflowRunner @Inject constructor(
                 )
             },
         )
+
+    /**
+     * What a template's `2.text` names among the outputs.
+     *
+     * The two halves of this app spell a reference differently and neither can
+     * change: a slot binding is `id:output`, because that is the key an output
+     * is stored under, and a template writes `id.output`, because the
+     * expression grammar reads a bare word and a word cannot contain a colon.
+     * Nothing bridged them, so `{{ 2.text }}` — the syntax in the editor's own
+     * help text and in the template's own docstring — found nothing, was left
+     * on the page as the literal characters it was written as, and every
+     * condition on an Only-if was therefore false. The node had never once
+     * taken its branch.
+     *
+     * Three readings, most specific first: the reference as written, the
+     * dotted form as a slot binding, and the step alone.
+     */
+    private fun lookup(outputs: Map<String, PortValue>, reference: String): String? =
+        outputs[reference]?.asText
+            ?: outputs[reference.replace('.', ':')]?.asText
+            ?: outputs[reference.substringBefore('.')]?.asText
 
     /** What is bound to a slot, or null when nothing is. */
     private fun resolve(

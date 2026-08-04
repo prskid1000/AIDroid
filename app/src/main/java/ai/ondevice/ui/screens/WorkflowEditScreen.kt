@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -508,6 +509,130 @@ private fun StepSettings(
             )
         }
 
+        /*
+         * The cheap steps, which had no settings at all.
+         *
+         * Every one of them ran — and every one of them ran at its default,
+         * because there was nowhere to say otherwise. A Resize with no size
+         * is a copy; a Take-a-frame with no index is always the first frame;
+         * a Tool with no tool chosen stops the run. They were in the palette
+         * and they were, in practice, not there.
+         */
+        NodeKind.Resize -> {
+            SectionKicker("Size", Modifier.padding(top = 12.dp, bottom = 4.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                NInput(
+                    value = value("width"),
+                    onValueChange = { viewModel.setParam(node.id, "width", it.filter(Char::isDigit)) },
+                    placeholder = "width",
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
+                    modifier = Modifier.weight(1f),
+                )
+                NInput(
+                    value = value("height"),
+                    onValueChange = { viewModel.setParam(node.id, "height", it.filter(Char::isDigit)) },
+                    placeholder = "height",
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            SectionKicker("How", Modifier.padding(top = 12.dp, bottom = 4.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("fit", "cover", "stretch").forEach { mode ->
+                    NTag(
+                        mode,
+                        style = if (value("mode", "fit") == mode) NTagStyle.Accent else NTagStyle.Outline,
+                        modifier = Modifier.nClickableFlat { viewModel.setParam(node.id, "mode", mode) },
+                    )
+                }
+            }
+            NHelp(
+                "Fit keeps the whole picture and lets the shape change. Cover keeps the shape " +
+                    "and loses the edges. Stretch keeps neither. Leave a box empty to keep " +
+                    "that side as it is.",
+                Modifier.padding(top = 4.dp),
+            )
+        }
+
+        NodeKind.FrameExtract -> {
+            SectionKicker("Which frame", Modifier.padding(top = 12.dp, bottom = 4.dp))
+            NInput(
+                value = value("index", "0"),
+                onValueChange = { input ->
+                    viewModel.setParam(
+                        node.id,
+                        "index",
+                        input.filterIndexed { i, ch -> ch.isDigit() || (i == 0 && ch == '-') },
+                    )
+                },
+                placeholder = "0",
+            )
+            NHelp(
+                "Counting from zero. A negative number counts back from the end, so −1 is the " +
+                    "last frame — useful for carrying on a clip from where it stopped.",
+                Modifier.padding(top = 4.dp),
+            )
+        }
+
+        NodeKind.TextJoin -> {
+            SectionKicker("Separator", Modifier.padding(top = 12.dp, bottom = 4.dp))
+            NInput(
+                value = value("separator", "\n\n"),
+                onValueChange = { viewModel.setParam(node.id, "separator", it) },
+                placeholder = "a blank line",
+            )
+        }
+
+        NodeKind.Tool -> {
+            SectionKicker("Tool", Modifier.padding(top = 12.dp, bottom = 4.dp))
+            var tools by remember { mutableStateOf<List<ai.ondevice.engine.ToolSpec>>(emptyList()) }
+            LaunchedEffect(Unit) { tools = viewModel.availableTools() }
+            if (tools.isEmpty()) {
+                NHelp(
+                    "No tools are switched on. Turn some on under Settings → Tools, and they " +
+                        "become available here as well as to chat.",
+                )
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    tools.forEach { spec ->
+                        val selected = value("tool") == spec.name
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .ring(
+                                    if (selected) NocturneColors.Accent else NocturneColors.Divider,
+                                    Radius.Md,
+                                )
+                                .nClickableFlat { viewModel.setParam(node.id, "tool", spec.name) }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(spec.name, style = NocturneType.Row)
+                                Text(
+                                    spec.description,
+                                    style = NocturneType.MonoXs,
+                                    color = NocturneColors.TextMuted,
+                                    maxLines = 2,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            SectionKicker("Arguments", Modifier.padding(top = 12.dp, bottom = 4.dp))
+            NTextArea(
+                value = value("arguments"),
+                onValueChange = { viewModel.setParam(node.id, "arguments", it) },
+                placeholder = "{\"query\": \"{{ 1.text }}\"}",
+                minHeight = 72.dp,
+            )
+            NHelp(
+                "JSON, in the shape the tool expects. An earlier step can be put inside it with " +
+                    "{{ 1.text }}. Binding the Arguments slot to a step overrides this.",
+                Modifier.padding(top = 4.dp),
+            )
+        }
+
         NodeKind.TextSplit -> {
             SectionKicker("Split by", Modifier.padding(top = 12.dp, bottom = 4.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -754,7 +879,7 @@ private fun ModelPickerSheet(
     onDismiss: () -> Unit,
     onPick: (ai.ondevice.data.db.ModelEntity) -> Unit,
 ) {
-    NBottomSheet("Choose a model", onDismiss, note = "${'$'}{models.size} installed") {
+    NBottomSheet("Choose a model", onDismiss, note = "${models.size} installed") {
         if (models.isEmpty()) {
             NCard(Modifier.fillMaxWidth().padding(top = 8.dp)) {
                 Text("No models installed", style = NocturneType.CardTitleSm)

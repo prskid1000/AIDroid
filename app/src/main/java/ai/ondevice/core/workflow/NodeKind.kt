@@ -269,11 +269,24 @@ sealed interface NodeKind {
         override val blurb = "Run the steps between here and the end of the repeat more than once."
     }
 
+    /**
+     * Where a Repeat, a Batch or an Only-if stops.
+     *
+     * It collects, the same way the end of a for-each does. Without that a
+     * Batch was decorative: it ran the steps below four times, each pass
+     * overwrote the last one's answer, and there was no way to name the four
+     * results together — so the node that exists to make four pictures from one
+     * model load could not hand four pictures to anything.
+     */
     data object RepeatEnd : NodeKind {
         override val type = "repeat_end"
         override val title = "End repeat"
         override val family = NodeFamily.LOGIC
-        override val blurb = "Where the repeat stops."
+        override val blurb = "Where the repeat stops. Collects what each pass produced."
+        override fun slots(context: NodeContext) =
+            listOf(SlotSpec("collect", PortType.FILE, "Keep from each pass", required = false))
+        override fun outputs(context: NodeContext) =
+            listOf(OutputSpec("items", PortType.LIST, "Everything collected"))
     }
 
     /** Once per item. */
