@@ -145,6 +145,48 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch { engines.unload() }
     }
 
+    /**
+     * Load this model's projector, or don't.
+     *
+     * Worth switching off rather than leaving to the model's own judgement: a
+     * projector is weights and an mtmd graph the run pays for whether or not a
+     * picture is ever sent, and a vision model used for text is the ordinary
+     * case rather than the exception.
+     *
+     * Recorded against the model rather than the conversation, because it is a
+     * fact about how the weights are loaded and one context serves every
+     * conversation. `mmproj` is a load-time argument — mtmd builds its graph
+     * against those weights — so the context has to go and come back, which is
+     * why this unloads rather than taking effect on the next message.
+     */
+    fun setVisionEnabled(enabled: Boolean) {
+        val model = _state.value.model ?: return
+        viewModelScope.launch {
+            val overrides = SparseParams.parse(model.paramOverridesJson).let {
+                // Blank is "no projector". Removing the key is not the same
+                // thing: absent means nobody has said, and the loader takes
+                // that as the old behaviour of attaching whatever was
+                // installed.
+                if (enabled) it.without(VISION_KEY) else it.with(VISION_KEY, "")
+            }
+            val updated = model.copy(paramOverridesJson = overrides.toJsonString())
+            db.models().upsert(updated)
+            _state.value = _state.value.copy(
+                model = updated,
+                // A picture already staged for a model that can no longer see
+                // would be sent and silently ignored.
+                pendingAttachments = if (enabled) {
+                    _state.value.pendingAttachments
+                } else {
+                    _state.value.pendingAttachments.filterNot {
+                        it.kind == ai.ondevice.data.AttachmentKind.IMAGE
+                    }
+                },
+            )
+            engines.unload()
+        }
+    }
+
     fun startNewConversation() {
         if (_state.value.generating) stop()
         // Already on an empty one.
@@ -229,6 +271,17 @@ class ChatViewModel @Inject constructor(
             val pending = when (attachment.kind) {
                 ai.ondevice.data.AttachmentKind.IMAGE -> {
                     val model = _state.value.model
+                    // Switched off is not the same as absent, and saying "add a
+                    // model with a projector" to someone who has one and turned
+                    // it off names a remedy they do not need.
+                    if (_state.value.hasProjector && !_state.value.visionEnabled) {
+                        _state.value = _state.value.copy(
+                            error = "${model?.label ?: "This model"} has its projector switched off",
+                            errorSuggestion = "Turn Vision back on in this conversation's " +
+                                "settings. The model reloads when you do.",
+                        )
+                        return@launch
+                    }
                     // Two separate ways this fails, and they used to be one check.
                     val missing = if (model?.modality != Modality.VISION) {
                         ai.ondevice.core.MissingComponent(
@@ -972,13 +1025,40 @@ data class ChatState(
     val templateKwargsJson: String
         get() = liveOverrides.string("chat_template_kwargs") ?: loadedTemplateKwargsJson
 
-    /** Whether an image can reach this model, which decides what the file picker offers. */
-    val acceptsImages: Boolean
+    /**
+     * Whether this model has a projector at all — which is a fact about what
+     * was installed, and not about whether it is switched on.
+     */
+    val hasProjector: Boolean
         get() = model?.modality == Modality.VISION &&
             ai.ondevice.core.ComponentCheck.forChatImage(
                 SparseParams.parse(model.companionPathsJson).keys.associateWith { "" },
             ) == null
+
+    /**
+     * Whether the projector is being loaded.
+     *
+     * Absent means yes: a model installed with a projector has always loaded
+     * it, and a switch nobody has touched should not change what the app does.
+     * Present and blank is the answer "no" — the same idiom the diffusion
+     * screens use for a component slot deliberately left empty, where the key
+     * being there at all is the question having been answered.
+     */
+    val visionEnabled: Boolean
+        get() {
+            val stored = SparseParams.parse(model?.paramOverridesJson)
+            return VISION_KEY !in stored || !stored.string(VISION_KEY).isNullOrBlank()
+        }
+
+    /** Whether an image can reach this model, which decides what the file picker offers. */
+    val acceptsImages: Boolean get() = hasProjector && visionEnabled
 }
+
+/**
+ * The runtime's own name for the projector path, which is also where the
+ * decision to go without one is recorded.
+ */
+const val VISION_KEY = "mmproj"
 
 /** A file the user attached but has not sent yet. */
 data class PendingAttachment(

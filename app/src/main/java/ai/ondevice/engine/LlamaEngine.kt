@@ -72,16 +72,28 @@ class LlamaEngine(
             // app never holds two at once (SPEC §3.5).
             if (handle != 0L) freeHandle()
 
-            // The projector is a load-time argument, not a parameter the user
-            // sets: mtmd builds its graph against these weights. The key is
-            // matched without regard to case because it is written lower-cased
-            // at download and named in upper case by the enum it comes from.
-            val loadParams = request.companionPaths.entries
-                .firstOrNull { it.key.equals(VISION_PROJECTOR, ignoreCase = true) }
-                ?.value
-                ?.takeIf { it.isNotBlank() }
-                ?.let { request.params.overlaidWith(SparseParams.of("mmproj" to it)) }
-                ?: request.params
+            // The projector is a load-time argument: mtmd builds its graph
+            // against these weights. The key is matched without regard to case
+            // because it is written lower-cased at download and named in upper
+            // case by the enum it comes from.
+            //
+            // The installed projector is attached unless the caller has said
+            // otherwise, and "otherwise" is the key being present at all — an
+            // empty `mmproj` is the answer "no projector", not the absence of
+            // an answer. It used to overlay unconditionally, so a model with a
+            // projector installed loaded it on every run whether or not a
+            // picture was ever sent, and there was no way to say no: that is
+            // weights and a graph paid for by every text-only conversation with
+            // a vision model, which is most of them.
+            val loadParams = when {
+                "mmproj" in request.params -> request.params
+                else -> request.companionPaths.entries
+                    .firstOrNull { it.key.equals(VISION_PROJECTOR, ignoreCase = true) }
+                    ?.value
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { request.params.overlaidWith(SparseParams.of("mmproj" to it)) }
+                    ?: request.params
+            }
 
             val started = System.currentTimeMillis()
             val newHandle = withContext(Dispatchers.IO) {

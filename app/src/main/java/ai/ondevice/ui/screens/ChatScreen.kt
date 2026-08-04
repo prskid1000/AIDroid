@@ -237,6 +237,7 @@ fun ChatScreen(
                 onChatTemplateChange = viewModel::setChatTemplate,
                 onTemplateKwargsChange = viewModel::setTemplateKwargs,
                 onLiveParam = viewModel::setLiveParam,
+                onVisionEnabledChange = viewModel::setVisionEnabled,
                 onOpenParameters = onOpenParameters,
                 onUnloadModel = { viewModel.unloadModel(); sheetOpen = false },
             )

@@ -26,6 +26,7 @@ import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NDot
 import ai.ondevice.ui.components.NHelp
 import ai.ondevice.ui.components.NSlider
+import ai.ondevice.ui.components.NSwitch
 import ai.ondevice.ui.components.NTextArea
 import ai.ondevice.ui.components.SectionKicker
 import ai.ondevice.ui.components.nClickableFlat
@@ -47,6 +48,7 @@ fun ChatSettingsSheet(
     onChatTemplateChange: (String?) -> Unit,
     onTemplateKwargsChange: (String) -> Unit,
     onLiveParam: (String, Any?) -> Unit,
+    onVisionEnabledChange: (Boolean) -> Unit,
     onOpenParameters: () -> Unit,
     onUnloadModel: () -> Unit,
 ) {
@@ -206,6 +208,30 @@ fun ChatSettingsSheet(
                             "not by this app.",
                         Modifier.padding(top = 6.dp),
                     )
+
+                    // — vision —
+                    //
+                    // Only for a model that has a projector. On one that does
+                    // not, a switch reading "off" would describe a file that
+                    // was never installed as a setting somebody had chosen.
+                    if (state.hasProjector) {
+                        SectionKicker("Vision", Modifier.padding(top = 20.dp, bottom = 8.dp))
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "Load the projector",
+                                style = NocturneType.Row,
+                                modifier = Modifier.weight(1f),
+                            )
+                            NSwitch(
+                                checked = state.visionEnabled,
+                                onCheckedChange = onVisionEnabledChange,
+                            )
+                        }
+                    }
 
                     // — chat template —
                     SectionKicker(
