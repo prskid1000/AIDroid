@@ -113,13 +113,31 @@ class VideoViewModel @Inject constructor(
     }
 
     /**
-     * The components installed for this model, as the loader will be told them.
+     * The components chosen for this model, as the loader will be told them.
      *
-     * The same list the image screen builds, minus the two roles the video
-     * struct has no field for. Offering an IP-Adapter here would be offering a
-     * file that loads, costs its weights and its 2.5 GB vision encoder, and is
-     * then never consulted — `sd_vid_gen_params_t` has nowhere to put the
-     * picture it would read.
+     * Built from what has been *chosen* — the model's own parameters, plus the
+     * obvious adoptions made on its behalf — and not from the library, which is
+     * what it used to be and what made this screen read differently from the
+     * still one for the same model.
+     *
+     * Sourcing it from the library put a row on screen for every add-on
+     * installed anywhere on the device. A Wan clip listed FLUX.2's Qwen3 encoder
+     * under Prompt encoder as "n/a · Not used by wan", which is the app
+     * answering a question nobody asked: nothing had chosen that file for this
+     * model, so there was nothing to disown. Meanwhile the still screen, reading
+     * from the choices, listed the one encoder it had been given and no more.
+     *
+     * The distinction is not cosmetic. [ModelAttachment.applicable] exists so a
+     * component someone *did* choose and this model cannot use is visible and
+     * disarmed rather than dropped — because the loader falls back to the stored
+     * path for any role the caller does not mention, and a dropped row is a file
+     * quietly loaded anyway. A library-sourced row inverted that: the mere
+     * presence of an unarmed LLM in the library shadowed a stored `llm` path, so
+     * a choice made under All Parameters was silently discarded on this screen
+     * and honoured on the other.
+     *
+     * What stays video-specific is which roles count at all — see
+     * [ROLES_VIDEO_IGNORES] and [rolesRead].
      */
     private suspend fun refreshAttachments(all: List<ModelEntity>) {
         val model = _state.value.model
@@ -132,60 +150,136 @@ class VideoViewModel @Inject constructor(
             model?.architecture,
         )
         // What the loader said, or failing that what the file declares.
-        val family = ai.ondevice.core.DiffusionFamily.forName(
-            _state.value.recognisedAs ?: model?.architecture,
-        )
+        val arch = _state.value.recognisedAs ?: model?.architecture
+        val family = ai.ondevice.core.DiffusionFamily.forName(arch)
         val reads = rolesRead(family)
 
-        val candidates = all.mapNotNull { entity ->
-            val role = entity.attachmentRole ?: return@mapNotNull null
-            if (role in ROLES_VIDEO_IGNORES) return@mapNotNull null
-            entity to role
-        }
-        val perRole = candidates.groupBy({ it.second }, { it.first })
+        // Three questions, asked in one place because they are one question:
+        // does the video struct have a field for this, does the manifest offer
+        // it for this architecture, and does this family read it.
+        fun usable(role: AttachmentRole): Boolean =
+            role !in ROLES_VIDEO_IGNORES &&
+                role.paramKey in offered &&
+                (reads == null || role in reads)
 
-        val attachments = candidates.map { (entity, role) ->
-            // Armed by role alone was the fault. Every VAE and every prompt
-            // encoder in the library switched itself on against whatever was
-            // loaded, so Wan 2.2 was handed FLUX.2's decoder and FLUX.2's Qwen3
-            // encoder while its own decoder sat installed and unused — and the
-            // load failed on tensor shapes, which names the symptom and not the
-            // cause.
-            //
-            // Three conditions now, and the same ones the image screen applies:
-            // the parameter set has to offer the slot, the family has to read
-            // it, and there has to be exactly one file that could fill it. Two
-            // candidates is a question for the person, not a coin toss — it
-            // shows up under "installed, not chosen".
-            // Two files for one slot is a question — unless one of them came
-            // out of the same repo as the checkpoint, in which case it is the
-            // one the publisher shipped for it.
-            val forRole = perRole[role].orEmpty().fromSameRepoAs(model)
-            val onlyOne = forRole.size == 1 && forRole.first().id == entity.id
-            val wanted = reads == null || role in reads
-            ModelAttachment(
-                modelId = entity.id,
-                role = role,
-                path = entity.localPath,
-                displayName = entity.label,
-                enabled = _state.value.availableAttachments
-                    .firstOrNull { it.modelId == entity.id }?.enabled
-                    ?: (role in ROLES_ARMED_BY_DEFAULT && wanted && onlyOne &&
-                        role.paramKey in offered && suits(family, role, entity)),
-                applicable = role.paramKey in offered && wanted,
-            )
+        val chosen = model
+            ?.let { adoptObviousComponents(it, all, family, ::usable) }
+            ?: SparseParams.EMPTY
+        val previous = _state.value.availableAttachments.associateBy { it.modelId }
+
+        // One entry per *file*, not per role: a LoRA key holds a stack.
+        val attachments = AttachmentRole.entries.flatMap { role ->
+            ai.ondevice.core.WeightedPaths.parse(chosen[role.paramKey]).map { pick ->
+                // A chosen path with no library row behind it is still chosen,
+                // and the loader will still pass it.
+                val entity = all.firstOrNull { it.localPath == pick.path }
+                val id = entity?.id ?: pick.path
+                val before = previous[id]
+                ModelAttachment(
+                    modelId = id,
+                    role = role,
+                    path = pick.path,
+                    displayName = entity?.label ?: File(pick.path).name,
+                    // The sheet's dial wins until the stored strength itself
+                    // changes, at which point the new one is the answer.
+                    weight = before?.takeIf { it.chosenWeight == pick.weight }?.weight
+                        ?: pick.weight,
+                    chosenWeight = pick.weight,
+                    // Chosen means armed, unless this run said otherwise.
+                    enabled = usable(role) && (before?.enabled ?: true),
+                    applicable = usable(role),
+                    mismatch = mismatchNote(family, arch, role, entity),
+                )
+            }
         }
 
-        val claimed = attachments.filter { it.enabled }.map { it.role }.toSet()
+        val claimed = attachments.map { it.role }.toSet()
         _state.value = _state.value.copy(
             availableAttachments = attachments,
             installedRoles = all.mapNotNull { it.attachmentRole }.toSet(),
-            unchosenRoles = attachments
-                .map { it.role }
-                .filter { it !in claimed && it.paramKey in offered && (reads == null || it in reads) }
+            // Installed, fits this model, and nobody has said which one — the
+            // difference between "you have nothing" and "you have not picked".
+            unchosenRoles = all
+                .mapNotNull { it.attachmentRole }
+                .filter { it !in claimed && usable(it) }
                 .distinct()
                 .sortedBy { it.ordinal },
         )
+    }
+
+    /**
+     * Fill the empty slots this model cannot run without, where one file fits.
+     *
+     * The still screen's [ImageViewModel.adoptObviousComponents] by the same
+     * rules, so a component adopted on one screen is the component the other one
+     * shows. It writes the choice down rather than arming it in memory, which is
+     * the difference: this screen used to decide afresh every refresh and tell
+     * nobody, so All Parameters showed an empty slot for a file that was being
+     * loaded on every run.
+     *
+     * Companion denoisers are adoptable here and are not on the still screen.
+     * Wan 2.2's I2V splits its weights by timestep and both halves are the
+     * model — leaving that unfilled is not restraint, it is a clip that cannot
+     * be made — and this is the only screen that can run one.
+     */
+    private suspend fun adoptObviousComponents(
+        model: ModelEntity,
+        installed: List<ModelEntity>,
+        family: ai.ondevice.core.DiffusionFamily?,
+        usable: (AttachmentRole) -> Boolean,
+    ): SparseParams {
+        val chosen = SparseParams.parse(model.paramOverridesJson)
+        // A checkpoint that carries its own encoders and decoder is filled, and
+        // adopting into it substitutes rather than supplies. Only the loader
+        // knows, and only after it has read the file.
+        if (_state.value.bareDenoiser == false) return chosen
+
+        var next = chosen
+        for (role in AttachmentRole.entries) {
+            if (role.family !in ADOPTABLE_FAMILIES) continue
+            if (role.multiple) continue
+            if (!usable(role)) continue
+            // Presence of the key is the question having been answered, and an
+            // empty answer is still an answer.
+            if (role.paramKey in chosen) continue
+            val candidates = installed
+                .filter { it.attachmentRole == role && File(it.localPath).isFile }
+                .filter { suits(family, role, it) }
+            // Several for one slot is a question, unless one of them shipped in
+            // the same repo as the checkpoint — see fromSameRepoAs.
+            val only = candidates.fromSameRepoAs(model).singleOrNull() ?: continue
+            next = next.with(role.paramKey, only.localPath)
+        }
+        if (next == chosen) return chosen
+
+        val json = next.toJsonString()
+        db.models().upsert(model.copy(paramOverridesJson = json))
+        // The row this screen holds is a copy; keep it in step or the next
+        // refresh adopts the same files again.
+        _state.value = _state.value.copy(model = model.copy(paramOverridesJson = json))
+        return next
+    }
+
+    /**
+     * Why this file is the wrong one for the slot it is in, or null.
+     *
+     * The still screen says this and this one did not, which is the whole of it:
+     * both T5-XXLs are called T5-XXL, and being told which one is in the slot is
+     * the only thing on the row that can tell them apart.
+     */
+    private fun mismatchNote(
+        family: ai.ondevice.core.DiffusionFamily?,
+        arch: String?,
+        role: AttachmentRole,
+        candidate: ModelEntity?,
+    ): String? {
+        if (role != AttachmentRole.T5XXL) return null
+        val wanted = family?.t5 ?: return null
+        val vocab = candidate?.localPath?.let { ai.ondevice.data.hf.LocalGguf.vocabSize(it) }
+        val kind = ai.ondevice.core.DiffusionFamily.T5Kind.of(vocab) ?: return null
+        if (kind == wanted) return null
+        return "This is ${kind.label}; ${arch ?: "this model"} reads ${wanted.label}. They share " +
+            "the slot and not the vocabulary, so this loads and conditions on the wrong tokens."
     }
 
     /**
@@ -648,17 +742,20 @@ class VideoViewModel @Inject constructor(
             AttachmentRole.CONTROLNET,
         )
 
-        /** The parts a model cannot run without, armed unless switched off. */
-        val ROLES_ARMED_BY_DEFAULT = setOf(
-            AttachmentRole.VAE,
-            AttachmentRole.AUDIO_VAE,
-            AttachmentRole.CLIP_L,
-            AttachmentRole.CLIP_G,
-            AttachmentRole.T5XXL,
-            AttachmentRole.LLM_ENCODER,
-            AttachmentRole.LLM_VISION,
-            AttachmentRole.HIGH_NOISE_DIFFUSION,
-            AttachmentRole.MOTION_MODULE,
+        /**
+         * The parts of a run that are plumbing rather than authorship, and so
+         * may be filled in on the user's behalf where exactly one file fits.
+         *
+         * The still screen's list plus companion denoisers. A LoRA changes what
+         * comes out and stays unchosen until somebody says otherwise; Wan 2.2's
+         * high-noise half changes nothing — it *is* the model, published in two
+         * files — and this is the only screen that can run one.
+         */
+        val ADOPTABLE_FAMILIES = setOf(
+            ai.ondevice.core.RoleFamily.PROMPT_ENCODER,
+            ai.ondevice.core.RoleFamily.DECODER,
+            ai.ondevice.core.RoleFamily.POST,
+            ai.ondevice.core.RoleFamily.COMPANION_DENOISER,
         )
     }
 }
