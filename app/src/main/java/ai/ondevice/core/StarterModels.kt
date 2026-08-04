@@ -142,16 +142,30 @@ object StarterModels {
         // size below is the whole bundle rather than the checkpoint — the
         // checkpoint is the part that fits.
         StarterModel(
-            repoId = WAN22_TI2V_5B,
+            repoId = WAN22_TI2V_5B_TURBO,
             modality = Modality.DIFFUSION,
             summary = "Video, and the one that fits. Text or a picture in, a few seconds of " +
                 "clip out, silently — sound needs an architecture no phone here has the " +
-                "memory for.",
-            sizeHint = "2.37 GB at Q3_K_M, ~6.5 GB the bundle",
+                "memory for. Step-distilled: four steps at CFG 1 rather than twenty at CFG 6, " +
+                "which on a phone is the difference between a clip and an afternoon.",
+            sizeHint = "2.55 GB at Q3_K_M, ~6.7 GB the bundle",
         ),
     )
 
     // Repo ids used by more than one card, or long enough to be worth a name.
+    /**
+     * The step-distilled TI2V 5B, which is the one worth recommending.
+     *
+     * Same architecture, same encoder, same decoder as the base model — only
+     * the denoiser differs, and it differs by taking four steps at CFG 1 where
+     * the original takes twenty at CFG 6. CFG 1 also drops the unconditional
+     * pass, so each of those four steps costs half of what one used to.
+     * Measured on the device this was written against, a 384² clip went from
+     * three quarters of an hour to a few minutes.
+     */
+    private const val WAN22_TI2V_5B_TURBO = "hum-ma/Wan2.2-TI2V-5B-Turbo-GGUF"
+
+    /** Still the source of the 2.2 decoder, which Turbo does not ship. */
     private const val WAN22_TI2V_5B = "QuantStack/Wan2.2-TI2V-5B-GGUF"
     private const val Z_IMAGE_TURBO = "leejet/Z-Image-Turbo-GGUF"
     private const val SD35_TURBO = "tensorart/stable-diffusion-3.5-medium-turbo"
@@ -494,8 +508,8 @@ object StarterModels {
 
         StarterBundle(
             architecture = "wan2_2_ti2v",
-            label = "Wan 2.2 TI2V 5B",
-            base = ALL.first { it.repoId == WAN22_TI2V_5B },
+            label = "Wan 2.2 TI2V 5B Turbo",
+            base = ALL.first { it.repoId == WAN22_TI2V_5B_TURBO },
             parts = listOf(
                 StarterModel(
                     repoId = "city96/umt5-xxl-encoder-gguf",
@@ -503,16 +517,19 @@ object StarterModels {
                     role = AttachmentRole.T5XXL,
                     summary = "Required. Wan reads its prompt with UMT5-XXL, and the encoder " +
                         "is larger than the model it feeds — Q3_K_M is where it stops being " +
-                        "the biggest thing in the bundle.",
+                        "the biggest thing in the bundle. Distilling the denoiser did not " +
+                        "change the encoder, and this is the same file the undistilled model " +
+                        "reads.",
                     sizeHint = "2.85 GB at Q3_K_M",
                 ),
                 StarterModel(
                     repoId = WAN22_TI2V_5B,
                     modality = Modality.DIFFUSION,
                     role = AttachmentRole.VAE,
-                    summary = "Required, at VAE/Wan2.2_VAE.safetensors. The 2.2 decoder, not " +
-                        "the 2.1 one every other Wan uses — TI2V 5B is the exception, and the " +
-                        "wrong one decodes to noise rather than failing.",
+                    summary = "Required, at VAE/Wan2.2_VAE.safetensors — from the undistilled " +
+                        "repo, because Turbo ships a denoiser and nothing else. The 2.2 " +
+                        "decoder, not the 2.1 one every other Wan uses: TI2V 5B is the " +
+                        "exception, and the wrong one decodes to noise rather than failing.",
                     sizeHint = "1.31 GB",
                 ),
             ),

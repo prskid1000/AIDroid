@@ -137,7 +137,7 @@ class VideoViewModel @Inject constructor(
      * and honoured on the other.
      *
      * What stays video-specific is which roles count at all — see
-     * [ROLES_VIDEO_IGNORES] and [rolesRead].
+     * [ROLES_VIDEO_IGNORES] and [familyReads].
      */
     private suspend fun refreshAttachments(all: List<ModelEntity>) {
         val model = _state.value.model
@@ -152,7 +152,6 @@ class VideoViewModel @Inject constructor(
         // What the loader said, or failing that what the file declares.
         val arch = _state.value.recognisedAs ?: model?.architecture
         val family = ai.ondevice.core.DiffusionFamily.forName(arch)
-        val reads = rolesRead(family)
 
         // Three questions, asked in one place because they are one question:
         // does the video struct have a field for this, does the manifest offer
@@ -160,7 +159,7 @@ class VideoViewModel @Inject constructor(
         fun usable(role: AttachmentRole): Boolean =
             role !in ROLES_VIDEO_IGNORES &&
                 role.paramKey in offered &&
-                (reads == null || role in reads)
+                familyReads(family, role)
 
         val chosen = model
             ?.let { adoptObviousComponents(it, all, family, ::usable) }
@@ -283,18 +282,40 @@ class VideoViewModel @Inject constructor(
     }
 
     /**
-     * The slots this family actually reads, or null when the family is unknown.
+     * Whether this family has any use for this slot.
      *
-     * Null is not "none": an architecture nothing recognises gets the old
-     * behaviour, because refusing to arm anything for a model we cannot
-     * describe would be worse than the guess.
+     * [DiffusionFamily] describes two things and only two: how a family encodes
+     * its prompt, and whether its decoder ships separately. So those are the
+     * two questions it is asked. Everything else — a LoRA, an upscaler, the
+     * second half of a split denoiser — it says nothing about, and silence is
+     * not a refusal: the manifest's `appliesTo` already gates those per
+     * architecture, which is how the still screen has always decided.
+     *
+     * Reading silence as "no" is what this used to do, by taking the family's
+     * encoder keys as the whole set of usable roles. Nothing outside that set
+     * could ever be armed, so a LoRA on a clip showed as "n/a · Not used by
+     * wan" and was never passed to the loader — including the step-distilled
+     * LoRAs that are the only thing making a clip on this hardware practical.
+     * Wan 2.2's high-noise denoiser was refused the same way, which is half a
+     * model dropped in silence.
+     *
+     * An unrecognised architecture says yes to everything the manifest offers,
+     * because refusing what we cannot describe is worse than the guess.
      */
-    private fun rolesRead(family: ai.ondevice.core.DiffusionFamily?): Set<AttachmentRole>? {
-        if (family == null) return null
-        val keys = family.encoders + family.optionalEncoders
-        return buildSet {
-            AttachmentRole.entries.filter { it.paramKey in keys }.forEach(::add)
-            if (family.vaeSeparate) add(AttachmentRole.VAE)
+    private fun familyReads(
+        family: ai.ondevice.core.DiffusionFamily?,
+        role: AttachmentRole,
+    ): Boolean {
+        if (family == null) return true
+        return when (role.family) {
+            ai.ondevice.core.RoleFamily.PROMPT_ENCODER ->
+                role.paramKey in family.encoders || role.paramKey in family.optionalEncoders
+            // A checkpoint that carries its own decoder does not take one.
+            // The audio decoder is a separate latent space and a separate
+            // question, left to the manifest.
+            ai.ondevice.core.RoleFamily.DECODER ->
+                role != AttachmentRole.VAE || family.vaeSeparate
+            else -> true
         }
     }
 
