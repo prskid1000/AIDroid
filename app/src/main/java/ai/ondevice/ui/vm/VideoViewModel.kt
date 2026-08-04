@@ -633,6 +633,11 @@ class VideoViewModel @Inject constructor(
                     recognisedAs = diffusion.detectedVersion,
                     bareDenoiser = diffusion.bareDiffusion,
                     supportsVideo = diffusion.supportsVideo,
+                    // Asked of the checkpoint that is loaded, because the Wan
+                    // variants disagree and the one that cannot use a first
+                    // frame discards it without saying so.
+                    supportsStartFrame = diffusion.supportsStartFrame,
+                    supportsEndFrame = diffusion.supportsEndFrame,
                     residentComponents = listOfNotNull(diffusion.residentModel) +
                         diffusion.residentComponents.map {
                             "${it.role.label} · ${it.fileName} · " +
@@ -972,6 +977,16 @@ data class VideoState(
     val recognisedAs: String? = null,
     /** Whether the loaded context can make video at all — false until one is loaded. */
     val supportsVideo: Boolean = false,
+    /**
+     * Whether the loaded checkpoint reads a supplied first — or last — frame.
+     *
+     * False until something is loaded, so neither control is offered before
+     * there is a model whose answer is known. Offering a picker that the run
+     * will ignore is worse than not offering it: the clip comes back looking
+     * merely disappointing, with nothing to say the picture was dropped.
+     */
+    val supportsStartFrame: Boolean = true,
+    val supportsEndFrame: Boolean = true,
     val clip: DiffusionClip? = null,
     val frameIndex: Int = 0,
     val playing: Boolean = false,

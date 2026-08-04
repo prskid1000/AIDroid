@@ -106,6 +106,14 @@ object SdBridge {
     external fun nativeSupportsVideo(handle: Long): Boolean
 
     /**
+     * What the loaded denoiser calls itself — "Wan2.2-TI2V-5B" and the like.
+     *
+     * Whether a first or last frame is used at all is decided upstream on this
+     * string; see [ai.ondevice.core.VideoConditioning].
+     */
+    external fun nativeModelDesc(handle: Long): String
+
+    /**
      * Generate a clip and leave it on disk, returning a manifest rather than
      * pixels — `{"dir","frames":[…],"width","height","fps","audio"}`.
      *

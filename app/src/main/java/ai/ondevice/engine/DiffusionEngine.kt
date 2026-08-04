@@ -7,6 +7,7 @@ import android.net.Uri
 import ai.ondevice.core.AttachmentRole
 import ai.ondevice.core.ModelAttachment
 import ai.ondevice.core.SparseParams
+import ai.ondevice.core.VideoConditioning
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -223,6 +224,13 @@ class DiffusionEngine(
             // on whether a file was attached.
             supportsImage = SdBridge.nativeSupportsImage(newHandle)
             supportsVideo = SdBridge.nativeSupportsVideo(newHandle)
+            // Which of the two supplied frames this particular checkpoint will
+            // read. Asked per checkpoint and not per family, because the Wan
+            // variants disagree: a T2V one drops a first frame in silence.
+            val desc = SdBridge.nativeModelDesc(newHandle).takeIf { it.isNotBlank() }
+            modelDesc = desc
+            supportsStartFrame = supportsVideo && VideoConditioning.supportsStartFrame(desc)
+            supportsEndFrame = supportsVideo && VideoConditioning.supportsEndFrame(desc)
             // What the loader decided this checkpoint is, now that it has read
             // the tensors. Nothing else in the app can know it as reliably.
             detectedVersion = SdBridge.nativeDetectedVersion().takeIf { it.isNotBlank() }
@@ -307,6 +315,26 @@ class DiffusionEngine(
 
     @Volatile
     var supportsVideo: Boolean = false
+        private set
+
+    /** What the loaded denoiser called itself, or null when it never said. */
+    @Volatile
+    var modelDesc: String? = null
+        private set
+
+    /**
+     * Whether a supplied first — or last — frame is read by this checkpoint.
+     *
+     * Two flags rather than one: the plain Wan I2V checkpoints take a start
+     * frame and have nowhere to put an end one, so offering both would still
+     * be offering something that does nothing.
+     */
+    @Volatile
+    var supportsStartFrame: Boolean = true
+        private set
+
+    @Volatile
+    var supportsEndFrame: Boolean = true
         private set
 
     /**
@@ -407,6 +435,9 @@ class DiffusionEngine(
         loadedModelId = null
         supportsImage = false
         supportsVideo = false
+        modelDesc = null
+        supportsStartFrame = true
+        supportsEndFrame = true
     }
 
     fun applyParams(params: SparseParams): ParamReport {
@@ -730,10 +761,28 @@ class DiffusionEngine(
         toRgb(BitmapFactory.decodeFile(path) ?: return null)
     }.getOrNull()
 
-    /** sd.cpp wants tightly packed RGB, and Android hands back ARGB_8888. */
+    /**
+     * sd.cpp wants tightly packed RGB, and Android hands back ARGB_8888.
+     *
+     * The shape is left alone. This used to floor both sides to a multiple of
+     * 64, which was wrong twice over: upstream resizes every supplied picture
+     * to the *requested* dimensions itself, so the work was redundant and cost
+     * a second resample; and flooring changes the aspect ratio, so a 512×288
+     * first frame arrived as 512×256 and the clip came out 2:1 instead of the
+     * 16:9 that was asked for. Sixty-four was never the right number either —
+     * it is SD's, while Wan needs 32 and Flux 16 — but no number is, because
+     * this is not the place the decision belongs.
+     *
+     * The one thing worth doing here is bounding the size. A camera photo is
+     * twelve megapixels, which is thirty-six megabytes of packed RGB handed to
+     * a process already holding several gigabytes of weights, and every one of
+     * those pixels is about to be thrown away by the resize upstream does.
+     */
     private fun toRgb(source: Bitmap): Rgb {
-        val width = (source.width / 64).coerceAtLeast(1) * 64
-        val height = (source.height / 64).coerceAtLeast(1) * 64
+        val longest = maxOf(source.width, source.height)
+        val scale = if (longest > MAX_SUPPLIED_EDGE) MAX_SUPPLIED_EDGE.toFloat() / longest else 1f
+        val width = (source.width * scale).toInt().coerceAtLeast(1)
+        val height = (source.height * scale).toInt().coerceAtLeast(1)
         val bitmap = if (width != source.width || height != source.height) {
             Bitmap.createScaledBitmap(source, width, height, true)
         } else {
@@ -834,6 +883,15 @@ class DiffusionEngine(
         const val WEIGHT_TYPE_KEY = "type"
 
         private const val TAG = "DiffusionEngine"
+
+        /**
+         * The longest edge a supplied picture is carried at.
+         *
+         * Not a quality ceiling — upstream resizes to the requested dimensions
+         * anyway, and those are far below this on a phone. It is a bound on
+         * what a twelve-megapixel camera photo costs on its way through.
+         */
+        private const val MAX_SUPPLIED_EDGE = 2048
 
         /**
          * The roles `sd_ctx_params_t` has a path for.

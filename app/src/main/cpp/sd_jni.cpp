@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
+#include <cctype>
 #include <cstring>
 #include <list>
 #include <map>
@@ -323,6 +324,23 @@ std::mutex  g_version_mutex;
 std::string g_version;
 
 /**
+ * What the loaded denoiser calls itself — "Wan2.2-TI2V-5B", "Wan2.x-T2V-14B".
+ *
+ * Not the same question as the version, and the difference is the whole point.
+ * The version says "Wan 2.2"; whether a *start frame* is used at all is decided
+ * upstream on this string, and the Wan variants disagree with each other. A
+ * T2V checkpoint handed a first frame matches no branch there, so the picture
+ * is dropped without a word and the clip comes out as if none had been given.
+ *
+ * Read from the log because upstream announces it on load —
+ * `LOG_INFO("%s", desc.c_str())` at the end of the Wan constructor — and
+ * exposes no accessor for it. The alternative was guessing the variant from a
+ * filename, which is the one thing this app has decided not to do about models.
+ */
+std::mutex  g_model_desc_mutex;
+std::string g_model_desc;
+
+/**
  * Whether the last load went through the bare-denoiser door.
  *
  * A full checkpoint carries its denoiser, its text encoders and its VAE in one
@@ -606,6 +624,8 @@ bool note_buffer(const std::string & line) {
     return true;
 }
 
+void note_model_desc(const std::string & line);
+
 void note_stage(const char * text) {
     if (text == nullptr) return;
     std::string line(text);
@@ -623,6 +643,7 @@ void note_stage(const char * text) {
     // Kept as a figure rather than as a sentence, so it does not also become
     // the stage line and appear twice.
     if (note_buffer(line)) return;
+    note_model_desc(line);
     {
         std::lock_guard<std::mutex> lock(g_stage_mutex);
         g_stage = line;
@@ -644,6 +665,51 @@ void note_version(const char * text) {
     if (value.empty()) return;
     std::lock_guard<std::mutex> lock(g_version_mutex);
     g_version = value;
+}
+
+/**
+ * Record a line that is a model identifier and nothing else.
+ *
+ * Upstream logs the desc bare, with no label to key on, so the test is on the
+ * shape of the line: one token, no spaces, letters and digits both, and only
+ * the punctuation these names use. "Wan2.2-TI2V-5B" passes; "sampling
+ * completed" and "load_model_from_file" do not.
+ *
+ * Last one wins. Several runners are constructed during a load — the denoiser
+ * announces itself after the encoders — and it is the denoiser that decides
+ * whether a first frame means anything.
+ */
+void note_model_desc(const std::string & line) {
+    if (line.size() < 4 || line.size() > 48) return;
+
+    // No underscore, and that is what separates a desc from the two things
+    // that otherwise look exactly like one. Upstream's descs are written with
+    // hyphens and dots — "Wan2.2-TI2V-5B", "Wan2.1-FLF2V-14B" — while the
+    // lines that would be mistaken for them are a quant name ("Q4_K_M") and a
+    // checkpoint filename ("Wan2_2-TI2V-5B-Turbo-Q4_K_M.gguf"), both of which
+    // use underscores. Without this the filename wins, because it is logged
+    // after the desc and the last match is the one kept.
+    bool letter = false;
+    bool digit  = false;
+    for (unsigned char c : line) {
+        if (std::isalpha(c)) {
+            letter = true;
+        } else if (std::isdigit(c)) {
+            digit = true;
+        } else if (c != '.' && c != '-') {
+            return;  // a space, an underscore, a colon: not a desc
+        }
+    }
+    if (!letter || !digit) return;
+
+    // Nor a file, whatever its punctuation.
+    for (const char * suffix : { ".gguf", ".safetensors", ".ckpt", ".bin", ".pt", ".pth" }) {
+        const size_t n = std::strlen(suffix);
+        if (line.size() >= n && line.compare(line.size() - n, n, suffix) == 0) return;
+    }
+
+    std::lock_guard<std::mutex> lock(g_model_desc_mutex);
+    g_model_desc = line;
 }
 
 void set_last_error(const char * text) {
@@ -1428,6 +1494,7 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
 
     // A version left over from the last checkpoint would be read as this one's.
     { std::lock_guard<std::mutex> lock(g_version_mutex); g_version.clear(); }
+    { std::lock_guard<std::mutex> lock(g_model_desc_mutex); g_model_desc.clear(); }
     { std::lock_guard<std::mutex> lock(g_stage_mutex); g_stage.clear(); }
     { std::lock_guard<std::mutex> lock(g_loaded_mutex); g_loaded.clear(); }
     { std::lock_guard<std::mutex> lock(g_buffers_mutex); g_buffers.clear(); }
@@ -1847,6 +1914,19 @@ JNIEXPORT jboolean JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeSupportsVideo(JNIEnv *, jobject, jlong handle) {
     auto * e = as_sd(handle);
     return e != nullptr && e->supports_video.load();
+}
+
+/**
+ * What the loaded denoiser calls itself, or "" when it never said.
+ *
+ * The caller turns this into "may this model be given a first frame" — see
+ * VideoConditioning on the Kotlin side, which mirrors the branch upstream
+ * takes on the same string.
+ */
+JNIEXPORT jstring JNICALL
+Java_ai_ondevice_engine_SdBridge_nativeModelDesc(JNIEnv * env, jobject, jlong) {
+    std::lock_guard<std::mutex> lock(g_model_desc_mutex);
+    return jni_from_string(env, g_model_desc);
 }
 
 /**

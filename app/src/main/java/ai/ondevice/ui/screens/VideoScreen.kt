@@ -191,34 +191,62 @@ fun VideoScreen(
 
             // — the two ends —
 
-            SectionKicker("Frames you supply", Modifier.padding(top = 18.dp, bottom = 6.dp))
-            NHelp(
-                "Both optional. With a first frame the clip starts from your picture; with " +
-                    "both, the model travels from one to the other.",
-                Modifier.padding(bottom = 8.dp),
-            )
-            PickedImageField(
-                label = "First frame",
-                uri = state.firstFrameUri,
-                emptyLabel = "Start the clip from a picture",
-                onPick = {
-                    pickFirst.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+            /*
+             * Shown only where the loaded checkpoint reads them.
+             *
+             * Whether a supplied frame is used at all is decided per
+             * checkpoint, not per family, and the Wan variants disagree: a
+             * text-to-video one matches no branch in the runtime, so the
+             * picture is dropped in silence and the clip returns as though
+             * none had been given. That is the worst shape a failure can
+             * take — nothing is reported and the result is merely worse than
+             * expected — so the picker is not offered when it would lie.
+             *
+             * Nothing is said in its place while no model is loaded. The
+             * answer is unknown then rather than no, and a warning about a
+             * limitation the next model may not have is noise.
+             */
+            if (state.supportsStartFrame || state.supportsEndFrame) {
+                SectionKicker("Frames you supply", Modifier.padding(top = 18.dp, bottom = 6.dp))
+                NHelp(
+                    if (state.supportsEndFrame) {
+                        "Both optional. With a first frame the clip starts from your picture; " +
+                            "with both, the model travels from one to the other."
+                    } else {
+                        // Said rather than left to be discovered by supplying
+                        // one and watching it do nothing.
+                        "Optional. This model starts a clip from a picture but has nowhere to " +
+                            "put a closing one, so only the first frame is offered."
+                    },
+                    Modifier.padding(bottom = 8.dp),
+                )
+                if (state.supportsStartFrame) {
+                    PickedImageField(
+                        label = "First frame",
+                        uri = state.firstFrameUri,
+                        emptyLabel = "Start the clip from a picture",
+                        onPick = {
+                            pickFirst.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                            )
+                        },
+                        onClear = { viewModel.setFirstFrame(null) },
                     )
-                },
-                onClear = { viewModel.setFirstFrame(null) },
-            )
-            PickedImageField(
-                label = "Last frame",
-                uri = state.lastFrameUri,
-                emptyLabel = "End the clip on a picture",
-                onPick = {
-                    pickLast.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                }
+                if (state.supportsEndFrame) {
+                    PickedImageField(
+                        label = "Last frame",
+                        uri = state.lastFrameUri,
+                        emptyLabel = "End the clip on a picture",
+                        onPick = {
+                            pickLast.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                            )
+                        },
+                        onClear = { viewModel.setLastFrame(null) },
                     )
-                },
-                onClear = { viewModel.setLastFrame(null) },
-            )
+                }
+            }
 
             // The pose or depth map the motion follows.
             //
