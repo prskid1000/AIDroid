@@ -473,6 +473,20 @@ class VideoViewModel @Inject constructor(
     fun setFps(value: Int) = update { copy(fps = value.coerceIn(1, 60)) }
     fun setSteps(value: Int) = update { copy(steps = value.coerceIn(1, 60)) }
     fun setCfg(value: Float) = update { copy(cfgScale = value) }
+    /**
+     * Width and height apart, because a clip model has an aspect ratio.
+     *
+     * One square slider was the control, capped at 768, so the only shapes it
+     * could ask for were squares — and Wan 2.2 TI2V is trained at 1280x704 and
+     * 704x1280. Every clip this app has made has been off-distribution in both
+     * dimensions at once, which is most of why they come out as texture rather
+     * than as scenes.
+     */
+    fun setWidth(value: Int) = update { copy(width = value) }
+
+    fun setHeight(value: Int) = update { copy(height = value) }
+
+    /** Both at once, for the callers that want a square. */
     fun setSize(value: Int) = update { copy(width = value, height = value) }
     fun setSeed(value: Long) = update { copy(seed = value) }
     fun setVaeTiling(value: Boolean) = update { copy(vaeTiling = value) }

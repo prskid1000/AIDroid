@@ -522,13 +522,32 @@ private fun VideoSettingsSheet(
             )
 
             SectionKicker("Sampling", Modifier.padding(top = 18.dp, bottom = 6.dp))
+            // Two sliders, and up to 1536 — the ceiling the manifest always
+            // allowed and this screen never offered. A square capped at 768
+            // could not express 1280x704, which is what this family is trained
+            // at, so nothing made here had the shape the model expects.
             LabelledSlider(
-                label = "Size",
-                value = "${state.width}²",
+                label = "Width",
+                value = "${state.width}",
                 position = state.width.toFloat(),
-                range = 64f..768f,
+                range = 64f..1536f,
                 step = 64f,
-                onChange = { viewModel.setSize(Math.round(it)) },
+                onChange = { viewModel.setWidth(Math.round(it)) },
+            )
+            LabelledSlider(
+                label = "Height",
+                value = "${state.height}",
+                position = state.height.toFloat(),
+                range = 64f..1536f,
+                step = 64f,
+                onChange = { viewModel.setHeight(Math.round(it)) },
+            )
+            NHelp(
+                "Wan is trained at 1280×704 and 704×1280. Further from that in either " +
+                    "direction costs coherence before it costs anything else — and both " +
+                    "dimensions multiply the work, so this is the setting that decides how " +
+                    "long a clip takes.",
+                Modifier.padding(top = 2.dp, bottom = 4.dp),
             )
             LabelledSlider(
                 label = "Steps",
