@@ -539,16 +539,33 @@ private fun ImageSettingsSheet(
         // Above All Parameters because it is about this model rather than
         // about the run, and because it is the only control here that gives
         // something back instead of asking for something.
+        // Two-step while a run is going — see the clip screen's copy.
+        var confirmingUnload by rememberSaveable { mutableStateOf(false) }
+        val busyNow = state.generating || state.loadingModel
         NButton(
-            "Unload model",
-            onClick = viewModel::unloadModel,
+            when {
+                !busyNow -> "Unload model"
+                confirmingUnload -> "Unload and stop the run"
+                else -> "Unload model…"
+            },
+            onClick = {
+                when {
+                    !busyNow -> viewModel.unloadModel()
+                    confirmingUnload -> { confirmingUnload = false; viewModel.unloadModel() }
+                    else -> confirmingUnload = true
+                }
+            },
             style = NButtonStyle.Ghost,
             block = true,
             enabled = state.residentComponents.isNotEmpty(),
             modifier = Modifier.padding(top = 14.dp),
         )
         NHelp(
-            "Frees the weights now. Generating again reloads them.",
+            if (busyNow) {
+                "A run is in progress. Unloading frees its weights and stops it."
+            } else {
+                "Frees the weights now. Generating again reloads them."
+            },
             Modifier.padding(top = 4.dp),
         )
 

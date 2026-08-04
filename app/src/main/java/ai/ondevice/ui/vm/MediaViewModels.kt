@@ -283,7 +283,16 @@ class ImageViewModel @Inject constructor(
                     ?: d.string("sampling_method") ?: _state.value.samplingMethod,
                 schedule = p.string("schedule") ?: d.string("schedule") ?: _state.value.schedule,
                 clipSkip = p.int("clip_skip") ?: d.int("clip_skip") ?: _state.value.clipSkip,
-                vaeTiling = p.bool("vae_tiling") ?: d.bool("vae_tiling") ?: _state.value.vaeTiling,
+                // Tiling is not seeded from the runtime, deliberately.
+                //
+                // Upstream defaults it off, which is a reasonable assumption
+                // about a desktop with VRAM to spare and the wrong one here:
+                // the decoder's working buffer grows with area, and untiled at
+                // 384 square the runtime reserved 7.47 GB for it on a phone
+                // with 15.6 GB shared with the rest of Android. Whether to
+                // decode in tiles is a fact about the device, which this app
+                // knows and the model does not.
+                vaeTiling = p.bool("vae_tiling") ?: _state.value.vaeTiling,
                 // Both are editable on All Parameters as well, so the sheet has
                 // to start from what that screen last wrote rather than from
                 // the built-in default.

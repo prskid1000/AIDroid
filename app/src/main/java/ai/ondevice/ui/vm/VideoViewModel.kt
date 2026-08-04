@@ -173,7 +173,16 @@ class VideoViewModel @Inject constructor(
             height = p.int("height") ?: d.int("height") ?: s.height,
             frames = p.int("video_frames") ?: d.int("video_frames") ?: s.frames,
             fps = p.int("fps") ?: d.int("fps") ?: s.fps,
-            vaeTiling = p.bool("vae_tiling") ?: d.bool("vae_tiling") ?: s.vaeTiling,
+            // Tiling is not seeded from the runtime, deliberately.
+            //
+            // Upstream defaults it off, which is a reasonable assumption
+            // about a desktop with VRAM to spare and the wrong one here:
+            // the decoder's working buffer grows with area, and untiled at
+            // 384 square the runtime reserved 7.47 GB for it on a phone
+            // with 15.6 GB shared with the rest of Android. Whether to
+            // decode in tiles is a fact about the device, which this app
+            // knows and the model does not.
+            vaeTiling = p.bool("vae_tiling") ?: s.vaeTiling,
             controlStrength = p.float("vace_strength")
                 ?: d.float("vace_strength") ?: s.controlStrength,
         )

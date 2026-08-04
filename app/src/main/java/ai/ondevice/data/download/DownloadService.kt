@@ -64,7 +64,7 @@ class DownloadService : LifecycleService() {
         )
 
         val builder = Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setSmallIcon(R.drawable.ic_notify_download)
             .setContentIntent(open)
             .setOnlyAlertOnce(true)
             .setOngoing(true)
@@ -78,6 +78,7 @@ class DownloadService : LifecycleService() {
                     "${Fmt.percent(job.fraction)} · ${Fmt.bytes(job.bytesDone)} of ${Fmt.bytes(job.bytesTotal)}",
                 )
                 .setProgress(100, (job.fraction * 100).toInt(), false)
+                .setSubText(Fmt.bytes(job.bytesPerSecond) + "/s")
                 .addAction(
                     Notification.Action.Builder(
                         null,

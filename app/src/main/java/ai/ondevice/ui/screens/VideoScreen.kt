@@ -588,16 +588,40 @@ private fun VideoSettingsSheet(
                     "hi-res stage is a separate latent upsampler, and that is where it goes.",
             )
 
+            // Unloading is not something to do by accident mid-run.
+            //
+            // The button was live whenever anything was resident, including
+            // while sampling — and freeing the weights under a running
+            // generation ends it, badly, with the native side reading memory
+            // that has gone. Now that a run outlives the screen it is easier
+            // than ever to arrive here with one going, so a run in flight
+            // turns this into a two-step: say it, then mean it.
+            var confirmingUnload by rememberSaveable { mutableStateOf(false) }
+            val busyNow = state.generating || state.loadingModel
             NButton(
-                "Unload model",
-                onClick = viewModel::unloadModel,
+                when {
+                    !busyNow -> "Unload model"
+                    confirmingUnload -> "Unload and stop the run"
+                    else -> "Unload model…"
+                },
+                onClick = {
+                    when {
+                        !busyNow -> viewModel.unloadModel()
+                        confirmingUnload -> { confirmingUnload = false; viewModel.unloadModel() }
+                        else -> confirmingUnload = true
+                    }
+                },
                 style = NButtonStyle.Ghost,
                 block = true,
                 enabled = state.residentComponents.isNotEmpty(),
                 modifier = Modifier.padding(top = 18.dp),
             )
             NHelp(
-                "Frees the weights now. Generating again reloads them.",
+                if (busyNow) {
+                    "A run is in progress. Unloading frees its weights and stops it."
+                } else {
+                    "Frees the weights now. Generating again reloads them."
+                },
                 Modifier.padding(top = 4.dp),
             )
 

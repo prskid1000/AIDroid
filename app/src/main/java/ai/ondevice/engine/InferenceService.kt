@@ -34,6 +34,14 @@ class InferenceService : LifecycleService() {
 
     @Inject lateinit var prefs: AppPrefs
 
+    // The sessions own the runs now, so they are the only things that know
+    // what is happening. Injected rather than guessed at from the engine's
+    // loaded model, which was all this service used to have and which says
+    // nothing at all during an image, a clip or a transcription.
+    @Inject lateinit var video: ai.ondevice.ui.vm.VideoSession
+
+    @Inject lateinit var image: ai.ondevice.ui.vm.ImageSession
+
     private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
@@ -51,10 +59,15 @@ class InferenceService : LifecycleService() {
         // that was not a conversation — and a forty-five minute clip, in a
         // process holding ten gigabytes, is the first thing Android reclaims.
         lifecycleScope.launch {
-            combine(engines.state, running) { state, count -> state to count }
-                .collectLatest { (state, count) ->
-                    notificationManager().notify(NOTIFICATION_ID, buildNotification(state, count))
-                    if (state.loaded == null && count == 0) stopSelf()
+            combine(
+                engines.state,
+                running,
+                video.state,
+                image.state,
+            ) { engine, count, clip, still -> Progress(engine, count, clip, still) }
+                .collectLatest { progress ->
+                    notificationManager().notify(NOTIFICATION_ID, buildNotification(progress))
+                    if (progress.engine.loaded == null && progress.count == 0) stopSelf()
                 }
         }
 
@@ -93,7 +106,25 @@ class InferenceService : LifecycleService() {
         super.onDestroy()
     }
 
-    private fun buildNotification(state: EngineState?, active: Int = 0): Notification {
+    /** What the three things that can be running are each doing. */
+    private data class Progress(
+        val engine: EngineState,
+        val count: Int,
+        val clip: ai.ondevice.ui.vm.VideoState,
+        val still: ai.ondevice.ui.vm.ImageState,
+    )
+
+    /**
+     * What is happening, said the way the screen says it.
+     *
+     * This used to read "Model loaded" with a token rate under it and nothing
+     * else, whatever was actually going on — the service knew only whether the
+     * chat model was resident, so a clip four minutes into a five minute run
+     * was described as a loaded model. It now names the work, counts the steps
+     * and carries the same bar the screen draws, because the notification is
+     * the only view of a run once you have left the app.
+     */
+    private fun buildNotification(progress: Progress? = null): Notification {
         val open = PendingIntent.getActivity(
             this,
             0,
@@ -107,23 +138,83 @@ class InferenceService : LifecycleService() {
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        return Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_menu_manage)
-            .setContentTitle(
-                state?.loaded?.modelId
-                    ?: if (active > 0) "Generating" else "Model loaded",
-            )
-            .setContentText(
-                if (state != null && state.tokensPerSecond > 0) {
-                    Fmt.tokensPerSecond(state.tokensPerSecond)
-                } else {
-                    ""
-                },
-            )
+        val builder = Notification.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notify_generate)
             .setContentIntent(open)
             .setOnlyAlertOnce(true)
             .setOngoing(true)
-            .build()
+
+        // Whichever run is actually going. Only one can sample at a time —
+        // the diffusion engine holds a load lock — so the first match is the
+        // whole story rather than an arbitrary pick.
+        val clip = progress?.clip?.takeIf { it.generating || it.loadingModel }
+        val still = progress?.still?.takeIf { it.generating || it.loadingModel }
+
+        when {
+            clip != null -> builder.describe(
+                what = "Making a clip",
+                model = clip.model?.label,
+                phase = if (clip.loadingModel) "loading weights" else clip.phase.label,
+                step = clip.step,
+                steps = clip.progressSteps,
+                rate = clip.secondsPerStep,
+            )
+            still != null -> builder.describe(
+                what = "Making a picture",
+                model = still.model?.label,
+                phase = if (still.loadingModel) "loading weights" else still.phase.label,
+                step = still.step,
+                steps = still.progressSteps,
+                rate = still.secondsPerStep,
+            )
+            progress != null && progress.engine.tokensPerSecond > 0 -> builder
+                .setContentTitle("Answering")
+                .setContentText(
+                    listOfNotNull(
+                        progress.engine.loaded?.modelId,
+                        Fmt.tokensPerSecond(progress.engine.tokensPerSecond),
+                    ).joinToString(" · "),
+                )
+                .setProgress(0, 0, true)
+            progress?.count.let { it != null && it > 0 } -> builder
+                .setContentTitle("Working")
+                .setContentText(progress?.engine?.loaded?.modelId.orEmpty())
+                .setProgress(0, 0, true)
+            // Nothing running: the model is resident and that is all there is
+            // to say. Worth saying, because several gigabytes are being held.
+            else -> builder
+                .setContentTitle("Model in memory")
+                .setContentText(progress?.engine?.loaded?.modelId.orEmpty())
+        }
+        return builder.build()
+    }
+
+    /**
+     * One run, in the shape a status bar can show: what, on what, how far.
+     *
+     * The bar is determinate while there are steps to count and indeterminate
+     * while there are not — a load and a decode take minutes and report no
+     * step, and a bar frozen at zero for that long reads as a run that has
+     * stalled rather than one that is working.
+     */
+    private fun Notification.Builder.describe(
+        what: String,
+        model: String?,
+        phase: String,
+        step: Int,
+        steps: Int,
+        rate: Float,
+    ): Notification.Builder {
+        setContentTitle(what)
+        setContentText(
+            listOfNotNull(
+                model,
+                if (steps > 0 && step > 0) "step $step/$steps" else phase,
+                rate.takeIf { it > 0f }?.let { String.format("%.0f s/it", it) },
+            ).joinToString(" · "),
+        )
+        if (steps > 0 && step > 0) setProgress(steps, step, false) else setProgress(0, 0, true)
+        return this
     }
 
     private fun notificationManager() =

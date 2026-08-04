@@ -1,0 +1,21 @@
+<!--
+  The status-bar mark for a generation in progress.
+
+  A four-point spark: the shape the app already uses for "something is being
+  made", and legible at the 24dp a status bar gives it. Silhouette only, as
+  Android requires — anything with interior detail comes out as a grey smudge
+  at that size, which is what the stock ic_menu_manage was doing here.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFFFF">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,2.2 L13.9,8.7 L20.4,10.6 L13.9,12.5 L12,19 L10.1,12.5 L3.6,10.6 L10.1,8.7 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M18.4,15.4 L19.3,18.1 L22,19 L19.3,19.9 L18.4,22.6 L17.5,19.9 L14.8,19 L17.5,18.1 Z" />
+</vector>
