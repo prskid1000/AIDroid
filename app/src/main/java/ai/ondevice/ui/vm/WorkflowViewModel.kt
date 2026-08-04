@@ -152,9 +152,29 @@ class WorkflowViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Store a setting as the *type* it is, not as the text it was typed as.
+     *
+     * Everything here came from a text field, and writing it all back as a
+     * JSON string is wrong in a way that is invisible until a run: a step
+     * asking for sixty tokens sent `"60"` where the runtime wanted `60`,
+     * parsed it as nothing, and generated nothing — reporting success, because
+     * an empty answer is not an error anywhere along that path.
+     *
+     * The free-text keys are named rather than guessed at, because a prompt
+     * that happens to read "60" is a prompt and not a number.
+     */
     fun setParam(nodeId: String, key: String, value: String?) = updateNode(nodeId) { node ->
         val params = node.params.toMutableMap()
-        if (value == null) params.remove(key) else params[key] = JsonPrimitive(value)
+        when {
+            value == null -> params.remove(key)
+            key in TEXT_KEYS -> params[key] = JsonPrimitive(value)
+            value.equals("true", true) || value.equals("false", true) ->
+                params[key] = JsonPrimitive(value.toBoolean())
+            value.toLongOrNull() != null -> params[key] = JsonPrimitive(value.toLong())
+            value.toDoubleOrNull() != null -> params[key] = JsonPrimitive(value.toDouble())
+            else -> params[key] = JsonPrimitive(value)
+        }
         node.copy(params = JsonObject(params))
     }
 
@@ -185,12 +205,21 @@ class WorkflowViewModel @Inject constructor(
         }
     }
 
+    private companion object {
+        /** Settings that are prose, whatever they happen to look like. */
+        val TEXT_KEYS = setOf(
+            "text", "template", "pattern", "path", "model", "shape",
+            "voice", "provider", "separator", "by", "condition", "mode", "tool",
+            "arguments", "portType",
+        )
+    }
+
     /** What a freshly-added step starts at. */
     private fun defaultsFor(kind: NodeKind): JsonObject = when (kind) {
         NodeKind.Input, NodeKind.LibraryItem ->
             JsonObject(mapOf("portType" to JsonPrimitive(PortType.TEXT.name)))
         NodeKind.RepeatStart, NodeKind.Batch ->
-            JsonObject(mapOf("times" to JsonPrimitive("2")))
+            JsonObject(mapOf("times" to JsonPrimitive(2)))
         NodeKind.TextSplit ->
             JsonObject(mapOf("by" to JsonPrimitive("paragraph")))
         NodeKind.TextJoin ->

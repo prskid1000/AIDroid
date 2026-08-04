@@ -398,7 +398,12 @@ class WorkflowRunner @Inject constructor(
         reporter.onLoading(listOf(model.label), null)
 
         val stored = SparseParams.parse(model.paramOverridesJson)
-        val params = stored.overlaidWith(SparseParams(node.params.toMap()))
+        // The editor keeps its own bookkeeping in the same bag — which model
+        // was chosen, what shape that made the step — and none of it is a
+        // runtime parameter. Passing them through would have every run report
+        // a handful of rejected keys it could do nothing about.
+        val settings = node.params.toMap().filterKeys { it !in BOOKKEEPING }
+        val params = stored.overlaidWith(SparseParams(settings))
 
         when (model.modality) {
             Modality.TEXT, Modality.VISION ->
@@ -460,6 +465,7 @@ class WorkflowRunner @Inject constructor(
         // is also how the chat screen reaches it.
         activeCancel = { (engine as? ai.ondevice.engine.LlamaEngine)?.cancel() }
         val answer = StringBuilder()
+        var thought = 0
         try {
             engine.generate(
                 GenerateRequest(
@@ -471,6 +477,11 @@ class WorkflowRunner @Inject constructor(
             ).collect { event ->
                 when (event) {
                     is GenerationEvent.Token -> answer.append(event.text)
+                    // Counted, not kept. A reasoning model can spend its whole
+                    // budget here and answer with nothing, and the step after
+                    // is then handed an empty string — which fails somewhere
+                    // else entirely, saying something that sounds unrelated.
+                    is GenerationEvent.ThinkingDelta -> thought += event.text.length
                     is GenerationEvent.Failed -> throw IllegalStateException(event.message)
                     else -> Unit
                 }
@@ -478,7 +489,20 @@ class WorkflowRunner @Inject constructor(
         } finally {
             activeCancel = null
         }
-        put(outputs, node, "text", PortValue.text(answer.toString().trim()))
+        val text = answer.toString().trim()
+        if (text.isEmpty()) {
+            // Said here, where it happened, rather than two steps later.
+            throw IllegalStateException(
+                if (thought > 0) {
+                    "This model reasoned for ${'$'}thought characters and then answered with " +
+                        "nothing — the whole budget went to thinking. Raise the token limit, " +
+                        "or turn thinking off in the model's parameters."
+                } else {
+                    "This model answered with nothing."
+                },
+            )
+        }
+        put(outputs, node, "text", PortValue.text(text))
     }
 
     private suspend fun runDiffusion(
@@ -613,8 +637,19 @@ class WorkflowRunner @Inject constructor(
         synthesizer.useKokoroModel(directory)
         synthesizer.useOmniVoiceModel(directory)
         val destination = File(outDir, "${node.id}.wav")
-        val provider = when (params.string("provider")) {
-            SynthProvider.OMNIVOICE.name.lowercase() -> SynthProvider.OMNIVOICE
+        // Which engine, asked of the folder rather than assumed.
+        //
+        // This defaulted to Kokoro whatever was chosen, so pointing a step at
+        // OmniVoice ran Kokoro instead — quietly, since both make a WAV. The
+        // synthesiser can tell them apart by what is in the directory, which
+        // is the same structural test the Voice tab uses and needs no names.
+        val provider = when {
+            params.string("provider") == SynthProvider.OMNIVOICE.name.lowercase() ->
+                SynthProvider.OMNIVOICE
+            params.string("provider") == SynthProvider.KOKORO.name.lowercase() ->
+                SynthProvider.KOKORO
+            directory != null && synthesizer.omniVoiceLooksInstalled(directory) ->
+                SynthProvider.OMNIVOICE
             else -> SynthProvider.KOKORO
         }
         synthesizer.synthesizeToFile(
@@ -718,5 +753,8 @@ class WorkflowRunner @Inject constructor(
          * its count is an afternoon of a hot phone.
          */
         const val MAX_REPEATS = 32
+
+        /** Editor-only keys, kept out of what reaches an engine. */
+        val BOOKKEEPING = setOf("model", "shape", "portType", "times", "by", "separator", "template", "pattern", "condition", "mode", "tool")
     }
 }

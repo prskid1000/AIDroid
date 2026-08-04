@@ -531,6 +531,32 @@ private fun StepSettings(
                     "gives a picture.",
                 Modifier.padding(top = 4.dp),
             )
+            // A voice, when the chosen model needs one.
+            //
+            // Kokoro keeps its speakers in separate files and refuses without
+            // one — "No Kokoro voice was selected" is a real failure a step
+            // could not avoid, because there was nowhere to say which voice.
+            if (chosen?.modality == ai.ondevice.core.Modality.TEXT_TO_SPEECH) {
+                SectionKicker("Voice", Modifier.padding(top = 12.dp, bottom = 4.dp))
+                val voices = remember(chosen.localPath) { voicesFor(chosen.localPath) }
+                if (voices.isEmpty()) {
+                    // OmniVoice carries its speakers inside the model; only
+                    // Kokoro keeps them as separate files beside it.
+                    NHelp("This engine carries its own voice — nothing to choose.")
+                } else {
+                    NInput(
+                        value = value("voice"),
+                        onValueChange = { viewModel.setParam(node.id, "voice", it) },
+                        placeholder = voices.first(),
+                    )
+                    NHelp(
+                        "One of: " + voices.take(6).joinToString(", ") +
+                            if (voices.size > 6) ", and ${voices.size - 6} more." else ".",
+                        Modifier.padding(top = 4.dp),
+                    )
+                }
+            }
+
             if (picking) {
                 ModelPickerSheet(
                     models = models,
@@ -668,6 +694,21 @@ private fun BindSlotSheet(
             )
         }
     }
+}
+
+/**
+ * The speaker files sitting beside a voice model.
+ *
+ * Read off the folder rather than from a list in the app: which voices exist
+ * is a fact about what was downloaded, and a hard-coded set would be wrong the
+ * first time somebody installed a different pack.
+ */
+private fun voicesFor(modelPath: String): List<String> {
+    val dir = java.io.File(modelPath).let { if (it.isDirectory) it else it.parentFile }
+    return dir?.listFiles { f -> f.extension == "bin" }
+        ?.map { it.nameWithoutExtension }
+        ?.sorted()
+        .orEmpty()
 }
 
 /**
