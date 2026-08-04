@@ -2,7 +2,6 @@ package ai.ondevice.ui.vm
 
 import android.content.Context
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import ai.ondevice.core.MessageRole
 import ai.ondevice.core.Modality
 import ai.ondevice.core.SparseParams
@@ -43,18 +42,31 @@ class ChatViewModel @Inject constructor(
     private val archive: ai.ondevice.data.ConversationArchive,
     private val storage: ai.ondevice.data.ModelStorage,
     private val recorder: ai.ondevice.engine.ResourceRecorder,
+    // The turn and its state live here, not in this class — see ChatSession.
+    private val session: ChatSession,
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(ChatState())
-    val state: StateFlow<ChatState> = _state.asStateFlow()
+    private val _state get() = session.state
+    val state: StateFlow<ChatState> = session.state.asStateFlow()
 
-    private var generationJob: Job? = null
+    /** The session's scope, under the name the body of this class already used. */
+    private val runScope get() = session.scope
+
+    private var generationJob: Job?
+        get() = session.generationJob
+        set(value) { session.generationJob = value }
 
     init {
-        viewModelScope.launch { restore() }
+        // Once per process — see VideoSession.claimObservers.
+        if (session.claimObservers()) attachObservers()
+    }
+
+    /** The long-lived watchers, attached once for the life of the process. */
+    private fun attachObservers() {
+        runScope.launch { restore() }
 
         // The model list has to be live.
-        viewModelScope.launch {
+        runScope.launch {
             db.models().observeInstalled().collect { models ->
                 _state.value = _state.value.copy(
                     availableModels = models.filter {
@@ -70,7 +82,7 @@ class ChatViewModel @Inject constructor(
 
         // A chat model still arriving is not a chat model missing, and the
         // empty screen told you to add one you were already adding.
-        viewModelScope.launch {
+        runScope.launch {
             db.models().observeInstalling().collect { jobs ->
                 _state.value = _state.value.copy(
                     installing = jobs.filter {
@@ -82,7 +94,7 @@ class ChatViewModel @Inject constructor(
 
         // Likewise the engine's own view of what is loaded, so the sheet says
         // "loaded" only when something actually is.
-        viewModelScope.launch {
+        runScope.launch {
             engines.state.collect { engine ->
                 _state.value = _state.value.copy(
                     loadedModelId = engine.loaded?.modelId,
@@ -142,7 +154,7 @@ class ChatViewModel @Inject constructor(
      * something else, and the only way to reclaim it was to force-stop the app.
      */
     fun unloadModel() {
-        viewModelScope.launch { engines.unload() }
+        runScope.launch { engines.unload() }
     }
 
     /**
@@ -161,7 +173,7 @@ class ChatViewModel @Inject constructor(
      */
     fun setVisionEnabled(enabled: Boolean) {
         val model = _state.value.model ?: return
-        viewModelScope.launch {
+        runScope.launch {
             val overrides = SparseParams.parse(model.paramOverridesJson).let {
                 // Blank is "no projector". Removing the key is not the same
                 // thing: absent means nobody has said, and the loader takes
@@ -191,7 +203,7 @@ class ChatViewModel @Inject constructor(
         if (_state.value.generating) stop()
         // Already on an empty one.
         if (_state.value.messages.isEmpty() && _state.value.conversation != null) return
-        viewModelScope.launch {
+        runScope.launch {
             (engines.llama as? ai.ondevice.engine.LlamaEngine)?.clearCache()
             val conversation = newConversation()
             _state.value = _state.value.copy(
@@ -214,7 +226,7 @@ class ChatViewModel @Inject constructor(
     fun openConversation(id: String) {
         if (_state.value.conversation?.id == id) return
         if (_state.value.generating) stop()
-        viewModelScope.launch {
+        runScope.launch {
             val conversation = db.conversations().get(id) ?: return@launch
             (engines.llama as? ai.ondevice.engine.LlamaEngine)?.clearCache()
             prefs.setLastConversationId(conversation.id)
@@ -237,7 +249,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun deleteConversation(id: String) {
-        viewModelScope.launch {
+        runScope.launch {
             db.messages().clearFor(id)
             db.conversations().deleteById(id)
             if (_state.value.conversation?.id == id) {
@@ -259,7 +271,7 @@ class ChatViewModel @Inject constructor(
 
     /** Attach a file the user picked, and decide what it *is* before deciding what to do with it. */
     fun attach(uri: android.net.Uri) {
-        viewModelScope.launch {
+        runScope.launch {
             val attachment = attachments.copyIn(uri) ?: run {
                 _state.value = _state.value.copy(
                     error = "That file could not be read.",
@@ -405,7 +417,7 @@ class ChatViewModel @Inject constructor(
 
         _state.value = _state.value.copy(input = "", pendingAttachments = emptyList(), error = null)
 
-        generationJob = viewModelScope.launch {
+        generationJob = runScope.launch {
             val params = effectiveParams()
 
             val userMessage = MessageEntity(
@@ -504,8 +516,8 @@ class ChatViewModel @Inject constructor(
             )
 
             // Per round, not per turn.
-            val recording = recorder.start(viewModelScope)
-            val liveJob = viewModelScope.launch {
+            val recording = recorder.start(runScope)
+            val liveJob = runScope.launch {
                 recording.live.collect { trace ->
                     _state.value = _state.value.copy(liveTrace = trace)
                 }
@@ -705,7 +717,7 @@ class ChatViewModel @Inject constructor(
             _state.value = _state.value.copy(error = "There is no conversation to export.")
             return
         }
-        viewModelScope.launch {
+        runScope.launch {
             val slug = conversation.title
                 .lowercase()
                 .replace(Regex("[^a-z0-9]+"), "-")
@@ -740,7 +752,7 @@ class ChatViewModel @Inject constructor(
 
     /** Export the whole library, not just the open conversation. */
     fun exportEverything(onReady: (java.io.File) -> Unit) {
-        viewModelScope.launch {
+        runScope.launch {
             runCatching {
                 archive.exportArchive(destination = java.io.File(storage.exportsDir(), "conversations.zip"))
             }.fold(
@@ -756,7 +768,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun import(uri: android.net.Uri) {
-        viewModelScope.launch {
+        runScope.launch {
             val report = runCatching {
                 context.contentResolver.openInputStream(uri)?.use { archive.importArchive(it) }
                     ?: ai.ondevice.data.ImportReport(error = "That file could not be opened.")
@@ -795,7 +807,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun regenerate(message: MessageEntity) {
-        viewModelScope.launch {
+        runScope.launch {
             db.messages().deleteById(message.id)
             refreshMessages()
             val previousUser = _state.value.messages.lastOrNull { it.role == MessageRole.USER }
@@ -809,7 +821,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun setModel(model: ModelEntity) {
-        viewModelScope.launch {
+        runScope.launch {
             val conversation = _state.value.conversation ?: return@launch
             db.conversations().upsert(conversation.copy(modelId = model.id, updatedAt = System.currentTimeMillis()))
             _state.value = _state.value.copy(model = model, conversation = db.conversations().get(conversation.id))
@@ -826,7 +838,7 @@ class ChatViewModel @Inject constructor(
      * Pass null to go back to the one in the GGUF.
      */
     fun setChatTemplate(template: String?) {
-        viewModelScope.launch {
+        runScope.launch {
             val model = _state.value.model ?: return@launch
             val trimmed = template?.takeIf { it.isNotBlank() }
             val overrides = SparseParams.parse(model.paramOverridesJson).let {
@@ -847,7 +859,7 @@ class ChatViewModel @Inject constructor(
 
     fun setSystemPrompt(value: String) {
         _state.value = _state.value.copy(systemPrompt = value)
-        viewModelScope.launch {
+        runScope.launch {
             val conversation = _state.value.conversation ?: return@launch
             db.conversations().upsert(conversation.copy(systemPrompt = value, updatedAt = System.currentTimeMillis()))
         }
@@ -859,7 +871,7 @@ class ChatViewModel @Inject constructor(
         _state.value = _state.value.copy(
             liveOverrides = if (value == null) current.without(key) else current.overlaidWith(SparseParams.of(key to value)),
         )
-        viewModelScope.launch { engines.llama?.applyParams(_state.value.liveOverrides) }
+        runScope.launch { engines.llama?.applyParams(_state.value.liveOverrides) }
     }
 
     fun toggleThinking(messageId: String) {
@@ -871,7 +883,7 @@ class ChatViewModel @Inject constructor(
 
     /** S10 — the exact string that reaches the tokenizer. */
     fun loadPromptInspector() {
-        viewModelScope.launch {
+        runScope.launch {
             val engine = engines.llama ?: return@launch
             val conversation = _state.value.conversation ?: return@launch
             val rendered = engine.renderPrompt(
@@ -902,7 +914,7 @@ class ChatViewModel @Inject constructor(
         _state.value = _state.value.copy(userStopSequences = values)
         setLiveParam("stop", values)
         val modelId = _state.value.model?.id ?: return
-        viewModelScope.launch {
+        runScope.launch {
             val stored = SparseParams.parse(db.models().get(modelId)?.paramOverridesJson)
             db.models().setParamOverrides(
                 modelId,

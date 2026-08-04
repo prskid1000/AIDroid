@@ -1,7 +1,6 @@
 package ai.ondevice.ui.vm
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import ai.ondevice.core.AttachmentRole
 import ai.ondevice.core.Modality
 import ai.ondevice.core.ModelAttachment
@@ -45,25 +44,55 @@ import kotlin.random.Random
 class VideoViewModel @Inject constructor(
     @dagger.hilt.android.qualifiers.ApplicationContext
     private val context: android.content.Context,
+    // The run and its state live here, not in this class — see VideoSession.
+    private val session: VideoSession,
     private val db: OnDeviceDatabase,
     private val diffusion: DiffusionEngine,
     private val recorder: ai.ondevice.engine.ResourceRecorder,
     private val params: ai.ondevice.params.ParamRepository,
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(VideoState())
-    val state: StateFlow<VideoState> = _state.asStateFlow()
+    private val _state get() = session.state
+    val state: StateFlow<VideoState> = session.state.asStateFlow()
 
-    private var generationJob: Job? = null
-    private var playbackJob: Job? = null
+    /**
+     * The session's scope, under the name the body of this class already used.
+     *
+     * Every launch here was `viewModelScope`, which is exactly what made a run
+     * die with the screen. Renaming rather than rewriting each call site keeps
+     * the change to what it is: the same work, on a scope that outlives the
+     * thing watching it.
+     */
+    private val runScope get() = session.scope
+
+    private var generationJob: Job?
+        get() = session.generationJob
+        set(value) { session.generationJob = value }
+
+    private var playbackJob: Job?
+        get() = session.playbackJob
+        set(value) { session.playbackJob = value }
 
     init {
-        viewModelScope.launch {
+        // Once per process, not once per visit.
+        //
+        // These watch the library and the download queue for as long as the
+        // app lives. They used to hang off `viewModelScope` and so were built
+        // and thrown away with the screen, which was wasteful and correct;
+        // on a scope that outlives the screen it would merely be wasteful —
+        // every reopening would add another copy of every collector, each
+        // writing the same state.
+        if (session.claimObservers()) attachObservers()
+    }
+
+    /** The long-lived watchers, attached once for the life of the process. */
+    private fun attachObservers() {
+        runScope.launch {
             val runtimeInstalled =
                 ai.ondevice.engine.SdBridge.available
             _state.value = _state.value.copy(runtimeInstalled = runtimeInstalled)
         }
-        viewModelScope.launch {
+        runScope.launch {
             db.models().observeInstalledByModality(Modality.DIFFUSION).collect { all ->
                 // Stills and clips share a runtime and a modality, so the same
                 // query answers for both and this list used to offer every
@@ -106,7 +135,7 @@ class VideoViewModel @Inject constructor(
         // list, so a UMT5 encoder nine per cent of the way here was reported as
         // "No T5-XXL for wan · add one from Models → Add", which is advice to
         // start the download that is already running.
-        viewModelScope.launch {
+        runScope.launch {
             db.models().observeInstalling().collect { jobs ->
                 _state.value = _state.value.copy(
                     installing = jobs.filter { it.modality == Modality.DIFFUSION },
@@ -383,7 +412,7 @@ class VideoViewModel @Inject constructor(
             clip = null,
             recognisedAs = null,
         )
-        viewModelScope.launch {
+        runScope.launch {
             // The new model's own settings, not the last one's left on screen.
             seedFrom(model)
             db.models().touch(model.id, System.currentTimeMillis())
@@ -490,7 +519,7 @@ class VideoViewModel @Inject constructor(
             frameIndex = 0,
         )
 
-        generationJob = viewModelScope.launch {
+        generationJob = runScope.launch {
             val started = System.currentTimeMillis()
             // What a clip costs, sampled while it runs.
             //
@@ -506,8 +535,8 @@ class VideoViewModel @Inject constructor(
             // nothing in the shade to say so. Only the conversation ever held
             // this; every other kind of generation ran unprotected.
             ai.ondevice.engine.InferenceService.holdWakeLock(context)
-            val recording = recorder.start(viewModelScope)
-            val liveJob = viewModelScope.launch {
+            val recording = recorder.start(runScope)
+            val liveJob = runScope.launch {
                 recording.live.collect { trace ->
                     // The buffers come along with the trace because they arrive
                     // during the run, not at the end of the load: the decoder
@@ -743,7 +772,7 @@ class VideoViewModel @Inject constructor(
         if (clip.frames.isEmpty()) return
         playbackJob?.cancel()
         _state.value = _state.value.copy(playing = true)
-        playbackJob = viewModelScope.launch {
+        playbackJob = runScope.launch {
             val frameMillis = (1000L / clip.fps.coerceAtLeast(1)).coerceAtLeast(16L)
             while (isActive) {
                 delay(frameMillis)
@@ -773,7 +802,7 @@ class VideoViewModel @Inject constructor(
     fun discard() {
         val clip = _state.value.clip ?: return
         stopPlayback()
-        viewModelScope.launch {
+        runScope.launch {
             runCatching { File(clip.directory).deleteRecursively() }
             _state.value = _state.value.copy(clip = null, frameIndex = 0)
         }
@@ -797,8 +826,15 @@ class VideoViewModel @Inject constructor(
         )
     }
 
+    /**
+     * The screen going away is not a reason to stop anything.
+     *
+     * This used to stop playback, which was right when the state died with it
+     * and is wrong now: the frames are still there, the run may still be going,
+     * and the next screen should find both where they were left. A generation
+     * ends when it finishes, fails, or somebody presses Cancel.
+     */
     override fun onCleared() {
-        stopPlayback()
         super.onCleared()
     }
 

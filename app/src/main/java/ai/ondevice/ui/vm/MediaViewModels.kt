@@ -45,12 +45,19 @@ class ImageViewModel @Inject constructor(
     private val diffusion: ai.ondevice.engine.DiffusionEngine,
     private val recorder: ai.ondevice.engine.ResourceRecorder,
     private val params: ai.ondevice.params.ParamRepository,
+    // The run and its state live here, not in this class — see ImageSession.
+    private val session: ImageSession,
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(ImageState())
-    val state: StateFlow<ImageState> = _state.asStateFlow()
+    private val _state get() = session.state
+    val state: StateFlow<ImageState> = session.state.asStateFlow()
 
-    private var generationJob: Job? = null
+    /** The session's scope, under the name the body of this class already used. */
+    private val runScope get() = session.scope
+
+    private var generationJob: Job?
+        get() = session.generationJob
+        set(value) { session.generationJob = value }
 
     /** What the components were called last time the sheet was built. */
     private var attachmentNames: String = ""
@@ -63,7 +70,13 @@ class ImageViewModel @Inject constructor(
     private var autoAdopted: Set<String> = emptySet()
 
     init {
-        viewModelScope.launch {
+        // Once per process — see VideoSession.claimObservers.
+        if (session.claimObservers()) attachObservers()
+    }
+
+    /** The long-lived watchers, attached once for the life of the process. */
+    private fun attachObservers() {
+        runScope.launch {
             // "No runtime" and "no model" are different problems with different
             // fixes, and SPEC §1.2 says a refusal has to name which one it is.
             val runtimeInstalled = ai.ondevice.engine.SdBridge.available
@@ -86,7 +99,7 @@ class ImageViewModel @Inject constructor(
         // this screen has to read them from: holding a snapshot taken when the
         // screen opened meant a component chosen over there never showed up
         // over here until the app restarted.
-        viewModelScope.launch {
+        runScope.launch {
             db.models().observeInstalledByModality(Modality.DIFFUSION).collect { all ->
                 val models = baseModelsOnly(all)
                 val fresh = _state.value.model?.let { current ->
@@ -107,7 +120,7 @@ class ImageViewModel @Inject constructor(
 
         // A model that is still arriving is not a model that is missing, and
         // the tab said the second thing for both.
-        viewModelScope.launch {
+        runScope.launch {
             db.models().observeInstalling().collect { jobs ->
                 _state.value = _state.value.copy(
                     installing = jobs.filter { it.modality == Modality.DIFFUSION },
@@ -169,7 +182,7 @@ class ImageViewModel @Inject constructor(
             recognisedAs = null,
             bareDenoiser = presumedBare(model),
         )
-        viewModelScope.launch {
+        runScope.launch {
             db.models().touch(model.id, System.currentTimeMillis())
             // The components belong to the base model, so they change with it.
             refreshAttachmentLibrary()
@@ -232,7 +245,7 @@ class ImageViewModel @Inject constructor(
 
     /** Pull back anything the Advanced screen changed. */
     fun refreshFromOverrides() {
-        viewModelScope.launch {
+        runScope.launch {
             // The *base* model, not whichever diffusion row was touched last.
             // Components are rows in the same table with the same modality, and
             // since a run stamps every model it loads, the most recently used
@@ -307,14 +320,14 @@ class ImageViewModel @Inject constructor(
             previewBitmap = null,
         )
 
-        generationJob = viewModelScope.launch {
+        generationJob = runScope.launch {
             val started = System.currentTimeMillis()
             // Keep the process alive for the length of the run: this app
             // holds gigabytes, which makes it the first thing Android reclaims
             // once it leaves the screen. Only the conversation ever did this.
             ai.ondevice.engine.InferenceService.holdWakeLock(context)
-            val recording = recorder.start(viewModelScope)
-            val liveJob = viewModelScope.launch {
+            val recording = recorder.start(runScope)
+            val liveJob = runScope.launch {
                 recording.live.collect { trace ->
                     // The runtime's buffer figures arrive during the run rather
                     // than at the end of the load — the decoder reserves
@@ -914,7 +927,7 @@ class ImageViewModel @Inject constructor(
             return
         }
 
-        generationJob = viewModelScope.launch {
+        generationJob = runScope.launch {
             _state.value = _state.value.copy(generating = true, error = null, errorHint = null)
             // The upscaler is the one model this run uses, so it is the one to stamp.
             touchAll(
@@ -931,8 +944,8 @@ class ImageViewModel @Inject constructor(
             // holds gigabytes, which makes it the first thing Android reclaims
             // once it leaves the screen. Only the conversation ever did this.
             ai.ondevice.engine.InferenceService.holdWakeLock(context)
-            val recording = recorder.start(viewModelScope)
-            val liveJob = viewModelScope.launch {
+            val recording = recorder.start(runScope)
+            val liveJob = runScope.launch {
                 recording.live.collect { trace ->
                     _state.value = _state.value.copy(
                         liveTrace = trace,
@@ -1348,13 +1361,28 @@ class VoiceViewModel @Inject constructor(
     private val attachments: ai.ondevice.data.AttachmentStore,
     private val transcriber: ai.ondevice.engine.Transcriber,
     private val recorder: ai.ondevice.engine.ResourceRecorder,
+    // Speaking and transcribing live here, not in this class — see VoiceSession.
+    private val session: VoiceSession,
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(VoiceState())
-    val state: StateFlow<VoiceState> = _state.asStateFlow()
+    private val _state get() = session.state
+    val state: StateFlow<VoiceState> = session.state.asStateFlow()
 
+    /** The session's scope, under the name the body of this class already used. */
+    private val runScope get() = session.scope
+
+    /**
+     * Recording stays on the view model's own scope, deliberately.
+     *
+     * It holds the microphone, and a microphone still listening after its
+     * screen has gone is a different kind of surprise from a generation still
+     * generating. Leaving the screen should stop it, and does.
+     */
     private var recordingJob: Job? = null
-    private var speakJob: Job? = null
+
+    private var speakJob: Job?
+        get() = session.speakJob
+        set(value) { session.speakJob = value }
 
     /** Where the take in progress is being written; null when not recording. */
     private var captureFile: java.io.File? = null
@@ -1364,14 +1392,20 @@ class VoiceViewModel @Inject constructor(
     }
 
     init {
-        viewModelScope.launch {
+        // Once per process — see VideoSession.claimObservers.
+        if (session.claimObservers()) attachObservers()
+    }
+
+    /** The long-lived watchers, attached once for the life of the process. */
+    private fun attachObservers() {
+        runScope.launch {
             // Read first, write second — and never `copy(x = <a suspending call>)`.
             val transcripts = db.transcripts().observeAll().first()
             _state.value = _state.value.copy(transcripts = transcripts)
         }
 
         // Both model lists are collected, not sampled once with `first()`.
-        viewModelScope.launch {
+        runScope.launch {
             db.models().observeInstalledByModality(Modality.SPEECH_TO_TEXT)
                 .catch { failure ->
                     android.util.Log.e(TAG, "speech model list failed", failure)
@@ -1387,7 +1421,7 @@ class VoiceViewModel @Inject constructor(
             }
         }
 
-        viewModelScope.launch {
+        runScope.launch {
             db.models().observeInstalledByModality(Modality.TEXT_TO_SPEECH).collect {
                 loadVoices(preferred = _state.value.ttsModel)
             }
@@ -1395,7 +1429,7 @@ class VoiceViewModel @Inject constructor(
 
         // Neither mode can start without its model, and both said "none
         // installed" while one was arriving.
-        viewModelScope.launch {
+        runScope.launch {
             db.models().observeInstalling().collect { jobs ->
                 _state.value = _state.value.copy(
                     installingStt = jobs.filter { it.modality == Modality.SPEECH_TO_TEXT },
@@ -1413,7 +1447,7 @@ class VoiceViewModel @Inject constructor(
         if (_state.value.ttsModel?.id == model.id) return
         if (_state.value.speaking) stopSpeaking()
         _state.value = _state.value.copy(ttsModel = model, speakError = null)
-        viewModelScope.launch {
+        runScope.launch {
             db.models().touch(model.id, System.currentTimeMillis())
             loadVoices(preferred = model)
         }
@@ -1528,7 +1562,7 @@ class VoiceViewModel @Inject constructor(
         // The voice list follows the engine, so it has to be rebuilt for the
         // one just chosen — otherwise the picker keeps showing the old engine's.
         if (model != null) {
-            viewModelScope.launch { loadVoices(preferred = model) }
+            runScope.launch { loadVoices(preferred = model) }
         }
     }
 
@@ -1552,7 +1586,7 @@ class VoiceViewModel @Inject constructor(
     fun unloadVoiceModel() {
         val provider = _state.value.selectedVoice?.provider
             ?: ai.ondevice.speech.SynthProvider.SYSTEM
-        viewModelScope.launch { synthesizer.unload(provider) }
+        runScope.launch { synthesizer.unload(provider) }
     }
 
     /** The transcriber holds whisper between recordings for the same reason. */
@@ -1566,7 +1600,7 @@ class VoiceViewModel @Inject constructor(
 
     /** Load a script from a text file the user picked. */
     fun loadScript(uri: android.net.Uri) {
-        viewModelScope.launch {
+        runScope.launch {
             val attachment = attachments.copyIn(uri) ?: run {
                 _state.value = _state.value.copy(speakError = "That file could not be read.")
                 return@launch
@@ -1587,7 +1621,7 @@ class VoiceViewModel @Inject constructor(
     }
 
     fun refreshFromOverrides() {
-        viewModelScope.launch {
+        runScope.launch {
             val model = db.models().observeInstalledByModality(Modality.TEXT_TO_SPEECH).first().firstOrNull()
             val tts = SparseParams.parse(model?.paramOverridesJson)
             val stt = SparseParams.parse(
@@ -1643,7 +1677,7 @@ class VoiceViewModel @Inject constructor(
             error = null,
             errorHint = null,
         )
-        viewModelScope.launch { db.models().touch(model.id, System.currentTimeMillis()) }
+        runScope.launch { db.models().touch(model.id, System.currentTimeMillis()) }
     }
 
     fun setPitch(value: Float) = update { copy(pitch = value) }
@@ -1678,7 +1712,7 @@ class VoiceViewModel @Inject constructor(
     /** Read the script aloud — by rendering it, storing it, and playing the file. */
     fun speak() {
         speakJob?.cancel()
-        speakJob = viewModelScope.launch { render(autoPlay = true) }
+        speakJob = runScope.launch { render(autoPlay = true) }
     }
 
     /** Render, store, and record the run. The only path that makes audio. */
@@ -1704,7 +1738,7 @@ class VoiceViewModel @Inject constructor(
             val request = currentRequest(text)
             val startedAt = System.currentTimeMillis()
             _state.value.ttsModel?.let { db.models().touch(it.id, startedAt) }
-            val recording = recorder.start(viewModelScope)
+            val recording = recorder.start(runScope)
             val liveJob = launch {
                 recording.live.collect { trace ->
                     _state.value = _state.value.copy(liveTrace = trace)
@@ -1846,7 +1880,7 @@ class VoiceViewModel @Inject constructor(
 
     /** Take a recording as the voice to copy. */
     fun useReferenceClip(uri: android.net.Uri) {
-        viewModelScope.launch {
+        runScope.launch {
             _state.value = _state.value.copy(speakError = null)
             // Copied in the same way an attachment is: a content URI granted to the picker is not guaranteed to still be readable by the time Speak is pressed.
             val attachment = attachments.copyIn(uri)
@@ -2002,7 +2036,7 @@ class VoiceViewModel @Inject constructor(
     /** SPEC §6.3 — take a picked file as the clip to work on. */
     fun chooseFile(uri: android.net.Uri) {
         if (_state.value.recording) stopRecording()
-        viewModelScope.launch {
+        runScope.launch {
             val attachment = attachments.copyIn(uri)
             if (attachment == null) {
                 _state.value = _state.value.copy(error = "That file could not be read.")
@@ -2044,7 +2078,9 @@ class VoiceViewModel @Inject constructor(
         }
         val file = java.io.File(path)
         val name = _state.value.sourceName ?: file.name
-        viewModelScope.launch {
+        // Kept on the session so leaving the screen cannot unload the model
+        // out from under it — see onCleared.
+        session.transcribeJob = runScope.launch {
             db.models().touch(model.id, System.currentTimeMillis())
             _state.value = _state.value.copy(loading = true, error = null, fileProgress = 0f)
             if (!transcriber.isCurrent(model.id)) {
@@ -2062,7 +2098,7 @@ class VoiceViewModel @Inject constructor(
                 }
             }
             val started = System.currentTimeMillis()
-            val recording = recorder.start(viewModelScope)
+            val recording = recorder.start(runScope)
             val liveJob = launch {
                 recording.live.collect { trace ->
                     _state.value = _state.value.copy(liveTrace = trace)
@@ -2177,7 +2213,7 @@ class VoiceViewModel @Inject constructor(
     }
 
     fun export(format: TranscriptFormat, onReady: (java.io.File) -> Unit) {
-        viewModelScope.launch {
+        runScope.launch {
             val state = _state.value
             val file = withContext(Dispatchers.IO) {
                 val name = state.title.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
@@ -2196,9 +2232,21 @@ class VoiceViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Give the speech models back, unless something is still using them.
+     *
+     * Freeing them when the screen goes away was right while a run died with
+     * the screen. It is wrong now: a transcription outlives the tab, and
+     * unloading whisper mid-file would end it as surely as cancelling it —
+     * except without saying so.
+     */
     override fun onCleared() {
-        transcriber.unload()
-        synthesizer.release()
+        val busy = session.speakJob?.isActive == true ||
+            session.transcribeJob?.isActive == true
+        if (!busy) {
+            transcriber.unload()
+            synthesizer.release()
+        }
         super.onCleared()
     }
 }
