@@ -43,6 +43,8 @@ import kotlin.random.Random
  */
 @HiltViewModel
 class VideoViewModel @Inject constructor(
+    @dagger.hilt.android.qualifiers.ApplicationContext
+    private val context: android.content.Context,
     private val db: OnDeviceDatabase,
     private val diffusion: DiffusionEngine,
     private val recorder: ai.ondevice.engine.ResourceRecorder,
@@ -496,6 +498,14 @@ class VideoViewModel @Inject constructor(
             // video is the heavier of the two by a wide margin — a clip is the
             // same denoiser over N frames — and it was the one screen with no
             // way to see what the phone was doing.
+            // Keep the process alive for the length of the run.
+            //
+            // A clip takes tens of minutes and this app holds gigabytes, which
+            // makes it the first thing Android reclaims once it leaves the
+            // screen — so switching to another app killed the run and there was
+            // nothing in the shade to say so. Only the conversation ever held
+            // this; every other kind of generation ran unprotected.
+            ai.ondevice.engine.InferenceService.holdWakeLock(context)
             val recording = recorder.start(viewModelScope)
             val liveJob = viewModelScope.launch {
                 recording.live.collect { trace ->
@@ -690,6 +700,7 @@ class VideoViewModel @Inject constructor(
                     }
                 }
             } finally {
+                ai.ondevice.engine.InferenceService.releaseWakeLock(context)
                 diffusion.cancel()
                 liveJob.cancel()
                 // Idempotent: a completed run already stopped it, a cancelled

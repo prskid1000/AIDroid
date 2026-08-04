@@ -126,5 +126,22 @@ class DownloadService : LifecycleService() {
                     .putExtra(EXTRA_JOB_ID, jobId),
             )
         }
+
+        /**
+         * Bring the service up for a transfer that has already been started.
+         *
+         * [start] tells the service to begin a job; this says a job is under
+         * way and the process needs to stay alive for it. The Downloader calls
+         * it as it launches, which is the one place every download passes
+         * through — and the reason there is no job id here is that the service
+         * reads the queue itself and stops when nothing is left in it.
+         */
+        fun ensureRunning(context: Context) {
+            runCatching {
+                context.startForegroundService(
+                    Intent(context, DownloadService::class.java),
+                )
+            }
+        }
     }
 }

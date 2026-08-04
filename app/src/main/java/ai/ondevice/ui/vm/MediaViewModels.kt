@@ -37,6 +37,8 @@ import kotlin.random.Random
 /** S11/S12/S13 — image generation, the mask editor and the gallery. */
 @HiltViewModel
 class ImageViewModel @Inject constructor(
+    @dagger.hilt.android.qualifiers.ApplicationContext
+    private val context: android.content.Context,
     private val db: OnDeviceDatabase,
     private val storage: ModelStorage,
     private val capabilities: DeviceCapabilities,
@@ -307,6 +309,10 @@ class ImageViewModel @Inject constructor(
 
         generationJob = viewModelScope.launch {
             val started = System.currentTimeMillis()
+            // Keep the process alive for the length of the run: this app
+            // holds gigabytes, which makes it the first thing Android reclaims
+            // once it leaves the screen. Only the conversation ever did this.
+            ai.ondevice.engine.InferenceService.holdWakeLock(context)
             val recording = recorder.start(viewModelScope)
             val liveJob = viewModelScope.launch {
                 recording.live.collect { trace ->
@@ -550,6 +556,7 @@ class ImageViewModel @Inject constructor(
                     }
                 }
             } finally {
+                ai.ondevice.engine.InferenceService.releaseWakeLock(context)
                 // Cancellation must reach the native loop, not merely stop the
                 // flow — otherwise sd.cpp keeps denoising and keeps its buffers.
                 diffusion.cancel()
@@ -920,6 +927,10 @@ class ImageViewModel @Inject constructor(
             // Upscaling is a prediction like any other, and it was the one that
             // ran with no graph: 23 RRDB blocks over a 512-square frame is the
             // heaviest thing the tab does per second, and it was invisible.
+            // Keep the process alive for the length of the run: this app
+            // holds gigabytes, which makes it the first thing Android reclaims
+            // once it leaves the screen. Only the conversation ever did this.
+            ai.ondevice.engine.InferenceService.holdWakeLock(context)
             val recording = recorder.start(viewModelScope)
             val liveJob = viewModelScope.launch {
                 recording.live.collect { trace ->
@@ -981,6 +992,7 @@ class ImageViewModel @Inject constructor(
             } catch (failure: Throwable) {
                 _state.value = _state.value.copy(error = failure.message ?: "Upscaling failed.")
             } finally {
+                ai.ondevice.engine.InferenceService.releaseWakeLock(context)
                 liveJob.cancel()
                 _state.value = _state.value.copy(
                     generating = false,
@@ -1328,6 +1340,8 @@ data class ImageState(
 /** S14 — live and file transcription, plus the Kokoro read-aloud panel. */
 @HiltViewModel
 class VoiceViewModel @Inject constructor(
+    @dagger.hilt.android.qualifiers.ApplicationContext
+    private val context: android.content.Context,
     private val db: OnDeviceDatabase,
     private val storage: ModelStorage,
     private val synthesizer: ai.ondevice.speech.SpeechSynthesizer,
@@ -1696,7 +1710,12 @@ class VoiceViewModel @Inject constructor(
                     _state.value = _state.value.copy(liveTrace = trace)
                 }
             }
-            val result = synthesizer.synthesizeToFile(request, destination)
+            // Speaking is minutes for a long passage, and it ran with
+            // nothing keeping the process alive. The bracket rather than a
+            // pair of calls: there is no finally on this path to release in.
+            val result = ai.ondevice.engine.InferenceService.holdingWakeLock(context) {
+                synthesizer.synthesizeToFile(request, destination)
+            }
             liveJob.cancel()
             val trace = recording.stop()
             result.getOrNull()?.let { file ->
@@ -2049,7 +2068,11 @@ class VoiceViewModel @Inject constructor(
                     _state.value = _state.value.copy(liveTrace = trace)
                 }
             }
-            val result = transcriber.transcribeFile(file)
+            // Transcribing an hour of audio is an hour of CPU on this
+            // device; the same bracket, for the same reason.
+            val result = ai.ondevice.engine.InferenceService.holdingWakeLock(context) {
+                transcriber.transcribeFile(file)
+            }
             liveJob.cancel()
             val trace = recording.stop()
             val elapsed = System.currentTimeMillis() - started

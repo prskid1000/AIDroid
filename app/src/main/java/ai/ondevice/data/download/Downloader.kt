@@ -92,6 +92,23 @@ class Downloader(
 
     fun start(jobId: String) {
         if (activeJobs[jobId]?.isActive == true) return
+        // Raise the foreground service before the transfer begins.
+        //
+        // There has been a DownloadService, declared in the manifest with a
+        // dataSync type and a notification that names the file and its
+        // progress, since the downloads were written — and nothing ever
+        // started it. Every caller went to `enqueue` or here directly, so the
+        // transfer ran on this class's application scope with no service
+        // behind it: alive while the process was, and the process is a ten-
+        // gigabyte one that Android reclaims within moments of the app leaving
+        // the screen. A download survived switching apps only for as long as
+        // the system had no use for the memory, and there was no notification
+        // to say it had stopped.
+        //
+        // Started here rather than at each call site, because this is the one
+        // place every download passes through — resume, retry and a fresh
+        // enqueue all end up on this line.
+        DownloadService.ensureRunning(context)
         activeJobs[jobId] = scope.launch(Dispatchers.IO) { runJob(jobId) }
     }
 
