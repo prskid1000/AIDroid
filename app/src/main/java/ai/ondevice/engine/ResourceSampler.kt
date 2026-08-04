@@ -53,61 +53,6 @@ data class ResourceTrace(
     /** How much the run added on top of what was already resident. */
     val deltaRssMb: Int get() = (peakRssMb - baselineRssMb).coerceAtLeast(0)
 
-    /** The latest reading, as against the highest one. */
-    val currentRssMb: Int get() = rssMb.lastOrNull() ?: 0
-
-    /**
-     * Where the run stands against where it started — signed, unlike
-     * [deltaRssMb], which is a high-water mark and cannot be negative.
-     *
-     * Negative is the interesting direction and it happens often: the weights
-     * are memory-mapped, so once a prompt encoder has done its work the kernel
-     * takes its pages back and the process is holding less part-way through a
-     * run than it was at the start of one.
-     */
-    val netRssMb: Int get() = currentRssMb - baselineRssMb
-
-    /**
-     * What the process is holding, in one line — measured, not added up.
-     *
-     * The app's only honest memory total. Summing the model files overstates
-     * it, because they are memory-mapped and the kernel takes back whatever is
-     * no longer being read: a diffusion bundle whose files come to 10.7 GB was
-     * measured sampling at 3.94 GB once its prompt encoder had finished. And
-     * the runtime's own buffer figures cannot be summed into a total either —
-     * it announces every allocation and never a free, so any running total
-     * built from them could only climb.
-     *
-     * Peak is worth saying beside the current figure because the peak is what
-     * decides whether a run fits, and it usually happens somewhere in the
-     * middle where nobody is looking.
-     */
-    val heldSummary: String
-        get() = buildString {
-            append("Holding ${gb(currentRssMb)}")
-            if (peakRssMb > currentRssMb) append(" · Peak ${gb(peakRssMb)}")
-            // Which way it is going, named rather than signed: a minus in front
-            // of a memory figure reads as an error more often than as a fall.
-            //
-            // A rise is only worth saying when there was something to rise
-            // from. Said unconditionally it produced "Holding 6.63 GB · Adding
-            // 6.40 GB" — two large numbers a fifth of a gigabyte apart, which
-            // is the same fact twice and reads as the two disagreeing. When the
-            // app was idle before the run, "Holding" has already said it.
-            //
-            // A fall always earns its place. It is the one thing about this
-            // screen that surprises people: the process holding less part-way
-            // through a run than at the start of it, because the weights are
-            // memory-mapped and the encoder's pages went back to the kernel.
-            when {
-                netRssMb < 0 -> append(" · Removing ${gb(-netRssMb)}")
-                netRssMb > 0 && baselineRssMb * 5 >= currentRssMb ->
-                    append(" · Adding ${gb(netRssMb)}")
-            }
-        }
-
-    private fun gb(mb: Int): String =
-        if (mb >= 1024) String.format("%.2f GB", mb / 1024.0) else "$mb MB"
 
     val peakRssBytes: Long get() = peakRssMb.toLong() * BYTES_PER_MB
 

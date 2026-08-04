@@ -152,10 +152,8 @@ fun VideoScreen(
                 ResidentCard(
                     loadingNow = loadingNow,
                     loadingWhat = state.loadingWhat,
-                    resident = state.residentComponents,
                     buffers = state.runtimeBuffers,
-                    measured = (state.liveTrace ?: state.lastTrace)
-                        ?.takeIf { !it.isEmpty }?.heldSummary,
+                    loaded = state.residentComponents.isNotEmpty(),
                     stage = state.loadingStage ?: state.runStage,
                     modifier = Modifier.padding(top = 10.dp),
                 )

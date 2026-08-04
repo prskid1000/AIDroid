@@ -155,12 +155,8 @@ fun ImageScreen(
                 ResidentCard(
                     loadingNow = loadingNow,
                     loadingWhat = state.loadingWhat,
-                    resident = resident,
                     buffers = state.runtimeBuffers,
-                    // Measured first, file sizes second — see ResidentCard.
-                    measured = (state.liveTrace ?: state.lastTrace)
-                        ?.takeIf { !it.isEmpty }?.heldSummary,
-                    weightsTotal = state.residentSize,
+                    loaded = resident.isNotEmpty(),
                     unloadReason = state.unloadReason,
                     // While loading this is the loader's progress; during a run
                     // it is the sampler's or the decoder's. Either way it is the

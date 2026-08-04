@@ -186,7 +186,6 @@ class ImageViewModel @Inject constructor(
         diffusion.unload("you asked for the memory back")
         _state.value = _state.value.copy(
             residentComponents = emptyList(),
-            residentSize = null,
             unloadReason = diffusion.lastUnloadReason,
             recognisedAs = null,
         )
@@ -315,7 +314,6 @@ class ImageViewModel @Inject constructor(
                 // saying nothing about a context that was holding four files.
                 _state.value = _state.value.copy(
                     residentComponents = residentLines(),
-                    residentSize = residentSize(),
                     unloadReason = diffusion.lastUnloadReason,
                     runStage = null,
                 )
@@ -362,7 +360,6 @@ class ImageViewModel @Inject constructor(
                         // component is switched off, and used to differ in
                         // silence.
                         residentComponents = residentLines(),
-                        residentSize = residentSize(),
                         unloadReason = diffusion.lastUnloadReason,
                     )
                     // The loader has now read the tensors and said what this
@@ -1027,28 +1024,7 @@ class ImageViewModel @Inject constructor(
      * its absence is what made this card vanish for a self-contained model.
      */
     private fun residentLines(): List<String> = listOfNotNull(diffusion.residentModel) +
-        diffusion.residentComponents.map {
-            "${it.role.label} · ${it.fileName} · " +
-                if (it.bytes >= 1_000_000_000L) {
-                    String.format("%.2f GB", it.bytes / 1_000_000_000.0)
-                } else {
-                    String.format("%.0f MB", it.bytes / 1_000_000.0)
-                }
-        }
-
-    /**
-     * What these files weigh on disk.
-     *
-     * It used to read "≈X GB of weights", next to a heading saying "In
-     * memory", which made a statement about storage look like one about
-     * memory. It is not: the weights are memory-mapped, and how much of them
-     * is resident is a different question with a different — usually much
-     * smaller — answer. The card shows the measured figure above this one now,
-     * and this says what it is.
-     */
-    private fun residentSize(): String? = diffusion.residentBytes
-        .takeIf { it > 0L }
-        ?.let { "${String.format("%.2f", it / 1_000_000_000.0)} GB of files on disk" }
+        diffusion.residentComponents.map { "${it.role.label} · ${it.fileName}" }
 
     private companion object {
         const val STEP_MILLIS = 3100L // the canvas' 3.1 s/it on CPU
@@ -1202,7 +1178,6 @@ data class ImageState(
     /** The runtime's own working-memory reservations — see RuntimeBuffer. */
     val runtimeBuffers: List<ai.ondevice.engine.RuntimeBuffer> = emptyList(),
     /** Roughly what the above is costing, already formatted, or null when nothing is loaded. */
-    val residentSize: String? = null,
     /** Why the app dropped the context on the user's behalf, when it did. */
     val unloadReason: String? = null,
     /** What the runtime says it is doing right now, mid-run. */
