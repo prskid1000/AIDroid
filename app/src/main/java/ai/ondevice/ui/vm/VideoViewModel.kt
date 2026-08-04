@@ -158,6 +158,24 @@ class VideoViewModel @Inject constructor(
      * fallback. Only the first is somebody's decision; the second is what
      * keeps the app from asserting numbers it does not own.
      */
+    /**
+     * Seeding must not undo a choice somebody has already made.
+     *
+     * This runs whenever the model's stored parameters change, and returning
+     * from All Parameters is one of those times — so setting a width here,
+     * stepping into that screen to change something unrelated, and stepping
+     * back put the width where the *model* said it was. Nothing announced it.
+     * The next run then used a size nobody had asked for, which on a clip is
+     * seven minutes to find out.
+     *
+     * So a value the person has touched this session is theirs until they
+     * change it or a different model is chosen. A value they have not touched
+     * still follows the model, which is what makes a checkpoint's own settings
+     * appear when it is picked.
+     */
+    private fun <T> keep(key: String, seeded: T?, current: T): T =
+        if (key in _state.value.touched) current else (seeded ?: current)
+
     private suspend fun seedFrom(model: ModelEntity?) {
         val p = SparseParams.parse(model?.paramOverridesJson)
         val d = params.defaultsFor(
@@ -167,12 +185,12 @@ class VideoViewModel @Inject constructor(
         )
         val s = _state.value
         _state.value = s.copy(
-            steps = p.int("steps") ?: d.int("steps") ?: s.steps,
-            cfgScale = p.float("cfg_scale") ?: d.float("cfg_scale") ?: s.cfgScale,
-            width = p.int("width") ?: d.int("width") ?: s.width,
-            height = p.int("height") ?: d.int("height") ?: s.height,
-            frames = p.int("video_frames") ?: d.int("video_frames") ?: s.frames,
-            fps = p.int("fps") ?: d.int("fps") ?: s.fps,
+            steps = keep("steps", p.int("steps") ?: d.int("steps"), s.steps),
+            cfgScale = keep("cfg_scale", p.float("cfg_scale") ?: d.float("cfg_scale"), s.cfgScale),
+            width = keep("width", p.int("width") ?: d.int("width"), s.width),
+            height = keep("height", p.int("height") ?: d.int("height"), s.height),
+            frames = keep("video_frames", p.int("video_frames") ?: d.int("video_frames"), s.frames),
+            fps = keep("fps", p.int("fps") ?: d.int("fps"), s.fps),
             // Tiling is not seeded from the runtime, deliberately.
             //
             // Upstream defaults it off, which is a reasonable assumption
@@ -182,9 +200,12 @@ class VideoViewModel @Inject constructor(
             // with 15.6 GB shared with the rest of Android. Whether to
             // decode in tiles is a fact about the device, which this app
             // knows and the model does not.
-            vaeTiling = p.bool("vae_tiling") ?: s.vaeTiling,
-            controlStrength = p.float("vace_strength")
-                ?: d.float("vace_strength") ?: s.controlStrength,
+            vaeTiling = keep("vae_tiling", p.bool("vae_tiling"), s.vaeTiling),
+            controlStrength = keep(
+                "vace_strength",
+                p.float("vace_strength") ?: d.float("vace_strength"),
+                s.controlStrength,
+            ),
         )
     }
 
@@ -420,6 +441,9 @@ class VideoViewModel @Inject constructor(
             errorHint = null,
             clip = null,
             recognisedAs = null,
+            // A new model brings its own settings, so this session's edits stop
+            // being an answer to anything.
+            touched = emptySet(),
         )
         runScope.launch {
             // The new model's own settings, not the last one's left on screen.
@@ -469,10 +493,12 @@ class VideoViewModel @Inject constructor(
 
     fun setPrompt(value: String) = update { copy(prompt = value) }
     fun setNegativePrompt(value: String) = update { copy(negativePrompt = value) }
-    fun setFrames(value: Int) = update { copy(frames = value.coerceIn(1, 129)) }
-    fun setFps(value: Int) = update { copy(fps = value.coerceIn(1, 60)) }
-    fun setSteps(value: Int) = update { copy(steps = value.coerceIn(1, 60)) }
-    fun setCfg(value: Float) = update { copy(cfgScale = value) }
+    fun setFrames(value: Int) =
+        update { copy(frames = value.coerceIn(1, 129), touched = touched + "video_frames") }
+    fun setFps(value: Int) = update { copy(fps = value.coerceIn(1, 60), touched = touched + "fps") }
+    fun setSteps(value: Int) =
+        update { copy(steps = value.coerceIn(1, 60), touched = touched + "steps") }
+    fun setCfg(value: Float) = update { copy(cfgScale = value, touched = touched + "cfg_scale") }
     /**
      * Width and height apart, because a clip model has an aspect ratio.
      *
@@ -482,14 +508,16 @@ class VideoViewModel @Inject constructor(
      * dimensions at once, which is most of why they come out as texture rather
      * than as scenes.
      */
-    fun setWidth(value: Int) = update { copy(width = value) }
+    fun setWidth(value: Int) = update { copy(width = value, touched = touched + "width") }
 
-    fun setHeight(value: Int) = update { copy(height = value) }
+    fun setHeight(value: Int) = update { copy(height = value, touched = touched + "height") }
 
     /** Both at once, for the callers that want a square. */
-    fun setSize(value: Int) = update { copy(width = value, height = value) }
+    fun setSize(value: Int) =
+        update { copy(width = value, height = value, touched = touched + "width" + "height") }
     fun setSeed(value: Long) = update { copy(seed = value) }
-    fun setVaeTiling(value: Boolean) = update { copy(vaeTiling = value) }
+    fun setVaeTiling(value: Boolean) =
+        update { copy(vaeTiling = value, touched = touched + "vae_tiling") }
     fun setFirstFrame(uri: String?) = update { copy(firstFrameUri = uri) }
     fun setLastFrame(uri: String?) = update { copy(lastFrameUri = uri) }
     fun setControlImage(uri: String?) = update { copy(controlImageUri = uri) }
@@ -987,6 +1015,18 @@ data class VideoState(
      */
     val supportsStartFrame: Boolean = true,
     val supportsEndFrame: Boolean = true,
+    /**
+     * Settings the person has changed by hand, by their parameter key.
+     *
+     * A re-seed from the model's stored parameters skips these. Without it,
+     * anything that re-seeds — and returning from All Parameters does —
+     * silently reverted a slider to whatever the model said, with no message
+     * and no way to tell until the run came back the wrong size.
+     *
+     * Cleared when a different model is chosen, because the settings then
+     * belong to that model rather than to this session.
+     */
+    val touched: Set<String> = emptySet(),
     val clip: DiffusionClip? = null,
     val frameIndex: Int = 0,
     val playing: Boolean = false,

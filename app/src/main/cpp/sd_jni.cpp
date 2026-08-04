@@ -341,6 +341,24 @@ std::mutex  g_model_desc_mutex;
 std::string g_model_desc;
 
 /**
+ * Whether a checkpoint is being constructed right now.
+ *
+ * The desc is announced while the denoiser is built, and nothing else in a
+ * load looks like one. During *generation* the runtime logs its own status the
+ * same way — "IMG2VID", "FLF2V" — and those are single words carrying a letter
+ * and a digit, which is exactly the shape a desc has. Without this they were
+ * recorded as the model's name the moment a clip started, replacing the real
+ * answer with a description of what the run was doing.
+ */
+std::atomic<bool> g_loading{false};
+
+/** Raises [g_loading] for a load and lowers it however that load returns. */
+struct LoadingScope {
+    LoadingScope() { g_loading.store(true); }
+    ~LoadingScope() { g_loading.store(false); }
+};
+
+/**
  * Whether the last load went through the bare-denoiser door.
  *
  * A full checkpoint carries its denoiser, its text encoders and its VAE in one
@@ -680,6 +698,8 @@ void note_version(const char * text) {
  * whether a first frame means anything.
  */
 void note_model_desc(const std::string & line) {
+    // Only while a checkpoint is being built — see g_loading.
+    if (!g_loading.load()) return;
     if (line.size() < 4 || line.size() > 48) return;
 
     // No underscore, and that is what separates a desc from the two things
@@ -1496,6 +1516,7 @@ Java_ai_ondevice_engine_SdBridge_nativeLoad(
     // A version left over from the last checkpoint would be read as this one's.
     { std::lock_guard<std::mutex> lock(g_version_mutex); g_version.clear(); }
     { std::lock_guard<std::mutex> lock(g_model_desc_mutex); g_model_desc.clear(); }
+    LoadingScope loading_scope;
     { std::lock_guard<std::mutex> lock(g_stage_mutex); g_stage.clear(); }
     { std::lock_guard<std::mutex> lock(g_loaded_mutex); g_loaded.clear(); }
     { std::lock_guard<std::mutex> lock(g_buffers_mutex); g_buffers.clear(); }

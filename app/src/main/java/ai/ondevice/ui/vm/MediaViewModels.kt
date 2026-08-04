@@ -170,6 +170,10 @@ class ImageViewModel @Inject constructor(
             }
 
     /** With more than one diffusion model installed, which one runs is the user's choice — not whichever the database happened to return first. */
+    /** A seeded value, unless the person has already set that one themselves. */
+    private fun <T> keep(key: String, seeded: T?, current: T): T =
+        if (key in _state.value.touched) current else (seeded ?: current)
+
     fun selectModel(model: ModelEntity) {
         if (_state.value.model?.id == model.id) return
         // The loaded context belongs to the old model; keep them in step.
@@ -181,6 +185,9 @@ class ImageViewModel @Inject constructor(
             previewBitmap = null,
             recognisedAs = null,
             bareDenoiser = presumedBare(model),
+            // A new model brings its own settings, so this session's edits stop
+            // being an answer to anything.
+            touched = emptySet(),
         )
         runScope.launch {
             db.models().touch(model.id, System.currentTimeMillis())
@@ -212,12 +219,14 @@ class ImageViewModel @Inject constructor(
 
     fun setPrompt(value: String) = update { copy(prompt = value) }
     fun setNegativePrompt(value: String) = update { copy(negativePrompt = value) }
-    fun setSteps(value: Int) = update { copy(steps = value) }
-    fun setCfg(value: Float) = update { copy(cfgScale = value) }
-    fun setSize(value: Int) = update { copy(width = value, height = value) }
+    fun setSteps(value: Int) = update { copy(steps = value, touched = touched + "steps") }
+    fun setCfg(value: Float) = update { copy(cfgScale = value, touched = touched + "cfg_scale") }
+    fun setSize(value: Int) =
+        update { copy(width = value, height = value, touched = touched + "width" + "height") }
     fun setSeed(value: Long) = update { copy(seed = value) }
-    fun setStrength(value: Float) = update { copy(strength = value) }
-    fun setVaeTiling(value: Boolean) = update { copy(vaeTiling = value) }
+    fun setStrength(value: Float) = update { copy(strength = value, touched = touched + "strength") }
+    fun setVaeTiling(value: Boolean) =
+        update { copy(vaeTiling = value, touched = touched + "vae_tiling") }
 
     fun setSourceImage(uri: String?) = update { copy(sourceImageUri = uri) }
 
@@ -274,15 +283,39 @@ class ImageViewModel @Inject constructor(
                 model = model,
                 runtimeInstalled = runtimeInstalled,
                 bareDenoiser = _state.value.bareDenoiser ?: presumedBare(model),
-                steps = p.int("steps") ?: d.int("steps") ?: _state.value.steps,
-                cfgScale = p.float("cfg_scale") ?: d.float("cfg_scale") ?: _state.value.cfgScale,
-                width = p.int("width") ?: d.int("width") ?: _state.value.width,
-                height = p.int("height") ?: d.int("height") ?: _state.value.height,
-                strength = p.float("strength") ?: d.float("strength") ?: _state.value.strength,
-                samplingMethod = p.string("sampling_method")
-                    ?: d.string("sampling_method") ?: _state.value.samplingMethod,
-                schedule = p.string("schedule") ?: d.string("schedule") ?: _state.value.schedule,
-                clipSkip = p.int("clip_skip") ?: d.int("clip_skip") ?: _state.value.clipSkip,
+                // Anything the person has already changed is left alone — see
+                // ImageState.touched. This block runs whenever the model's
+                // stored parameters change, and returning from All Parameters
+                // is one of those times, so without the guard a size set here
+                // was silently reverted to the model's on the way back.
+                steps = keep("steps", p.int("steps") ?: d.int("steps"), _state.value.steps),
+                cfgScale = keep(
+                    "cfg_scale",
+                    p.float("cfg_scale") ?: d.float("cfg_scale"),
+                    _state.value.cfgScale,
+                ),
+                width = keep("width", p.int("width") ?: d.int("width"), _state.value.width),
+                height = keep("height", p.int("height") ?: d.int("height"), _state.value.height),
+                strength = keep(
+                    "strength",
+                    p.float("strength") ?: d.float("strength"),
+                    _state.value.strength,
+                ),
+                samplingMethod = keep(
+                    "sampling_method",
+                    p.string("sampling_method") ?: d.string("sampling_method"),
+                    _state.value.samplingMethod,
+                ),
+                schedule = keep(
+                    "schedule",
+                    p.string("schedule") ?: d.string("schedule"),
+                    _state.value.schedule,
+                ),
+                clipSkip = keep(
+                    "clip_skip",
+                    p.int("clip_skip") ?: d.int("clip_skip"),
+                    _state.value.clipSkip,
+                ),
                 // Tiling is not seeded from the runtime, deliberately.
                 //
                 // Upstream defaults it off, which is a reasonable assumption
@@ -1141,6 +1174,18 @@ enum class ImageUse(val label: String) {
 data class ImageState(
     val use: ImageUse = ImageUse.EDIT,
     val model: ModelEntity? = null,
+    /**
+     * Settings the person has changed by hand, by their parameter key.
+     *
+     * A re-seed from the model's stored parameters skips these. Without it,
+     * anything that re-seeds — and returning from All Parameters does —
+     * silently reverted a control to whatever the model said, with nothing to
+     * say it had happened.
+     *
+     * Cleared when a different model is chosen, because the settings then
+     * belong to that model rather than to this session.
+     */
+    val touched: Set<String> = emptySet(),
     /**
      * Landscape, and no `<lora:…>` tag.
      *
