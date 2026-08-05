@@ -130,6 +130,38 @@ struct od_sd {
     float ip_adapter_strength;
     int64_t seed;
     bool  vae_tiling;
+    /**
+     * Tile edge in *latent* units, not pixels, and 0 defers to the runtime's 32.
+     *
+     * The distinction is the whole point of exposing this. A latent pixel is
+     * eight output pixels on SD and sixteen on Wan 2.2 and Hunyuan, so the
+     * shared default of 32 is a 256px tile on one architecture and a 512px one
+     * on another. At 704x384 that second number tiles a frame into two, which
+     * is close enough to not tiling that the switch reads as broken: it is on,
+     * it costs overlap, and peak memory barely moves. Sized in latent units the
+     * budget is per-tile and constant, which is what a memory bound wants —
+     * `vae_tiles_per_side` would grow the tile with the frame instead.
+     */
+    int   vae_tile_size;
+    /**
+     * Fraction of a tile shared with its neighbour, blended to hide the seam.
+     *
+     * Upstream defaults to 0.5, which is generous: half of every tile is
+     * computed twice, so a 3x3 grid does roughly 4x the work of one pass. On a
+     * phone that is the difference between a clip finishing and a clip being
+     * killed for taking too long, and 0.25 is usually seamless.
+     */
+    float vae_tile_overlap;
+    /**
+     * Split the decode along time as well as space.
+     *
+     * Honoured only where the VAE implements it, which upstream means LTX-AV.
+     * Wan's runner does not override `set_temporal_tiling_enabled`, so on Wan
+     * this flag is accepted and does nothing — hence the `appliesTo.arch` gate
+     * in the manifest, which refuses it visibly rather than letting it sit on
+     * screen looking like a remedy for the OOM it cannot fix.
+     */
+    bool  vae_tiling_temporal;
 
     // Video. Upstream's own defaults: a second of 16 fps, which is the shortest
     // clip worth looking at and the longest most phones will finish.
@@ -137,6 +169,26 @@ struct od_sd {
     int   fps;
     /** VACE's hold on the control frames, and inert without them. */
     float vace_strength;
+    /**
+     * The high-noise expert's own sampler, where it differs from the other's.
+     *
+     * Wan 2.2 is two denoisers either side of a noise boundary, and upstream
+     * gives each a full `sd_sample_params_t`. This app copied the low-noise
+     * one wholesale and changed the step count, so every other dial — guidance,
+     * eta, the sampler itself — was silently shared. That is a defensible
+     * default and a poor ceiling: the high-noise pass is the one laying down
+     * composition, and it is routinely worth a different CFG from the pass
+     * that only refines detail.
+     *
+     * Negative is "whatever the low-noise expert is using", the same sentinel
+     * `or_model_default` uses elsewhere, so an untouched dial stays inherited
+     * rather than pinning a number somebody never chose.
+     */
+    float high_noise_cfg_scale;
+    float high_noise_guidance;
+    float high_noise_eta;
+    /** Blank or "auto" inherits, exactly as the low-noise sampler's does. */
+    std::string high_noise_sampling_method;
     /** Where Wan 2.2 hands over from its high-noise expert to its low-noise one. */
     float moe_boundary;
     /** Steps for that high-noise expert; 0 means "the same as the other". */
@@ -249,6 +301,9 @@ struct od_sd {
         ip_adapter_strength = img.ip_adapter_strength;
         seed                = img.seed;
         vae_tiling          = img.vae_tiling_params.enabled;
+        vae_tile_size       = img.vae_tiling_params.tile_size_x;
+        vae_tile_overlap    = img.vae_tiling_params.target_overlap;
+        vae_tiling_temporal = img.vae_tiling_params.temporal_tiling;
         pm_style_strength   = img.pm_params.style_strength;
         pulid_id_weight     = img.pulid_params.id_weight;
 
@@ -257,6 +312,11 @@ struct od_sd {
         vace_strength       = vid.vace_strength;
         moe_boundary        = vid.moe_boundary;
         high_noise_steps    = vid.high_noise_sample_params.sample_steps;
+        // Not seeded from upstream: these start as "inherit", which is the
+        // behaviour that was here before they existed.
+        high_noise_cfg_scale = -1.0f;
+        high_noise_guidance  = -1.0f;
+        high_noise_eta       = -1.0f;
 
         hires_enabled       = img.hires.enabled;
         hires_upscaler      = sd_hires_upscaler_name(img.hires.upscaler);
@@ -893,6 +953,9 @@ const std::map<std::string, row> & table() {
         { "control_strength", { [](od_sd & e, const json & v) { e.control_strength = as_float(v, e.control_strength); } } },
         { "ip_adapter_strength", { [](od_sd & e, const json & v) { e.ip_adapter_strength = as_float(v, e.ip_adapter_strength); } } },
         { "vae_tiling",       { [](od_sd & e, const json & v) { e.vae_tiling = as_bool(v, false); } } },
+        { "vae_tile_size",    { [](od_sd & e, const json & v) { e.vae_tile_size = std::max(0, as_int(v, e.vae_tile_size)); } } },
+        { "vae_tile_overlap", { [](od_sd & e, const json & v) { e.vae_tile_overlap = std::min(0.5f, std::max(0.0f, as_float(v, e.vae_tile_overlap))); } } },
+        { "vae_tiling_temporal", { [](od_sd & e, const json & v) { e.vae_tiling_temporal = as_bool(v, false); } } },
         // Video. Inert on an image model, which is why they are in the same
         // table rather than a second one: the runtime reports what it will act
         // on, and `appliesTo` in the manifest decides what is worth showing.
@@ -901,10 +964,15 @@ const std::map<std::string, row> & table() {
         { "vace_strength",    { [](od_sd & e, const json & v) { e.vace_strength = as_float(v, e.vace_strength); } } },
         { "moe_boundary",     { [](od_sd & e, const json & v) { e.moe_boundary = as_float(v, e.moe_boundary); } } },
         { "high_noise_steps", { [](od_sd & e, const json & v) { e.high_noise_steps = std::max(-1, as_int(v, e.high_noise_steps)); } } },
+        { "high_noise_cfg_scale", { [](od_sd & e, const json & v) { e.high_noise_cfg_scale = as_float(v, e.high_noise_cfg_scale); } } },
+        { "high_noise_guidance", { [](od_sd & e, const json & v) { e.high_noise_guidance = as_float(v, e.high_noise_guidance); } } },
+        { "high_noise_eta",   { [](od_sd & e, const json & v) { e.high_noise_eta = as_float(v, e.high_noise_eta); } } },
+        { "high_noise_sampling_method", { [](od_sd & e, const json & v) { e.high_noise_sampling_method = as_string(v); } } },
         // The hi-res stage. Both stills and clips have one, and on a clip it is
         // the only coherent way to enlarge — the whole sequence's latent is
         // scaled and re-denoised together.
         { "hires_fix",        { [](od_sd & e, const json & v) { e.hires_enabled = as_bool(v, false); } } },
+        { "hires_tile",       { [](od_sd & e, const json & v) { e.hires_tile = std::max(0, as_int(v, e.hires_tile)); } } },
         { "hires_upscaler",   { [](od_sd & e, const json & v) { e.hires_upscaler = as_string(v); } } },
         { "hires_scale",      { [](od_sd & e, const json & v) { e.hires_scale = as_float(v, e.hires_scale); } } },
         { "hires_steps",      { [](od_sd & e, const json & v) { e.hires_steps = std::max(0, as_int(v, e.hires_steps)); } } },
@@ -945,12 +1013,20 @@ const std::map<std::string, json (*)(const od_sd &)> & default_table() {
         { "control_strength", [](const od_sd & e) { return json(e.control_strength); } },
         { "ip_adapter_strength", [](const od_sd & e) { return json(e.ip_adapter_strength); } },
         { "vae_tiling",       [](const od_sd & e) { return json(e.vae_tiling); } },
+        { "vae_tile_size",    [](const od_sd & e) { return json(e.vae_tile_size); } },
+        { "vae_tile_overlap", [](const od_sd & e) { return json(e.vae_tile_overlap); } },
+        { "vae_tiling_temporal", [](const od_sd & e) { return json(e.vae_tiling_temporal); } },
         { "video_frames",     [](const od_sd & e) { return json(e.video_frames); } },
         { "fps",              [](const od_sd & e) { return json(e.fps); } },
         { "vace_strength",    [](const od_sd & e) { return json(e.vace_strength); } },
         { "moe_boundary",     [](const od_sd & e) { return json(e.moe_boundary); } },
         { "high_noise_steps", [](const od_sd & e) { return json(e.high_noise_steps); } },
+        { "high_noise_cfg_scale", [](const od_sd & e) { return json(e.high_noise_cfg_scale); } },
+        { "high_noise_guidance", [](const od_sd & e) { return json(e.high_noise_guidance); } },
+        { "high_noise_eta",   [](const od_sd & e) { return json(e.high_noise_eta); } },
+        { "high_noise_sampling_method", [](const od_sd & e) { return json(e.high_noise_sampling_method); } },
         { "hires_fix",        [](const od_sd & e) { return json(e.hires_enabled); } },
+        { "hires_tile",       [](const od_sd & e) { return json(e.hires_tile); } },
         { "hires_upscaler",   [](const od_sd & e) { return json(e.hires_upscaler); } },
         { "hires_scale",      [](const od_sd & e) { return json(e.hires_scale); } },
         { "hires_steps",      [](const od_sd & e) { return json(e.hires_steps); } },
@@ -1255,6 +1331,75 @@ void apply_sample_params(const od_sd & e, sd_sample_params_t & sample) {
                                              : str_to_scheduler(e.schedule.c_str());
 }
 
+/**
+ * Tiled VAE decode, sized rather than merely switched on.
+ *
+ * Both generate paths used to set `enabled` and nothing else, which left the
+ * tile at the runtime's 32-latent default. On Wan that is a 512px tile, so a
+ * 704x384 frame decoded as two tiles and peak memory stayed within a few per
+ * cent of the untiled figure — the setting was on, and the process was still
+ * killed. Sizing it is the difference between the two.
+ *
+ * `tile_size_x`/`tile_size_y` are set together because a non-square tile buys
+ * nothing here: the peak is the tile's area, and a square minimises the
+ * perimeter that has to be recomputed as overlap.
+ */
+void apply_vae_tiling(const od_sd & e, sd_tiling_params_t & tiling) {
+    tiling.enabled         = e.vae_tiling;
+    tiling.temporal_tiling = e.vae_tiling_temporal;
+    // Zero means "runtime default"; the runtime reads anything under 4 that
+    // way too, so passing it through unchanged keeps one meaning for one value.
+    tiling.tile_size_x     = e.vae_tile_size;
+    tiling.tile_size_y     = e.vae_tile_size;
+    tiling.target_overlap  = e.vae_tile_overlap;
+    // Left at the initialised 0 deliberately. `rel_size_*` overrides
+    // `tile_size_*` when set, and it sizes the tile as a fraction of the frame
+    // — so the tile, and the peak, grow with the resolution. That is the
+    // opposite of what a device with a fixed memory ceiling needs.
+}
+
+/**
+ * The remedy worth naming, given what is already set.
+ *
+ * "Enable vae_tiling" is useless advice to someone who has it enabled, and that
+ * is the state these failures arrive in — the switch was the first thing tried.
+ * Tiling that is on but unsized is the common case, because the runtime's
+ * 32-latent default is a 512px tile on a 16x VAE and divides a 704px frame into
+ * two, which moves the peak by about a quarter when the shortfall is a multiple.
+ */
+std::string vae_memory_advice(const od_sd & e) {
+    if (!e.vae_tiling) {
+        return "turn on VAE tiling";
+    }
+    if (e.vae_tile_size <= 0) {
+        return "set a VAE tile size — tiling is on, but at the runtime's default "
+               "tile, which on this architecture may be most of the frame";
+    }
+    if (e.vae_tile_size > 8) {
+        return "lower the VAE tile size below " + std::to_string(e.vae_tile_size);
+    }
+    return "lower the resolution — the VAE tile is already as small as it usefully goes";
+}
+
+/**
+ * The high-noise expert's sampler: the other one, then what differs.
+ *
+ * Starting from a copy is what makes an untouched dial mean "inherit" rather
+ * than "zero", which matters because most of these have no sensible zero —
+ * a CFG of 0 is not a weaker CFG, it is an unconditioned pass.
+ */
+void apply_high_noise(const od_sd & e, const sd_sample_params_t & low, sd_sample_params_t & high) {
+    high = low;
+    high.sample_steps = e.high_noise_steps > 0 ? e.high_noise_steps : e.steps;
+    if (e.high_noise_cfg_scale >= 0.0f) high.guidance.txt_cfg = e.high_noise_cfg_scale;
+    if (e.high_noise_guidance >= 0.0f) high.guidance.distilled_guidance = e.high_noise_guidance;
+    if (e.high_noise_eta >= 0.0f) high.eta = e.high_noise_eta;
+    if (!is_model_default(e.high_noise_sampling_method)) {
+        const auto parsed = str_to_sample_method(e.high_noise_sampling_method.c_str());
+        if (parsed != SAMPLE_METHOD_COUNT) high.sample_method = parsed;
+    }
+}
+
 void apply_slg(const od_sd & e, sd_slg_params_t & slg) {
     slg.scale       = e.slg_scale;
     slg.layer_start = e.skip_layer_start;
@@ -1277,6 +1422,14 @@ void apply_hires(const od_sd & e, sd_hires_params_t & hires, const std::string &
     hires.scale    = e.hires_scale;
     hires.steps    = e.hires_steps > 0 ? e.hires_steps : e.steps;
     hires.denoising_strength = e.hires_denoise;
+    // Was captured from upstream's default and then dropped on the floor: the
+    // field existed, nothing set it and nothing read it, so the tile the
+    // upscaler ran at was whichever one `sd_hires_params_init` had chosen. It
+    // is the same knob as the VAE's, one stage later, and it decides the peak
+    // of the stage most likely to be run at the largest size.
+    if (e.hires_tile > 0) {
+        hires.upscale_tile_size = e.hires_tile;
+    }
     if (hires.upscaler == SD_HIRES_UPSCALER_MODEL) {
         // Asking for the model mode with no model is asking for nothing; fall
         // back to the latent one rather than passing a null it would read.
@@ -2081,15 +2234,13 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerateVideo(
 
     apply_sample_params(*e, params.sample_params);
     apply_slg(*e, params.sample_params.guidance.slg);
-    // Wan 2.2 is two experts either side of a noise boundary, and each takes
-    // its own step count. Defaulting the second to the first keeps one dial
-    // meaningful for the architectures that have only one denoiser.
-    params.high_noise_sample_params = params.sample_params;
-    params.high_noise_sample_params.sample_steps = e->high_noise_steps > 0
-                                                       ? e->high_noise_steps
-                                                       : e->steps;
+    // Wan 2.2 is two experts either side of a noise boundary, and each takes a
+    // full sampler of its own. Everything the second one is not given
+    // explicitly follows the first, which keeps every dial meaningful for the
+    // architectures that have only one denoiser.
+    apply_high_noise(*e, params.sample_params, params.high_noise_sample_params);
 
-    params.vae_tiling_params.enabled = e->vae_tiling;
+    apply_vae_tiling(*e, params.vae_tiling_params);
     apply_cache(*e, params.cache);
     const std::string hires_dropped = apply_video_hires(*e, params.hires, upscaler_model);
     if (!hires_dropped.empty()) {
@@ -2122,8 +2273,11 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerateVideo(
         if (frames != nullptr) free(frames);
         if (audio != nullptr) { free(audio->data); free(audio); }
         if (cancelled) return nullptr;
-        jni_throw(env, "The run produced no frames. This is usually memory — lower the "
-                       "size, ask for fewer frames, or enable vae_tiling.");
+        // Frames are named first because they are the one dimension tiling
+        // cannot help with: Wan decodes every frame of a clip in one graph, and
+        // only LTX-AV's VAE splits along time.
+        jni_throw(env, ("The run produced no frames. This is usually memory — ask for "
+                        "fewer frames, lower the size, or " + vae_memory_advice(*e) + ".").c_str());
         return nullptr;
     }
 
@@ -2300,7 +2454,7 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
     apply_sample_params(*e, params.sample_params);
     apply_slg(*e, params.sample_params.guidance.slg);
 
-    params.vae_tiling_params.enabled = e->vae_tiling;
+    apply_vae_tiling(*e, params.vae_tiling_params);
     apply_cache(*e, params.cache);
     apply_hires(*e, params.hires, upscaler_model);
 
@@ -2359,8 +2513,8 @@ Java_ai_ondevice_engine_SdBridge_nativeGenerate(
         if (cancelled) {
             return nullptr;
         }
-        jni_throw(env, "The diffusion run produced no image. This is usually memory — "
-                       "lower the size or enable vae_tiling.");
+        jni_throw(env, ("The diffusion run produced no image. This is usually memory — "
+                        "lower the size or " + vae_memory_advice(*e) + ".").c_str());
         return nullptr;
     }
 

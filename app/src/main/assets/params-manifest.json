@@ -40,6 +40,20 @@
           "cliFlag": "-n"
         },
         {
+          "key": "reasoning_budget",
+          "group": "sampling",
+          "type": "int",
+          "default": -1,
+          "min": -1,
+          "max": 8192,
+          "step": 64,
+          "tier": "ADVANCED",
+          "label": "Thinking budget",
+          "help": "How many tokens a reasoning model may spend thinking before it is made to stop and answer. -1 lets it run until it stops on its own, which on a phone is how one question becomes a hot device and a flat battery; 0 ends the thinking block straight away. Separate from the reply length, which this does not touch.",
+          "requiresReload": false,
+          "cliFlag": "--reasoning-budget"
+        },
+        {
           "key": "stop",
           "group": "generation",
           "type": "string[]",
@@ -1601,9 +1615,56 @@
           "default": false,
           "tier": "ADVANCED",
           "label": "VAE tiling",
-          "help": "Tiled VAE decode. Critical on mobile — a large memory reduction at high resolutions.",
+          "help": "Tiled VAE decode. Critical on mobile — a large memory reduction at high resolutions. How large depends entirely on the tile size below; on its own this switch only decides that tiling happens, not that it helps.",
           "requiresReload": false,
           "cliFlag": "--vae-tiling"
+        },
+        {
+          "key": "vae_tile_size",
+          "group": "model",
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 64,
+          "step": 4,
+          "tier": "ADVANCED",
+          "label": "VAE tile size",
+          "help": "Tile edge in latent units, where 0 means the runtime's own 32. A latent unit is 8 output pixels on SD and 16 on Wan 2.2, so 32 is a 256px tile on one and a 512px tile on the other — which is why the default barely tiles a 704x384 Wan clip into two pieces and leaves peak memory almost where it started. Peak scales with the square of this, so 16 costs about a quarter of 32. Too small and the decoder loses the context it needs, and seams start showing through the overlap; 12 to 16 is the usual floor.",
+          "requiresReload": false,
+          "cliFlag": "--vae-tile-size"
+        },
+        {
+          "key": "vae_tile_overlap",
+          "group": "model",
+          "type": "float",
+          "default": 0.5,
+          "min": 0.0,
+          "max": 0.5,
+          "step": 0.05,
+          "tier": "EXPERT",
+          "label": "VAE tile overlap",
+          "help": "How much of each tile is shared with its neighbour and blended away, as a fraction of the tile. This is paid for twice over: at the default 0.5 half of every tile is decoded a second time, so a 3x3 grid does roughly four passes' worth of work. Lowering it to 0.25 is usually invisible and close to twice as fast; at 0 the tile edges stop being blended at all and show as a grid.",
+          "requiresReload": false,
+          "cliFlag": "--vae-tile-overlap"
+        },
+        {
+          "key": "vae_tiling_temporal",
+          "group": "model",
+          "type": "bool",
+          "default": false,
+          "tier": "EXPERT",
+          "label": "Temporal VAE tiling",
+          "help": "Decode the clip in chunks of frames rather than all at once, capping the memory that frame count costs. Only LTX-AV's VAE implements it. Wan decodes every frame of a clip in one graph and has no equivalent, so on Wan the memory that frames cost can only be reduced by asking for fewer of them.",
+          "requiresReload": false,
+          "cliFlag": "--temporal-tiling",
+          "appliesTo": {
+            "output": [
+              "video"
+            ],
+            "arch": [
+              "ltxav"
+            ]
+          }
         },
         {
           "key": "hires_fix",
@@ -1615,6 +1676,20 @@
           "help": "Generate small, enlarge, then denoise again at the larger size. Different from the Upscale button, which runs over a finished picture and does not know what it was meant to be. On a clip this is the only coherent way to enlarge — the whole sequence is re-sampled together, so frames stay consistent.",
           "requiresReload": false,
           "cliFlag": "--hires-fix"
+        },
+        {
+          "key": "hires_tile",
+          "group": "postprocess",
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 512,
+          "step": 32,
+          "tier": "EXPERT",
+          "label": "Hi-res tile size",
+          "help": "Tile edge in output pixels for the hi-res stage's upscaler, where 0 means the runtime's own 128. Unlike the VAE tile this one is in pixels, because the upscaler works on the picture rather than on the latent. It bounds the peak of the stage that runs at the largest size of any.",
+          "requiresReload": false,
+          "cliFlag": "--hires-upscale-tile-size"
         },
         {
           "key": "hires_upscaler",
@@ -1783,6 +1858,102 @@
           "help": "Steps for the high-noise expert. 0 gives it the same count as the other one, which is what a single-denoiser architecture wants and what most people should leave it at.",
           "requiresReload": false,
           "cliFlag": "--high-noise-steps",
+          "appliesTo": {
+            "output": [
+              "video"
+            ]
+          }
+        },
+        {
+          "key": "high_noise_cfg_scale",
+          "group": "video",
+          "type": "float",
+          "default": -1.0,
+          "min": -1.0,
+          "max": 20.0,
+          "step": 0.1,
+          "tier": "EXPERT",
+          "label": "High-noise CFG",
+          "help": "CFG for the high-noise expert alone. -1 gives it the same value as the other one, which is what every architecture with a single denoiser wants. This is the pass that lays down composition, so it is the one worth a different number from the pass that only refines detail.",
+          "requiresReload": false,
+          "cliFlag": "--high-noise-cfg-scale",
+          "appliesTo": {
+            "output": [
+              "video"
+            ]
+          }
+        },
+        {
+          "key": "high_noise_guidance",
+          "group": "video",
+          "type": "float",
+          "default": -1.0,
+          "min": -1.0,
+          "max": 10.0,
+          "step": 0.1,
+          "tier": "EXPERT",
+          "label": "High-noise guidance",
+          "help": "Distilled guidance for the high-noise expert alone. -1 follows the other expert. Only means anything on a model that was distilled with a guidance input.",
+          "requiresReload": false,
+          "cliFlag": "--high-noise-guidance",
+          "appliesTo": {
+            "output": [
+              "video"
+            ]
+          }
+        },
+        {
+          "key": "high_noise_eta",
+          "group": "video",
+          "type": "float",
+          "default": -1.0,
+          "min": -1.0,
+          "max": 1.0,
+          "step": 0.05,
+          "tier": "EXPERT",
+          "label": "High-noise eta",
+          "help": "Eta for the high-noise expert alone. -1 follows the other expert.",
+          "requiresReload": false,
+          "cliFlag": "--high-noise-eta",
+          "appliesTo": {
+            "output": [
+              "video"
+            ]
+          }
+        },
+        {
+          "key": "high_noise_sampling_method",
+          "group": "video",
+          "type": "enum",
+          "values": [
+            "auto",
+            "euler",
+            "euler_a",
+            "heun",
+            "dpm2",
+            "dpm++2s_a",
+            "dpm++2m",
+            "dpm++2mv2",
+            "ipndm",
+            "ipndm_v",
+            "lcm",
+            "ddim_trailing",
+            "tcd",
+            "res_multistep",
+            "res_2s",
+            "er_sde",
+            "euler_cfg_pp",
+            "euler_a_cfg_pp",
+            "euler_ge",
+            "dpm++2m_sde",
+            "dpm++2m_sde_bt"
+          ],
+          "default": "auto",
+          "tier": "EXPERT",
+          "label": "High-noise sampler",
+          "help": "Sampler for the high-noise expert alone. \"auto\" follows the other expert, which is the right answer unless you have a reason to split them.",
+          "requiresReload": false,
+          "cliFlag": "--high-noise-sampling-method",
           "appliesTo": {
             "output": [
               "video"

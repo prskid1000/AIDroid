@@ -296,6 +296,10 @@ const std::map<std::string, param_row> & param_table() {
         { "ignore_eos",       { false, [](od_engine & e, const json & v) { e.params.sampling.ignore_eos = as_bool(v, false); } } },
         { "n_probs",          { false, [](od_engine & e, const json & v) { e.params.sampling.n_probs = as_int(v, e.params.sampling.n_probs); } } },
         { "n_predict",        { false, [](od_engine & e, const json & v) { e.params.n_predict = as_int(v, e.params.n_predict); } } },
+        // A cap on thinking, not on the answer. -1 leaves a reasoning model to
+        // run until it stops on its own, which on a phone is how a chat turns
+        // into a thermal event; 0 ends the thinking block immediately.
+        { "reasoning_budget", { false, [](od_engine & e, const json & v) { e.params.sampling.reasoning_budget_tokens = std::max(-1, as_int(v, e.params.sampling.reasoning_budget_tokens)); } } },
         { "n_keep",           { false, [](od_engine & e, const json & v) { e.params.n_keep = as_int(v, e.params.n_keep); } } },
         { "context_shift",    { false, [](od_engine & e, const json & v) { e.params.ctx_shift = as_bool(v, e.params.ctx_shift); } } },
         { "grammar",          { false, [](od_engine & e, const json & v) {
@@ -403,6 +407,7 @@ const std::map<std::string, json (*)(const common_params &)> & default_table() {
         { "n_probs",            [](const common_params & p) { return json(p.sampling.n_probs); } },
 
         { "n_predict",          [](const common_params & p) { return json(p.n_predict); } },
+        { "reasoning_budget",   [](const common_params & p) { return json(p.sampling.reasoning_budget_tokens); } },
         { "n_keep",             [](const common_params & p) { return json(p.n_keep); } },
         { "context_shift",      [](const common_params & p) { return json(p.ctx_shift); } },
     };
