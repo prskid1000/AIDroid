@@ -1064,6 +1064,14 @@ data class VideoState(
     val error: String? = null,
     val errorHint: String? = null,
 ) {
+    /** What the runtime is doing, apart from what this screen still needs. */
+    val runPhase: ai.ondevice.core.RunPhase
+        get() = ai.ondevice.core.runPhaseOf(
+            stopping = unloading || cancelling,
+            loading = loadingModel,
+            running = generating,
+        )
+
     val attachments: List<ModelAttachment> get() = availableAttachments.filter { it.enabled }
 
     /** The clip's length in seconds, from what was asked for rather than what came back. */

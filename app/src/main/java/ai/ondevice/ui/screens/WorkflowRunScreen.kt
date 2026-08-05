@@ -44,6 +44,7 @@ import ai.ondevice.ui.theme.NocturneType
 import ai.ondevice.ui.theme.Radius
 import ai.ondevice.ui.theme.ring
 import ai.ondevice.ui.vm.WorkflowViewModel
+import ai.ondevice.core.control
 
 /**
  * S17 — a workflow running.
@@ -229,19 +230,25 @@ fun WorkflowRunScreen(
                 )
             }
 
+            // Same phase machine as the diffusion tabs: it decides the control
+            // while the run exists, and the screen only names the idle case.
+            val phase = ai.ondevice.core.runPhaseOf(
+                stopping = state.cancelling,
+                running = state.running,
+            )
+            val control = phase.control()
             NButton(
-                when {
-                    state.cancelling -> "Stopping…"
-                    state.running -> "Cancel"
+                control?.label ?: when {
                     state.finishedAt != null || state.error != null -> "Run again"
                     else -> "Run"
                 },
-                onClick = { if (state.running) viewModel.cancel() else viewModel.run() },
-                style = if (state.running) NButtonStyle.Secondary else NButtonStyle.Primary,
+                onClick = { if (phase.busy) viewModel.cancel() else viewModel.run() },
+                style = if (phase.busy) NButtonStyle.Secondary else NButtonStyle.Primary,
+                enabled = control?.enabled ?: true,
                 block = true,
                 modifier = Modifier.padding(top = 16.dp),
             )
-            if (state.running) {
+            if (phase.showsProgress) {
                 NHelp(
                     "This carries on when you leave the app — there is a notification while it " +
                         "runs, and opening it brings you back here.",

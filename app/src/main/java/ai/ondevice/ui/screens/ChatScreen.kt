@@ -962,7 +962,16 @@ private fun ChatComposer(
             // takes to come off storage this was the one control on the screen
             // with nothing to do — it showed Send, and a press queued a second
             // message behind the load rather than abandoning it.
-            val busy = state.generating || state.loadingModel
+            //
+            // The same phase machine the other tabs use. Chat has no stopping
+            // flag of its own to feed it: llama's stop sets a flag the sampler
+            // reads between tokens rather than waiting on a native call, so
+            // there is no interval here where the run is neither going nor
+            // stopped. That is a property of this runtime, not an omission.
+            val busy = ai.ondevice.core.runPhaseOf(
+                loading = state.loadingModel,
+                running = state.generating,
+            ).busy
             NCircleButton(
                 icon = if (busy) NIcons.Stop else NIcons.Send,
                 contentDescription = if (busy) "Stop" else "Send",

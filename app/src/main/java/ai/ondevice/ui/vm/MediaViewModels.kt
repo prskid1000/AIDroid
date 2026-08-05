@@ -16,6 +16,7 @@ import ai.ondevice.data.db.TranscriptEntity
 import ai.ondevice.data.hf.DeviceCapabilities
 import ai.ondevice.engine.CaptureEvent
 import ai.ondevice.engine.record
+import ai.ondevice.core.control
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -1391,9 +1392,17 @@ data class ImageState(
     val outputWidth: Int get() = width + extendLeft + extendRight
     val outputHeight: Int get() = height + extendTop + extendBottom
 
+    /** What the runtime is doing, apart from what this screen still needs. */
+    val runPhase: ai.ondevice.core.RunPhase
+        get() = ai.ondevice.core.runPhaseOf(
+            stopping = unloading || cancelling,
+            loading = loadingModel,
+            running = generating,
+        )
+
     val action: ImageAction
         get() = when {
-            generating -> ImageAction.CANCEL
+            runPhase.busy -> ImageAction.CANCEL
             !runtimeInstalled -> ImageAction.NO_RUNTIME
             // A download in flight is not an absence, and "Add a diffusion
             // model" is the wrong instruction for someone already adding one.
@@ -1409,7 +1418,7 @@ data class ImageState(
 
     val actionLabel: String
         get() = when (action) {
-            ImageAction.CANCEL -> if (cancelling) "Cancelling…" else "Cancel"
+            ImageAction.CANCEL -> runPhase.control()?.label ?: "Cancel"
             ImageAction.NO_RUNTIME -> "No diffusion runtime in this build"
             ImageAction.INSTALLING -> baseInstalling?.label ?: "Downloading…"
             ImageAction.ADD_MODEL -> "Add a diffusion model"
@@ -1419,7 +1428,9 @@ data class ImageState(
 
     /** Whether pressing it does anything. A button that silently does nothing is worse than one that is plainly off. */
     val actionEnabled: Boolean
-        get() = action != ImageAction.INSTALLING && action != ImageAction.NO_RUNTIME
+        get() = (runPhase.control()?.enabled ?: true) &&
+            action != ImageAction.INSTALLING &&
+            action != ImageAction.NO_RUNTIME
 
     /** The runtime is installed but there is nothing for it to load. */
     val actionHint: String?

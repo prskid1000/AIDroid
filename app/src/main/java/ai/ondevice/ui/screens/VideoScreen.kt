@@ -61,6 +61,7 @@ import ai.ondevice.ui.theme.Radius
 import ai.ondevice.ui.theme.ring
 import ai.ondevice.ui.vm.VideoState
 import ai.ondevice.ui.vm.VideoViewModel
+import ai.ondevice.core.control
 import androidx.compose.ui.draw.clip
 import androidx.hilt.navigation.compose.hiltViewModel
 
@@ -125,16 +126,15 @@ fun VideoScreen(
             // control frame and the length sliders — so starting a clip meant
             // scrolling past every setting, and Cancel was somewhere off-screen
             // for the whole run.
-            val busy = state.generating || state.loadingModel
+            // The runtime's phase decides the control while it is doing
+            // something; the screen only says what to offer when it is not.
+            val running = state.runPhase.control()
+            val busy = state.runPhase.busy
             NButton(
-                when {
-                    state.cancelling -> "Stopping…"
-                    busy -> "Cancel"
-                    else -> "Generate clip"
-                },
+                running?.label ?: "Generate clip",
                 onClick = { if (busy) viewModel.cancel() else viewModel.generate() },
                 style = if (busy) NButtonStyle.Secondary else NButtonStyle.Primary,
-                enabled = state.model != null && (busy || state.runtimeInstalled),
+                enabled = (running?.enabled ?: state.runtimeInstalled) && state.model != null,
                 block = true,
                 modifier = Modifier.padding(top = 12.dp),
             )
@@ -364,7 +364,7 @@ private fun ClipStage(state: VideoState, viewModel: VideoViewModel) {
         // Over the frame, not under it — the same block the still screen
         // draws, so one run does not describe itself in two shapes depending
         // on which tab is open.
-        if (state.generating) {
+        if (state.runPhase.showsProgress) {
             GenerationProgress(
                 phase = state.phase,
                 step = state.step,
