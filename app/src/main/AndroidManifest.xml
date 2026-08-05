@@ -117,5 +117,19 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
-    </application>
+    
+        <!--
+            Its own process, so killing the main one does not kill the thing
+            doing the killing. See RestartActivity: an activity start from a
+            dead process is dropped by the background-launch rules, so the
+            launch has to happen from something still in the foreground.
+        -->
+        <activity
+            android:name=".RestartActivity"
+            android:process=":restart"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay" />
+</application>
 </manifest>

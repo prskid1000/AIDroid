@@ -1,8 +1,7 @@
 package ai.ondevice.core
 
-import android.app.AlarmManager
-import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 
 /**
  * Kill this process and come back, for the work that cannot be asked to stop.
@@ -25,26 +24,19 @@ import android.content.Context
  * has just said they no longer want. What is lost is the partial result, which
  * is exactly what Cancel discards anyway.
  *
- * The alarm is set before the kill because a dead process cannot start
- * anything. `RTC` rather than `RTC_WAKEUP`: the screen is on — somebody just
- * pressed a button — and this does not deserve a wake lock.
+ * The kill is delegated rather than done here, and that is the whole trick.
+ * An alarm set before dying does not work: when it fires there is nothing left
+ * with foreground standing, and Android 10 onward drops the activity start —
+ * measured, the process returned and the screen did not. So a second process
+ * does the killing and the launching, from a foreground it still has.
  */
 fun forceStopAndRestart(context: Context) {
     val app = context.applicationContext
-    val launch = app.packageManager.getLaunchIntentForPackage(app.packageName)
-    if (launch != null) {
-        val pending = PendingIntent.getActivity(
-            app,
-            RESTART_REQUEST,
-            launch,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_CANCEL_CURRENT,
-        )
-        // A moment, not none: the alarm has to outlive the process that set it.
-        app.getSystemService(AlarmManager::class.java)
-            ?.set(AlarmManager.RTC, System.currentTimeMillis() + RESTART_DELAY_MILLIS, pending)
+    val handover = Intent(app, Class.forName("ai.ondevice.RestartActivity")).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        putExtra("ai.ondevice.restart.pid", android.os.Process.myPid())
     }
-    android.os.Process.killProcess(android.os.Process.myPid())
+    // Started from the foreground, which is the only moment this is allowed.
+    // It kills this process from its own, then launches a fresh one.
+    app.startActivity(handover)
 }
-
-private const val RESTART_REQUEST = 0xA1D2
-private const val RESTART_DELAY_MILLIS = 400L
