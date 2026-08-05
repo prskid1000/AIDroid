@@ -269,10 +269,17 @@ class ParamsViewModel @Inject constructor(
                     val model = db.models().get(modelId) ?: return@launch
                     engines.load(model, _state.value.values, force = true)
                 }
-                RuntimeRegistry.STABLE_DIFFUSION -> diffusion.unload()
-                RuntimeRegistry.WHISPER -> transcriber.unload()
-                RuntimeRegistry.KOKORO -> kokoro.unload()
-                RuntimeRegistry.OMNIVOICE -> omniVoice.unload()
+                // On IO, not on viewModelScope's main dispatcher: dropping a
+                // context waits for any run still inside it, and that wait on
+                // the UI thread is an ANR.
+                RuntimeRegistry.STABLE_DIFFUSION ->
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { diffusion.unload() }
+                RuntimeRegistry.WHISPER ->
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { transcriber.unload() }
+                RuntimeRegistry.KOKORO ->
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { kokoro.unload() }
+                RuntimeRegistry.OMNIVOICE ->
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { omniVoice.unload() }
             }
             _state.value = _state.value.copy(pendingReloadKeys = emptySet())
         }

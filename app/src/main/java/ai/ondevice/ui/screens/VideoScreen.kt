@@ -641,37 +641,32 @@ private fun VideoSettingsSheet(
                     "hi-res stage is a separate latent upsampler, and that is where it goes.",
             )
 
-            // Unloading is not something to do by accident mid-run.
+            // One press: stop whatever is running and give the memory back.
             //
-            // The button was live whenever anything was resident, including
-            // while sampling — and freeing the weights under a running
-            // generation ends it, badly, with the native side reading memory
-            // that has gone. Now that a run outlives the screen it is easier
-            // than ever to arrive here with one going, so a run in flight
-            // turns this into a two-step: say it, then mean it.
-            var confirmingUnload by rememberSaveable { mutableStateOf(false) }
+            // This was a two-step -- "Unload model…" then "Unload and stop the
+            // run" -- guarding against freeing weights under a live generation,
+            // which used to end with the native side reading memory that had
+            // gone. `nativeFree` has since taken that on properly: it cancels
+            // the run, waits on its mutex until the native call returns, and
+            // only then deletes. There is nothing left for a confirmation to
+            // protect, and a second tap between someone and their memory is a
+            // toll rather than a safeguard.
             val busyNow = state.generating || state.loadingModel
             NButton(
                 when {
-                    !busyNow -> "Unload model"
-                    confirmingUnload -> "Unload and stop the run"
-                    else -> "Unload model…"
+                    state.unloading -> "Freeing the memory…"
+                    busyNow -> "Stop and unload"
+                    else -> "Unload model"
                 },
-                onClick = {
-                    when {
-                        !busyNow -> viewModel.unloadModel()
-                        confirmingUnload -> { confirmingUnload = false; viewModel.unloadModel() }
-                        else -> confirmingUnload = true
-                    }
-                },
+                onClick = viewModel::unloadModel,
                 style = NButtonStyle.Ghost,
                 block = true,
-                enabled = state.residentComponents.isNotEmpty(),
+                enabled = !state.unloading && state.residentComponents.isNotEmpty(),
                 modifier = Modifier.padding(top = 18.dp),
             )
             NHelp(
                 if (busyNow) {
-                    "A run is in progress. Unloading frees its weights and stops it."
+                    "A run is in progress. Unloading stops it and frees its weights."
                 } else {
                     "Frees the weights now. Generating again reloads them."
                 },

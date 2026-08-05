@@ -81,36 +81,42 @@ fun ResidentCard(
                 Text(it, style = NocturneType.MonoXs, color = NocturneColors.Accent300)
             }
         } else {
-            // Reserved as each module first builds a graph, so the decoder's do
-            // not exist until the decode — an empty list here means not yet
-            // asked for rather than nothing.
-            buffers.forEach { buffer ->
-                // Two columns rather than one run-on line: the module names are
-                // short and the figures are what the eye is looking for, and
-                // strung together with separators they had to be read through
-                // to be compared. The name is left as the runtime spells it —
-                // `wan_vae`, `t5` — because it is an identifier, and prettying
-                // an identifier only makes it harder to match against a log.
-                Row(Modifier.fillMaxWidth()) {
-                    Text(
-                        buffer.what,
-                        style = NocturneType.MonoXs,
-                        color = NocturneColors.Accent300,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        buildString {
-                            if (buffer.computeMb > 0) append("graph ${megabytes(buffer.computeMb)}")
-                            if (buffer.cacheMb > 0) {
-                                if (isNotEmpty()) append(" · ")
-                                append("cache ${megabytes(buffer.cacheMb)}")
-                            }
-                        },
-                        style = NocturneType.MonoXs,
-                        color = NocturneColors.TextMuted,
-                    )
-                }
-            }
+            // Two groups, each labelled and totalled.
+            //
+            // This card used to list graph reservations alone: "t5 graph 297
+            // MB, Wan2.2-TI2V-5B graph 56 MB" for a process holding 10.7 GB of
+            // weights. That is not a small error but the wrong quantity — the
+            // graph is the smallest of the terms and was the only one counted,
+            // so the card answered "what is this run holding" with 3% of the
+            // answer.
+            //
+            // Kept split rather than summed to one number, because the split is
+            // the surprising part: the text encoder is nearly twice the
+            // diffusion model, and the diffusion model is the file the user
+            // chose. Totals on the group rows so the two scales can be compared
+            // without adding up the children.
+            //
+            // Working memory is reserved as each module first builds a graph,
+            // so the decoder's does not exist until the decode — an empty
+            // group here means not yet asked for rather than nothing.
+            MemoryGroup(
+                label = "in memory",
+                totalMb = buffers.filter { it.isResident }.sumOf { it.residentMb },
+                rows = buffers.filter { it.isResident }.map { it.what to megabytes(it.residentMb) },
+            )
+            MemoryGroup(
+                label = "working",
+                totalMb = buffers.filterNot { it.isResident }.sumOf { it.computeMb + it.cacheMb },
+                rows = buffers.filterNot { it.isResident }.map { buffer ->
+                    buffer.what to buildString {
+                        if (buffer.computeMb > 0) append("graph ${megabytes(buffer.computeMb)}")
+                        if (buffer.cacheMb > 0) {
+                            if (isNotEmpty()) append(" · ")
+                            append("cache ${megabytes(buffer.cacheMb)}")
+                        }
+                    }
+                },
+            )
             if (!loaded) {
                 unloadReason?.let {
                     Text(it, style = NocturneType.Help, color = NocturneColors.TextMuted)
@@ -126,6 +132,33 @@ fun ResidentCard(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+    }
+}
+
+/**
+ * One labelled, totalled group of the resident card.
+ *
+ * The module name is left as the runtime spells it — `wan_vae`, `t5`, and
+ * `text_encoders` — because it is an identifier, and prettying an identifier
+ * only makes it harder to match against a log.
+ */
+@Composable
+private fun MemoryGroup(label: String, totalMb: Double, rows: List<Pair<String, String>>) {
+    if (rows.isEmpty()) return
+    Row(Modifier.fillMaxWidth()) {
+        Text(label, style = NocturneType.MonoXs, color = NocturneColors.Text, modifier = Modifier.weight(1f))
+        Text(megabytes(totalMb), style = NocturneType.MonoXs, color = NocturneColors.Text)
+    }
+    rows.forEach { (name, figure) ->
+        Row(Modifier.fillMaxWidth()) {
+            Text(
+                "  $name",
+                style = NocturneType.MonoXs,
+                color = NocturneColors.Accent300,
+                modifier = Modifier.weight(1f),
+            )
+            Text(figure, style = NocturneType.MonoXs, color = NocturneColors.TextMuted)
         }
     }
 }

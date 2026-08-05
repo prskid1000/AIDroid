@@ -330,6 +330,26 @@ struct od_sd {
     std::atomic<int>   step{0};
     std::atomic<int>   total_steps{0};
     std::atomic<float> seconds_per_step{0.0f};
+    /**
+     * The other two callers of the step callback, kept instead of discarded.
+     *
+     * One callback serves three producers: the sampler counts steps, the VAE
+     * tiler counts tiles, and the tensor loader counts tensors. Only the
+     * sampler's numbers belong on the step counter, and the other two used to
+     * be dropped on the floor for that reason — which was the right fix for a
+     * progress bar that restarted at "1 of 12" when the tiler took over, and
+     * the wrong one for the readout, because it threw away the only detail
+     * either of those phases has. A decode that takes four minutes said
+     * "decoding" for four minutes while the runtime was telling us which tile
+     * it was on.
+     *
+     * They go on a second counter rather than the first, so the step number
+     * still means steps and a phase that has sub-progress can show it.
+     */
+    std::atomic<int>   sub_step{0};
+    std::atomic<int>   sub_total{0};
+    /** What sub_step is counting: 0 nothing, 1 tiles, 2 tensors. */
+    std::atomic<int>   sub_kind{0};
     std::atomic<bool>  generating{false};
     std::atomic<int>   phase{0};
     std::atomic<bool>  sampling_started{false};
@@ -441,6 +461,11 @@ std::atomic<bool> g_bare_diffusion{false};
  */
 std::mutex  g_stage_mutex;
 std::string g_stage;
+
+/** What the second progress counter is counting. See od_sd::sub_kind. */
+constexpr int SUB_NONE   = 0;
+constexpr int SUB_TILE   = 1;
+constexpr int SUB_TENSOR = 2;
 
 constexpr int PHASE_PREPARING = 0;
 constexpr int PHASE_SAMPLING  = 1;
@@ -598,6 +623,69 @@ struct od_buffer {
 std::mutex g_buffers_mutex;
 std::vector<od_buffer> g_buffers;
 
+/**
+ * The weights themselves, which is the number none of the above is.
+ *
+ * The buffers above are working memory — a graph reservation and a feature
+ * cache — and on this model they come to a few hundred megabytes against
+ * weights of ten gigabytes. Reporting only those put "graph 851.60 MB" on a
+ * screen describing a process holding 10.7 GB, which reads as though the app
+ * had measured the wrong thing, because it had: it was measuring the smallest
+ * term of four and calling it the memory.
+ *
+ * Upstream prints the real figure once per load, at INFO, already broken down:
+ *
+ *     total params memory size = 10713.69MB (VRAM 0.00MB, RAM 10713.69MB):
+ *       text_encoders 6091.95MB(RAM), diffusion_model 3277.49MB(RAM),
+ *       vae 1344.24MB(RAM), controlnet 0.00MB(N/A), extensions 0.00MB(N/A)
+ *
+ * Worth having in the breakdown rather than as one total, because the split is
+ * the surprising part — the text encoder is nearly twice the diffusion model
+ * here, and the file the user picked is the diffusion model.
+ */
+std::mutex g_params_mutex;
+double g_params_total_mb = 0.0;
+std::vector<std::pair<std::string, double>> g_params_parts;
+
+/** Parses the line above. Returns whether it was that line. */
+bool note_params_memory(const std::string & line) {
+    const auto head = line.find("total params memory size");
+    if (head == std::string::npos) return false;
+    const auto eq = line.find('=', head);
+    if (eq == std::string::npos) return false;
+
+    const double total = std::strtod(line.c_str() + eq + 1, nullptr);
+    // The breakdown follows the colon that closes the parenthesised split.
+    const auto colon = line.find(':', eq);
+
+    std::vector<std::pair<std::string, double>> parts;
+    if (colon != std::string::npos) {
+        std::string rest = line.substr(colon + 1);
+        size_t at = 0;
+        while (at < rest.size()) {
+            auto comma = rest.find(',', at);
+            if (comma == std::string::npos) comma = rest.size();
+            std::string item = rest.substr(at, comma - at);
+            at = comma + 1;
+            const auto digit = item.find_first_of("0123456789");
+            if (digit == std::string::npos || digit == 0) continue;
+            const double mb = std::strtod(item.c_str() + digit, nullptr);
+            std::string name = item.substr(0, digit);
+            while (!name.empty() && (name.front() == ' ')) name.erase(name.begin());
+            while (!name.empty() && (name.back() == ' ')) name.pop_back();
+            // Components the run does not use are printed as 0.00MB(N/A);
+            // listing them says "you have no ControlNet" in a memory readout.
+            if (name.empty() || mb <= 0.0) continue;
+            parts.emplace_back(name, mb);
+        }
+    }
+
+    std::lock_guard<std::mutex> lock(g_params_mutex);
+    g_params_total_mb = total;
+    g_params_parts = std::move(parts);
+    return true;
+}
+
 /** The runtime's word for a component, mapped to the app's role name. */
 const std::pair<const char *, const char *> COMPONENT_WORDS[] = {
     // Longest first: "llm vision" must not be read as "llm".
@@ -721,6 +809,15 @@ void note_stage(const char * text) {
     // Kept as a figure rather than as a sentence, so it does not also become
     // the stage line and appear twice.
     if (note_buffer(line)) return;
+    if (note_params_memory(line)) return;
+    // The reservations note_buffer does not keep are still not sentences.
+    //
+    // "Model manager prepared params backend buffer ( 1.12 MB, 1 tensors,
+    // RAM)" wrapped to two lines of the resident card to report one megabyte,
+    // and it is logged late enough in a load to be the line still showing when
+    // sampling starts. An allocation notice is a figure or it is nothing; it is
+    // never the sentence describing what the run is doing.
+    if (line.find("backend buffer") != std::string::npos) return;
     note_model_desc(line);
     {
         std::lock_guard<std::mutex> lock(g_stage_mutex);
@@ -1041,12 +1138,29 @@ void progress_cb(int step, int steps, float time, void *) {
     od_sd * e = g_current.load();
     if (e == nullptr) return;
 
+    if (steps <= 0) return;
+
     // The phase is the runtime's own word for it, set in note_phase. This
     // callback serves both the sampler and the VAE tiler, and only the
     // sampler's numbers are steps of the thing the progress bar measures — the
-    // tiler's are tiles, and reporting them made a finished picture restart its
-    // count from 1 of 12.
-    if (e->phase.load() != PHASE_SAMPLING || steps <= 0) return;
+    // tiler's are tiles, and reporting them on the step counter made a finished
+    // picture restart its count from 1 of 12.
+    //
+    // Outside sampling they are still worth having, just not there. Decode is
+    // the longest phase of a clip — 238s of this run's 453s — and the tiler is
+    // announcing which tile it is on for every second of it. Same callback,
+    // same numbers, second counter.
+    const int phase = e->phase.load();
+    if (phase != PHASE_SAMPLING) {
+        e->sub_step.store(step);
+        e->sub_total.store(steps);
+        // Which of the two it is comes from the phase, not from "not sampling".
+        // Preparing is also not sampling, and what reports during preparing is
+        // the loader — so a first attempt at this labelled a 242-tensor load
+        // "Tile 242 of 242" on screen. Only a decode has tiles.
+        e->sub_kind.store(phase == PHASE_DECODING ? SUB_TILE : SUB_TENSOR);
+        return;
+    }
 
     // A third caller, which the phase cannot filter because it runs *inside*
     // sampling: the tensor loader.
@@ -1069,10 +1183,21 @@ void progress_cb(int step, int steps, float time, void *) {
         e->sampler_steps.store(steps);
         expected = steps;
     }
-    if (steps != expected) return;
+    if (steps != expected) {
+        // The loader, mid-sample. Its count is not a step, but it is the only
+        // thing moving during a lazy load, so it goes on the second counter
+        // rather than nowhere.
+        e->sub_step.store(step);
+        e->sub_total.store(steps);
+        e->sub_kind.store(SUB_TENSOR);
+        return;
+    }
 
     e->step.store(step);
     e->total_steps.store(steps);
+    // A step arriving means the load that preceded it is done; leaving the
+    // tensor count up would freeze a stale "1680 of 1680" under a live step.
+    e->sub_kind.store(SUB_NONE);
     if (time > 0.0f) {
         e->seconds_per_step.store(time);
     }
@@ -1567,16 +1692,33 @@ Java_ai_ondevice_engine_SdBridge_nativeLoadedComponents(JNIEnv * env, jobject) {
  */
 JNIEXPORT jstring JNICALL
 Java_ai_ondevice_engine_SdBridge_nativeBuffers(JNIEnv * env, jobject) {
-    std::lock_guard<std::mutex> lock(g_buffers_mutex);
-    json out = json::array();
-    for (const auto & b : g_buffers) {
-        out.push_back(json{
-            { "what",      b.desc      },
-            { "computeMb", b.compute_mb },
-            { "cacheMb",   b.cache_mb   },
-        });
+    json buffers = json::array();
+    {
+        std::lock_guard<std::mutex> lock(g_buffers_mutex);
+        for (const auto & b : g_buffers) {
+            buffers.push_back(json{
+                { "what",      b.desc      },
+                { "computeMb", b.compute_mb },
+                { "cacheMb",   b.cache_mb   },
+            });
+        }
     }
-    return jni_from_string(env, dump_json(out));
+    json weights = json::array();
+    double total = 0.0;
+    {
+        std::lock_guard<std::mutex> lock(g_params_mutex);
+        total = g_params_total_mb;
+        for (const auto & [name, mb] : g_params_parts) {
+            weights.push_back(json{ { "what", name }, { "mb", mb } });
+        }
+    }
+    // An object rather than the bare array this used to return: the weights are
+    // the larger half of the answer and had nowhere to go.
+    return jni_from_string(env, dump_json(json{
+        { "buffers",  buffers },
+        { "weights",  weights },
+        { "weightsTotalMb", total },
+    }));
 }
 
 JNIEXPORT jstring JNICALL
@@ -2037,6 +2179,12 @@ Java_ai_ondevice_engine_SdBridge_nativeProgress(JNIEnv * env, jobject, jlong han
         { "step",           e->step.load() },
         { "steps",          e->total_steps.load() },
         { "secondsPerStep", e->seconds_per_step.load() },
+        // The second counter, so a phase with no steps is not a static word for
+        // minutes at a time. Empty kind means there is nothing to add.
+        { "subStep",        e->sub_step.load() },
+        { "subTotal",       e->sub_total.load() },
+        { "subKind",        e->sub_kind.load() == SUB_TILE   ? "tile"
+                            : e->sub_kind.load() == SUB_TENSOR ? "tensor" : "" },
         { "generating",     e->generating.load() },
         { "previewSerial",  e->preview_serial.load() },
         { "phase",          phase == PHASE_SAMPLING ? "sampling"

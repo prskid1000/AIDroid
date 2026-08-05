@@ -260,3 +260,40 @@ class ResourceRecorder(private val capabilities: DeviceCapabilities) {
         private val WHITESPACE = Regex("""\s+""")
     }
 }
+
+    /**
+     * Resident memory split into the half that can be given back and the
+     * half that cannot.
+     *
+     * `total params memory size` is what the runtime *mapped*, not what is
+     * in RAM — `enable_mmap` defaults on, so a 10.46 GB model is a promise
+     * about address space and the resident figure is usually far below it.
+     * Reporting the mapped number as memory overstates it, and reporting
+     * one RSS figure hides the distinction that decides whether this
+     * process survives pressure.
+     *
+     * `Anonymous` is everything allocated rather than mapped from a file:
+     * compute buffers, the VAE's feature cache, the heap. It cannot be
+     * evicted, so it is the number the kernel's killer effectively reads.
+     * The remainder of Rss is weight pages faulted in from the checkpoint —
+     * genuinely in memory, and genuinely reclaimable, because the file they
+     * came from is still on disk.
+     */
+    fun residentMemorySplit(): Pair<Long, Long> = runCatching {
+        var rss = 0L
+        var anon = 0L
+        java.io.File("/proc/self/smaps_rollup").forEachLine { line ->
+            when {
+                line.startsWith("Rss:") -> rss = kilobytesIn(line)
+                line.startsWith("Anonymous:") -> anon = kilobytesIn(line)
+            }
+        }
+        // Clamped rather than trusted: the two fields are sampled as the
+        // kernel walks the maps, so a growing process can report an
+        // Anonymous larger than the Rss read a moment earlier.
+        val allocated = anon.coerceAtMost(rss)
+        allocated to (rss - allocated)
+    }.getOrDefault(0L to 0L)
+
+    private fun kilobytesIn(line: String): Long =
+        line.split(Regex("\\s+")).getOrNull(1)?.toLongOrNull()?.times(1024L) ?: 0L

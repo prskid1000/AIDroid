@@ -397,8 +397,11 @@ class DiffusionEngine(
      * run and call it the run.
      */
     val buffers: List<RuntimeBuffer>
+        get() = weights + working
+
+    private val working: List<RuntimeBuffer>
         get() = runCatching {
-            (json.parseToJsonElement(SdBridge.nativeBuffers()) as kotlinx.serialization.json.JsonArray)
+            (memoryReport()["buffers"] as kotlinx.serialization.json.JsonArray)
                 .map { it.jsonObject }
                 .mapNotNull { row ->
                     val what = row["what"]?.jsonPrimitive?.content.orEmpty().trim()
@@ -412,13 +415,78 @@ class DiffusionEngine(
                 .filter { it.computeMb > 0.0 || it.cacheMb > 0.0 }
         }.getOrDefault(emptyList())
 
+    /**
+     * What the weights cost, split the way the runtime splits them.
+     *
+     * [buffers] is working memory — a graph reservation and a feature cache —
+     * and on a video model those come to a few hundred megabytes against ten
+     * gigabytes of weights. Reporting only those described a process holding
+     * 10.7 GB as "graph 851.60 MB", which is not a small error but the wrong
+     * quantity: it is the smallest of four terms.
+     *
+     * The split is worth keeping whole rather than summing, because it is the
+     * surprising part. On Wan 2.2 the text encoder is 6.1 GB against the
+     * diffusion model's 3.3 GB — so the file the user chose is not the file
+     * costing them the memory.
+     */
+    val weights: List<RuntimeBuffer>
+        get() {
+            val (current, cached) = residentMemorySplit()
+            if (current + cached <= 0L) return emptyList()
+            val mb = { bytes: Long -> bytes.toDouble() / ResourceTrace.BYTES_PER_MB }
+            return listOf(
+                RuntimeBuffer("cached", 0.0, 0.0, residentMb = mb(cached)),
+                RuntimeBuffer("current", 0.0, 0.0, residentMb = mb(current)),
+            )
+        }
+
+    private fun memoryReport(): kotlinx.serialization.json.JsonObject =
+        json.parseToJsonElement(SdBridge.nativeBuffers()).jsonObject
+
+    /**
+     * The second progress counter, as a phrase, or null when there is none.
+     *
+     * Read the same way for a picture and for a clip, because both go through
+     * one callback and one phase machine -- the tiler counts tiles either way,
+     * and the loader counts tensors either way.
+     */
+    private fun subDetail(progress: kotlinx.serialization.json.JsonObject): String? {
+        val kind = progress["subKind"]?.jsonPrimitive?.content.orEmpty()
+        if (kind.isBlank()) return null
+        val at = progress["subStep"]?.jsonPrimitive?.content?.toIntOrNull() ?: return null
+        val of = progress["subTotal"]?.jsonPrimitive?.content?.toIntOrNull() ?: return null
+        if (of <= 1) return null
+        return when (kind) {
+            "tile" -> "tile $at of $of"
+            "tensor" -> "$at of $of tensors"
+            else -> null
+        }
+    }
+
     /** The loader's own account of where it has got to, or null between loads. */
     val loadStage: String?
         get() = if (SdBridge.available) SdBridge.nativeLoadStage().takeIf { it.isNotBlank() } else null
 
     /** @param because what to tell the user, when the app unloaded on their behalf. */
+    /**
+     * Synchronized, and the handle is taken before it is freed.
+     *
+     * This was safe only by accident: every caller ran on the main thread, so
+     * the main thread serialised them. Moving the wait off it — which it had to
+     * be, or a free during a run is an ANR — removed that, and two callers
+     * could then both read a non-zero handle and both pass it to `nativeFree`.
+     * The second is a free of a pointer already deleted, which is not an
+     * exception but a segfault, and it was reachable from two taps.
+     *
+     * Claiming the handle first also shuts the door on a generate racing in:
+     * `generate` bails on a zero handle, so from here on there is nothing left
+     * to start a run with.
+     */
+    @Synchronized
     fun unload(because: String? = null) {
-        if (handle != 0L) {
+        val claimed = handle
+        if (claimed != 0L) {
+            handle = 0L
             android.util.Log.i(
                 TAG,
                 "unloading " + (residentModel ?: loadedModelId ?: "?") +
@@ -426,8 +494,7 @@ class DiffusionEngine(
                     " (freeing ~${formatBytes(residentBytes)})" +
                     (because?.let { ": $it" } ?: ""),
             )
-            SdBridge.nativeFree(handle)
-            handle = 0L
+            SdBridge.nativeFree(claimed)
             lastUnloadReason = because
         }
         residentComponents = emptyList()
@@ -581,7 +648,7 @@ class DiffusionEngine(
                 else -> DiffusionPhase.PREPARING
             }
             val stage = progress["stage"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
-            send(DiffusionEvent.Progress(step, steps, secondsPerStep, phase, stage))
+            send(DiffusionEvent.Progress(step, steps, secondsPerStep, phase, stage, subDetail(progress)))
 
             val serial = progress["previewSerial"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
             if (serial != lastPreviewSerial) {
@@ -719,7 +786,7 @@ class DiffusionEngine(
                 else -> DiffusionPhase.PREPARING
             }
             val stage = progress["stage"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
-            send(DiffusionEvent.Progress(step, steps, secondsPerStep, phase, stage))
+            send(DiffusionEvent.Progress(step, steps, secondsPerStep, phase, stage, subDetail(progress)))
 
             val serial = progress["previewSerial"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
             if (serial != lastPreviewSerial) {
@@ -1084,7 +1151,18 @@ data class RuntimeBuffer(
     val what: String,
     val computeMb: Double,
     val cacheMb: Double,
-)
+    /**
+     * Weights, where this row is weights rather than working memory.
+     *
+     * The two travel in one list because they are one answer to one question —
+     * what is this run holding — and splitting them into two state fields put
+     * the larger half behind a plumbing change through five files. A row has
+     * one or the other, never both.
+     */
+    val residentMb: Double = 0.0,
+) {
+    val isResident: Boolean get() = residentMb > 0.0
+}
 
 /** Which part of the run is happening. */
 enum class DiffusionPhase(val label: String) {
@@ -1113,6 +1191,14 @@ sealed interface DiffusionEvent {
         val phase: DiffusionPhase,
         /** The runtime's own last word, where it has said one. */
         val stage: String? = null,
+        /**
+         * What a phase with no steps is counting instead, or null.
+         *
+         * Decode was the longest phase of a 704x384 clip -- 238s of 453s --
+         * and said "decoding" for all of it while the tiler was reporting
+         * which tile it was on through the same callback the sampler uses.
+         */
+        val detail: String? = null,
     ) : DiffusionEvent
     data class Preview(val image: DiffusionImage) : DiffusionEvent
     data class Completed(

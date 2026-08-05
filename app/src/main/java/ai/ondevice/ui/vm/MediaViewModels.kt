@@ -204,13 +204,35 @@ class ImageViewModel @Inject constructor(
      * gigabytes resident while you go and do something else, and force-stopping
      * the app was the only way to reclaim it.
      */
+    /**
+     * Free the weights, stopping the run if one is going.
+     *
+     * Off the main thread, because `nativeFree` is not a quick call. It cancels
+     * the run, waits on its mutex until the native generate returns, and only
+     * then deletes the context — which is the correct order, and the reason it
+     * blocks for as long as the run takes to notice the cancel. Called from the
+     * UI thread, as this was, that block is an ANR: input dispatch times out at
+     * five seconds and the system kills the app. It reads as a crash, and the
+     * system log calls it one --
+     *
+     *     ANR in ai.ondevice ... Waited 5000ms for MotionEvent
+     *     Killing 27286:ai.ondevice ... user request after error
+     *
+     * -- but nothing had gone wrong in native code at all. The only fault was
+     * where the wait happened.
+     */
     fun unloadModel() {
-        diffusion.unload("you asked for the memory back")
-        _state.value = _state.value.copy(
-            residentComponents = emptyList(),
-            unloadReason = diffusion.lastUnloadReason,
-            recognisedAs = null,
-        )
+        if (_state.value.unloading) return
+        _state.value = _state.value.copy(unloading = true)
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { diffusion.unload("you asked for the memory back") }
+            _state.value = _state.value.copy(
+                residentComponents = emptyList(),
+                unloadReason = diffusion.lastUnloadReason,
+                recognisedAs = null,
+                unloading = false,
+            )
+        }
     }
 
     fun setUse(use: ImageUse) {
@@ -528,7 +550,11 @@ class ImageViewModel @Inject constructor(
                                 step = event.step,
                                 progressSteps = event.steps,
                                 phase = event.phase,
-                                runStage = event.stage,
+                                // The tiler's or the loader's count first,
+                                // then the runtime's sentence: a phase
+                                // with sub-progress leads with it.
+                                runStage = listOfNotNull(event.detail, event.stage)
+                                    .joinToString(" · ").takeIf { it.isNotBlank() },
                                 secondsPerStep = event.secondsPerStep,
                                 etaSeconds = if (event.secondsPerStep > 0f) {
                                     (remaining * event.secondsPerStep).toLong()
@@ -1285,6 +1311,17 @@ data class ImageState(
     val residentComponents: List<String> = emptyList(),
     /** The runtime's own working-memory reservations — see RuntimeBuffer. */
     val runtimeBuffers: List<ai.ondevice.engine.RuntimeBuffer> = emptyList(),
+    /**
+     * An unload in flight, which is not instant and used to look like nothing.
+     *
+     * Freeing waits for the run still inside the context to return, so the tap
+     * is followed by seconds of an unchanged screen. A ghost button's press
+     * animation is ~100ms and its border is transparent, so there was no sign
+     * the press had landed at all — and the answer to a button that looks dead
+     * is to press it again. Five concurrent unloads of one handle is what that
+     * produced.
+     */
+    val unloading: Boolean = false,
     /** Roughly what the above is costing, already formatted, or null when nothing is loaded. */
     /** Why the app dropped the context on the user's behalf, when it did. */
     val unloadReason: String? = null,
@@ -1645,7 +1682,10 @@ class VoiceViewModel @Inject constructor(
 
     /** The transcriber holds whisper between recordings for the same reason. */
     fun unloadTranscriber() {
-        transcriber.unload()
+        // Off the main thread for the same reason the diffusion one is: a free
+        // waits for the run using those weights to return, and a wait on the UI
+        // thread is an ANR rather than a pause.
+        runScope.launch { withContext(Dispatchers.IO) { transcriber.unload() } }
     }
 
     fun setScript(value: String) {

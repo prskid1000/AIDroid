@@ -539,25 +539,27 @@ private fun ImageSettingsSheet(
         // Above All Parameters because it is about this model rather than
         // about the run, and because it is the only control here that gives
         // something back instead of asking for something.
-        // Two-step while a run is going — see the clip screen's copy.
-        var confirmingUnload by rememberSaveable { mutableStateOf(false) }
+        // One press: stop whatever is running and give the memory back.
+        //
+        // This was a two-step -- "Unload model…" then "Unload and stop the
+        // run" -- guarding against freeing weights under a live generation,
+        // which used to end with the native side reading memory that had
+        // gone. `nativeFree` has since taken that on properly: it cancels
+        // the run, waits on its mutex until the native call returns, and
+        // only then deletes. There is nothing left for a confirmation to
+        // protect, and a second tap between someone and their memory is a
+        // toll rather than a safeguard.
         val busyNow = state.generating || state.loadingModel
         NButton(
             when {
-                !busyNow -> "Unload model"
-                confirmingUnload -> "Unload and stop the run"
-                else -> "Unload model…"
+                state.unloading -> "Freeing the memory…"
+                busyNow -> "Stop and unload"
+                else -> "Unload model"
             },
-            onClick = {
-                when {
-                    !busyNow -> viewModel.unloadModel()
-                    confirmingUnload -> { confirmingUnload = false; viewModel.unloadModel() }
-                    else -> confirmingUnload = true
-                }
-            },
+            onClick = viewModel::unloadModel,
             style = NButtonStyle.Ghost,
             block = true,
-            enabled = state.residentComponents.isNotEmpty(),
+            enabled = !state.unloading && state.residentComponents.isNotEmpty(),
             modifier = Modifier.padding(top = 14.dp),
         )
         NHelp(

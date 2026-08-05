@@ -482,13 +482,37 @@ class VideoViewModel @Inject constructor(
     }
 
     /** Give the weights back now — see the note on the image screen's copy. */
+    /**
+     * Free the weights, stopping the run if one is going.
+     *
+     * Off the main thread, because `nativeFree` is not a quick call. It cancels
+     * the run, waits on its mutex until the native generate returns, and only
+     * then deletes the context — which is the correct order, and the reason it
+     * blocks for as long as the run takes to notice the cancel. Called from the
+     * UI thread, as this was, that block is an ANR: input dispatch times out at
+     * five seconds and the system kills the app. It reads as a crash, and the
+     * system log calls it one --
+     *
+     *     ANR in ai.ondevice ... Waited 5000ms for MotionEvent
+     *     Killing 27286:ai.ondevice ... user request after error
+     *
+     * -- but nothing had gone wrong in native code at all. The only fault was
+     * where the wait happened.
+     */
     fun unloadModel() {
-        diffusion.unload("you asked for the memory back")
-        _state.value = _state.value.copy(
-            residentComponents = emptyList(),
-            recognisedAs = null,
-            supportsVideo = false,
-        )
+        if (_state.value.unloading) return
+        _state.value = _state.value.copy(unloading = true)
+        runScope.launch {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                diffusion.unload("you asked for the memory back")
+            }
+            _state.value = _state.value.copy(
+                residentComponents = emptyList(),
+                recognisedAs = null,
+                supportsVideo = false,
+                unloading = false,
+            )
+        }
     }
 
     fun setPrompt(value: String) = update { copy(prompt = value) }
@@ -715,7 +739,11 @@ class VideoViewModel @Inject constructor(
                                 progressSteps = event.steps,
                                 phase = event.phase,
                                 secondsPerStep = event.secondsPerStep,
-                                runStage = event.stage,
+                                // The tiler's or the loader's count first,
+                                // then the runtime's sentence: a phase
+                                // with sub-progress leads with it.
+                                runStage = listOfNotNull(event.detail, event.stage)
+                                    .joinToString(" · ").takeIf { it.isNotBlank() },
                             )
                         }
                         is DiffusionEvent.Preview -> {
@@ -995,6 +1023,8 @@ data class VideoState(
     val residentComponents: List<String> = emptyList(),
     /** The runtime's own working-memory reservations — see RuntimeBuffer. */
     val runtimeBuffers: List<ai.ondevice.engine.RuntimeBuffer> = emptyList(),
+    /** See ImageState.unloading — a free is not instant and must say so. */
+    val unloading: Boolean = false,
     val step: Int = 0,
     val progressSteps: Int = 0,
     val secondsPerStep: Float = 0f,
