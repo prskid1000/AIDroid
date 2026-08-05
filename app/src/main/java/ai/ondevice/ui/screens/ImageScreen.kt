@@ -549,17 +549,23 @@ private fun ImageSettingsSheet(
         // only then deletes. There is nothing left for a confirmation to
         // protect, and a second tap between someone and their memory is a
         // toll rather than a safeguard.
-        val busyNow = state.generating || state.loadingModel
+        // The same phase the main control reads, so a cancel started
+        // from the screen is not still offered here as if nothing
+        // had happened. Stopping is stopping, whichever button
+        // began it.
+        val stopping = state.runPhase == ai.ondevice.core.RunPhase.Stopping
+        val busyNow = state.runPhase.busy
         NButton(
             when {
                 state.unloading -> "Freeing the memory…"
+                stopping -> "Stopping…"
                 busyNow -> "Stop and unload"
                 else -> "Unload model"
             },
             onClick = viewModel::unloadModel,
             style = NButtonStyle.Ghost,
             block = true,
-            enabled = !state.unloading && state.residentComponents.isNotEmpty(),
+            enabled = !stopping && state.residentComponents.isNotEmpty(),
             modifier = Modifier.padding(top = 14.dp),
         )
         NHelp(
