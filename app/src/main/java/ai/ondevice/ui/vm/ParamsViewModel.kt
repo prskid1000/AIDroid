@@ -90,7 +90,7 @@ class ParamsViewModel @Inject constructor(
             bundledVersion = repository.bundledVersion(),
             runtimeId = runtimeId,
             buildTag = registry.buildTag(runtimeId),
-            allSpecs = repository.specsFor(manifest, runtimeId),
+            allSpecs = withModelTemplate(repository.specsFor(manifest, runtimeId), model),
             values = SparseParams.parse(model?.paramOverridesJson),
             modality = (model?.modality ?: modalityOf(runtimeId)).name.lowercase(),
             architecture = model?.architecture,
@@ -133,6 +133,42 @@ class ParamsViewModel @Inject constructor(
                 }
         else -> db.models().observeInstalledByModality(modalityOf(runtimeId)).first()
             .firstOrNull { it.attachmentRole == null }
+    }
+
+    /**
+     * Fill `chat_template`'s default with the template this model actually has.
+     *
+     * The renderer already treats that default as "the model's own": it is what
+     * the button offers to edit when no override exists, and what Reset goes
+     * back to. Nothing was ever putting it there. So a model carrying a
+     * perfectly good template in its GGUF header showed an empty box, the
+     * button read "Write one", and the invitation was to hand-write from
+     * scratch the thing the file was already holding — the one way to get a
+     * worse template than the one you had.
+     *
+     * Two sources, because they answer at different times. The engine knows the
+     * template it resolved and is authoritative, but only while the model is
+     * resident. The database column was read out of the header at install and
+     * is there either way. The engine wins for the loaded model — except when
+     * it is reporting an override back at us, because the default has to stay
+     * the model's *own* template or Reset would restore the very thing it is
+     * meant to undo.
+     */
+    private fun withModelTemplate(
+        specs: List<ParamSpec>,
+        model: ai.ondevice.data.db.ModelEntity?,
+    ): List<ParamSpec> {
+        val loaded = engines.state.value.loaded
+        val fromEngine = loaded
+            ?.takeIf { it.modelId == model?.id && it.templateSource != "override" }
+            ?.chatTemplate
+            ?.takeIf { it.isNotBlank() }
+        val template = fromEngine
+            ?: model?.chatTemplate?.takeIf { it.isNotBlank() }
+            ?: return specs
+        return specs.map {
+            if (it.key == "chat_template") it.copy(default = JsonPrimitive(template)) else it
+        }
     }
 
     /** Every installed file a `path` parameter could legitimately name. */

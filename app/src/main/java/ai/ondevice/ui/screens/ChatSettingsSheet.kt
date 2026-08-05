@@ -45,8 +45,6 @@ fun ChatSettingsSheet(
     onDismiss: () -> Unit,
     onSelectModel: (ModelEntity) -> Unit,
     onSystemPromptChange: (String) -> Unit,
-    onChatTemplateChange: (String?) -> Unit,
-    onTemplateKwargsChange: (String) -> Unit,
     onLiveParam: (String, Any?) -> Unit,
     onVisionEnabledChange: (Boolean) -> Unit,
     onOpenParameters: () -> Unit,
@@ -177,38 +175,6 @@ fun ChatSettingsSheet(
                         textStyle = NocturneType.Row,
                     )
 
-                    // — template arguments —
-                    //
-                    // A model card that says `--chat-template-kwargs '{"…":…}'`
-                    // is naming exactly this, so it is offered whole rather
-                    // than as a switch per key somebody has to add each time —
-                    // enable_thinking included.
-                    SectionKicker("Template arguments", Modifier.padding(top = 20.dp, bottom = 8.dp))
-                    var kwargsDraft by remember(state.templateKwargsJson) {
-                        mutableStateOf(state.templateKwargsJson)
-                    }
-                    NTextArea(
-                        value = kwargsDraft,
-                        onValueChange = { kwargsDraft = it },
-                        minHeight = 56.dp,
-                        textStyle = NocturneType.MonoXs,
-                        placeholder = """{"enable_thinking": false}""",
-                    )
-                    NButton(
-                        "Apply arguments",
-                        onClick = { onTemplateKwargsChange(kwargsDraft) },
-                        style = NButtonStyle.Secondary,
-                        block = true,
-                        enabled = kwargsDraft.isNotBlank() && kwargsDraft != state.templateKwargsJson,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                    NHelp(
-                        "The same JSON llama.cpp takes as --chat-template-kwargs, handed to the " +
-                            "template as-is. Keys it does not read are ignored by the template, " +
-                            "not by this app.",
-                        Modifier.padding(top = 6.dp),
-                    )
-
                     // — vision —
                     //
                     // Only for a model that has a projector. On one that does
@@ -233,75 +199,15 @@ fun ChatSettingsSheet(
                         }
                     }
 
-                    // — chat template —
-                    SectionKicker(
-                        "Chat template",
-                        Modifier.padding(top = 20.dp, bottom = 8.dp),
-                        trailing = {
-                            Text(
-                                if (state.templateSource == "override") "overridden" else "from the GGUF",
-                                style = NocturneType.Help,
-                                color = if (state.templateSource == "override") {
-                                    NocturneColors.Accent300
-                                } else {
-                                    NocturneColors.TextMuted
-                                },
-                            )
-                        },
-                    )
-                    var templateOpen by remember { mutableStateOf(false) }
-                    var draft by remember(state.chatTemplate) {
-                        mutableStateOf(state.chatTemplate.orEmpty())
-                    }
-                    if (!templateOpen) {
-                        NButton(
-                            if (state.chatTemplate == null) "No model loaded" else "Edit template",
-                            onClick = { templateOpen = true },
-                            style = NButtonStyle.Secondary,
-                            block = true,
-                            enabled = state.chatTemplate != null,
-                        )
-                        NHelp(
-                            "The Jinja the runtime renders every turn through. Editing it is how " +
-                                "a model with a broken or missing template gets a working one.",
-                            Modifier.padding(top = 6.dp),
-                        )
-                    } else {
-                        NTextArea(
-                            value = draft,
-                            onValueChange = { draft = it },
-                            minHeight = 180.dp,
-                            textStyle = NocturneType.MonoXs,
-                        )
-                        Row(
-                            Modifier.fillMaxWidth().padding(top = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            NButton(
-                                "Apply and reload",
-                                onClick = {
-                                    onChatTemplateChange(draft)
-                                    templateOpen = false
-                                },
-                                style = NButtonStyle.Primary,
-                                modifier = Modifier.weight(1f),
-                            )
-                            NButton(
-                                "Reset",
-                                onClick = {
-                                    onChatTemplateChange(null)
-                                    templateOpen = false
-                                },
-                                style = NButtonStyle.Secondary,
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                        NHelp(
-                            "Applying reloads the model: llama.cpp builds its parser and its stop " +
-                                "sequences from the template once, at load.",
-                            Modifier.padding(top = 6.dp),
-                        )
-                    }
+                    // — chat template and its arguments —
+                    //
+                    // Both moved to All Parameters, which is where every other
+                    // thing that costs a reload already lives. They were a
+                    // Jinja editor and a JSON editor on a sheet whose job is
+                    // the handful of dials worth turning mid-conversation, and
+                    // neither is that: editing either one reloads the model and
+                    // drops the prompt cache, so the turn you are in the middle
+                    // of pays for its whole context again.
 
                     // — Basic tier, inline —
                     SectionKicker(

@@ -829,34 +829,6 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /**
-     * The chat template, overridden per model and applied by reloading it.
-     *
-     * A template is not a live setting: llama.cpp builds its parser and its
-     * stop sequences from it once, in `common_chat_templates_init` at load, so
-     * setting it on a resident model would change nothing until the next one.
-     * Pass null to go back to the one in the GGUF.
-     */
-    fun setChatTemplate(template: String?) {
-        runScope.launch {
-            val model = _state.value.model ?: return@launch
-            val trimmed = template?.takeIf { it.isNotBlank() }
-            val overrides = SparseParams.parse(model.paramOverridesJson).let {
-                if (trimmed == null) it.without("chat_template") else it.with("chat_template", trimmed)
-            }
-            db.models().setParamOverrides(model.id, overrides.toJsonString())
-            val updated = db.models().get(model.id) ?: return@launch
-            _state.value = _state.value.copy(model = updated)
-            engines.unload()
-            engines.load(updated)
-        }
-    }
-
-    /** `--chat-template-kwargs`, verbatim. Anything but a JSON object is ignored by the runtime. */
-    fun setTemplateKwargs(json: String) {
-        setLiveParam("chat_template_kwargs", json)
-    }
-
     fun setSystemPrompt(value: String) {
         _state.value = _state.value.copy(systemPrompt = value)
         runScope.launch {

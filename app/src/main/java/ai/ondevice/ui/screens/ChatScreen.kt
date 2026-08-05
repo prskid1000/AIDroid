@@ -234,8 +234,6 @@ fun ChatScreen(
                 onDismiss = { sheetOpen = false },
                 onSelectModel = viewModel::setModel,
                 onSystemPromptChange = viewModel::setSystemPrompt,
-                onChatTemplateChange = viewModel::setChatTemplate,
-                onTemplateKwargsChange = viewModel::setTemplateKwargs,
                 onLiveParam = viewModel::setLiveParam,
                 onVisionEnabledChange = viewModel::setVisionEnabled,
                 onOpenParameters = { onOpenParameters(state.model?.id) },
