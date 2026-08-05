@@ -446,6 +446,7 @@ private fun StepSettings(
                     onValueChange = { viewModel.setParam(node.id, "template", it) },
                     placeholder = "A summary of {{ 1.text }}",
                     minHeight = 96.dp,
+                    code = true,
                 )
                 NHelp(
                     "Put an earlier step's answer inside a sentence — {{ 2.text }}. There is " +
@@ -457,6 +458,7 @@ private fun StepSettings(
             NTextArea(
                 value = value("script"),
                 onValueChange = { viewModel.setParam(node.id, "script", it) },
+                code = true,
                 placeholder = "steps[\"2\"].text.split(\".\")[0]",
                 minHeight = if (usingScript) 140.dp else 84.dp,
                 modifier = Modifier.padding(top = if (usingScript) 0.dp else 10.dp),
@@ -625,6 +627,7 @@ private fun StepSettings(
                 onValueChange = { viewModel.setParam(node.id, "arguments", it) },
                 placeholder = "{\"query\": \"{{ 1.text }}\"}",
                 minHeight = 72.dp,
+                code = true,
             )
             NHelp(
                 "JSON, in the shape the tool expects. An earlier step can be put inside it with " +

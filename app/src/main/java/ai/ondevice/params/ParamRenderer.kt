@@ -37,6 +37,9 @@ import ai.ondevice.ui.theme.ring
 import ai.ondevice.ui.theme.ruleBelow
 import kotlinx.serialization.json.JsonPrimitive
 
+/** Only ever used to ask "is this JSON yet", so it accepts what a person types. */
+private val LENIENT = kotlinx.serialization.json.Json { isLenient = true }
+
 /** SPEC §16.4 — the renderer. */
 /** One installed file a `path` parameter can point at. */
 data class PathChoice(
@@ -292,6 +295,7 @@ private fun ParamControl(
                     onValueChange = { draft = it },
                     minHeight = 180.dp,
                     textStyle = NocturneType.MonoXs,
+                    code = true,
                 )
                 Row(
                     Modifier.fillMaxWidth().padding(top = 8.dp),
@@ -342,14 +346,46 @@ private fun ParamControl(
             // trying to balance. The raw-parameters escape hatch on the same
             // screen already got this right — it is a text area — and there was
             // no reason for the two to differ.
-            val raw = values[spec.key]?.toString() ?: "{}"
+            //
+            // Committed on a press rather than per keystroke, for the same
+            // reason the template below is. Bound straight to the stored value
+            // this was not editable at all: every character typed was stored
+            // and re-serialised, and what came back a frame later was not what
+            // went in. `{"enable_thin` is not valid JSON, so it round-tripped
+            // as something else, replaced the text under the cursor and took
+            // the cursor with it. Editing JSON means the half-typed states have
+            // to survive, and that needs a draft nothing else writes to.
+            val stored = values[spec.key]?.toString() ?: "{}"
+            var draft by remember(stored) { mutableStateOf(stored) }
+            val parses = remember(draft) {
+                draft.isBlank() || runCatching { LENIENT.parseToJsonElement(draft) }.isSuccess
+            }
             NTextArea(
-                value = raw,
-                onValueChange = { onChange(spec.key, it) },
+                value = draft,
+                onValueChange = { draft = it },
                 minHeight = 72.dp,
                 textStyle = NocturneType.MonoSm,
                 placeholder = mapPlaceholder(spec.key),
+                code = true,
             )
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (parses) "Parses" else "Not valid JSON yet",
+                    style = NocturneType.Help,
+                    color = if (parses) NocturneColors.TextMuted else NocturneColors.Neutral300,
+                    modifier = Modifier.weight(1f),
+                )
+                ai.ondevice.ui.components.NButton(
+                    "Apply",
+                    onClick = { onChange(spec.key, draft) },
+                    style = ai.ondevice.ui.components.NButtonStyle.Secondary,
+                    enabled = parses && draft != stored,
+                )
+            }
         }
 
         ParamType.ORDERED_LIST -> {

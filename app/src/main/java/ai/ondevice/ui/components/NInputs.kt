@@ -23,7 +23,12 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,10 +65,41 @@ fun NInput(
     minHeight: Dp = 36.dp,
     textStyle: TextStyle = NocturneType.Input,
     keyboardType: KeyboardType = KeyboardType.Text,
+    /**
+     * JSON, Jinja, JavaScript — anything the IME must keep its hands off.
+     *
+     * A phone keyboard defaults to autocorrect and suggestions, and applies
+     * them to `{"enable_thinking": false}` as readily as to prose: keys get
+     * capitalised, quotes get replaced with typographic ones the parser then
+     * rejects, and a word the dictionary recognises is swapped for its
+     * neighbour. That is not a field being fussy, it is a field being
+     * corrected into invalidity while you watch.
+     */
+    code: Boolean = false,
     trailing: (@Composable () -> Unit)? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
+
+    // The caret lives here, not inside BasicTextField's String overload.
+    //
+    // That overload rebuilds its selection from whatever the caller hands back,
+    // and many of this app's fields hand it back through a StateFlow — a round
+    // trip that lands a frame later, and in the case of a JSON field through a
+    // parse and re-serialise that returns different text than was typed. The
+    // caret jumps to the end between keystrokes and fast typing drops or
+    // reorders characters. Holding the value here means the ordinary case,
+    // where the text comes back unchanged, moves nothing at all.
+    var field by remember { mutableStateOf(TextFieldValue(value)) }
+    // What was last sent up. A value equal to this is our own echo returning
+    // and must leave the caret alone; anything else is a real external change —
+    // a reset, a model reload, a caller that rewrote the text — and replaces
+    // the contents outright.
+    var emitted by remember { mutableStateOf(value) }
+    if (value != emitted) {
+        field = TextFieldValue(value, TextRange(value.length))
+        emitted = value
+    }
 
     Row(
         modifier = modifier
@@ -75,18 +111,32 @@ fun NInput(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.weight(1f)) {
-            if (value.isEmpty() && placeholder != null) {
+            // Asked of the field rather than of the hoisted value, so the
+            // placeholder goes on the first keystroke rather than on the echo.
+            if (field.text.isEmpty() && placeholder != null) {
                 Text(placeholder, style = textStyle, color = NocturneColors.TextMuted)
             }
             BasicTextField(
-                value = value,
-                onValueChange = onValueChange,
+                value = field,
+                onValueChange = {
+                    field = it
+                    if (it.text != emitted) {
+                        emitted = it.text
+                        onValueChange(it.text)
+                    }
+                },
                 enabled = enabled,
                 singleLine = singleLine,
                 textStyle = textStyle.copy(color = NocturneColors.Text),
                 cursorBrush = SolidColor(NocturneColors.Accent),
                 interactionSource = interaction,
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = keyboardType),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    // Ascii rather than Text: it is the request that stops most
+                    // IMEs offering a smart-quote key in the first place.
+                    keyboardType = if (code) KeyboardType.Ascii else keyboardType,
+                    autoCorrect = !code,
+                    capitalization = KeyboardCapitalization.None,
+                ),
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -103,6 +153,8 @@ fun NTextArea(
     minHeight: Dp = 90.dp,
     placeholder: String? = null,
     textStyle: TextStyle = NocturneType.Input,
+    /** See [NInput] — off for prose, on for anything with syntax. */
+    code: Boolean = false,
 ) = NInput(
     value = value,
     onValueChange = onValueChange,
@@ -111,6 +163,7 @@ fun NTextArea(
     singleLine = false,
     minHeight = minHeight,
     textStyle = textStyle,
+    code = code,
 )
 
 /** `.field` — label above input. */

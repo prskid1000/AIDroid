@@ -210,6 +210,7 @@ fun AllParametersScreen(
                     onValueChange = viewModel::setRawJson,
                     minHeight = 120.dp,
                     textStyle = NocturneType.MonoCode,
+                    code = true,
                 )
                 Row(
                     Modifier.fillMaxWidth(),
