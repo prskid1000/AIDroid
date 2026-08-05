@@ -144,6 +144,24 @@ val BottomDestinations = listOf(
 )
 // Models is no longer one of these.
 
+/**
+ * The routes worth coming back to, which is the tabs and the one pushed mode.
+ *
+ * Not every route: Parameters, Downloads and the rest are pushed on top of a
+ * tab, and restoring one as the *start* destination makes it the root of the
+ * back stack -- so Back had nowhere to go and the screen could not be left.
+ * A destination is only resumable if arriving there directly still leaves
+ * somewhere to go back to.
+ *
+ * Video earns its place despite being pushed: it is a mode of the Visuals tab
+ * rather than a detail screen, and coming back to Stills after making a clip
+ * is the thing this was asked to stop doing.
+ */
+private val RESUMABLE = setOf(
+    Routes.CHAT, Routes.IMAGE, Routes.VIDEO, Routes.VOICE,
+    Routes.WORKFLOW, Routes.LIBRARY, Routes.SETTINGS,
+)
+
 @Composable
 fun OnDeviceApp(
     modifier: Modifier = Modifier,
@@ -168,7 +186,7 @@ fun OnDeviceApp(
     // process is killed rather than closed -- which is now something the app
     // does to itself when a run cannot be cancelled any other way.
     LaunchedEffect(currentRoute) {
-        currentRoute?.takeIf { it != Routes.GRAPH }?.let(onRouteChanged)
+        currentRoute?.takeIf { it in RESUMABLE }?.let(onRouteChanged)
     }
 
     // A notification tapped while the app is already open arrives as a change
@@ -190,7 +208,11 @@ fun OnDeviceApp(
             initialDestination == ai.ondevice.MainActivity.DEST_DOWNLOADS -> Routes.DOWNLOADS
             // A notification's destination outranks where you happened to be.
             initialDestination != null -> Routes.CHAT
-            else -> startRoute ?: Routes.CHAT
+            // Checked on the way in as well as on the way out. A value stored
+            // by an older build -- or any route that stops being resumable
+            // later -- would otherwise become the root of the back stack, and
+            // Back from the root leaves the app rather than going back.
+            else -> startRoute?.takeIf { it in RESUMABLE } ?: Routes.CHAT
         },
         route = Routes.GRAPH,
         modifier = modifier,
