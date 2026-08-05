@@ -226,13 +226,18 @@ class ImageViewModel @Inject constructor(
         if (_state.value.unloading) return
         _state.value = _state.value.copy(unloading = true)
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { diffusion.unload("you asked for the memory back") }
-            _state.value = _state.value.copy(
-                residentComponents = emptyList(),
-                unloadReason = diffusion.lastUnloadReason,
-                recognisedAs = null,
-                unloading = false,
-            )
+            // In a finally: a throw here used to leave the flag set, and a set
+            // flag is now a button that cannot be pressed.
+            try {
+                withContext(Dispatchers.IO) { diffusion.unload("you asked for the memory back") }
+                _state.value = _state.value.copy(
+                    residentComponents = emptyList(),
+                    unloadReason = diffusion.lastUnloadReason,
+                    recognisedAs = null,
+                )
+            } finally {
+                _state.value = _state.value.copy(unloading = false)
+            }
         }
     }
 
@@ -377,8 +382,19 @@ class ImageViewModel @Inject constructor(
     fun generate() {
         val model = _state.value.model ?: return
         val seed = if (_state.value.seed < 0) Random.nextLong(0, Int.MAX_VALUE.toLong()) else _state.value.seed
+        // A new run is unambiguously not a stopping one.
+        //
+        // Both flags are cleared by whoever set them, and neither could rely on
+        // that: `cancelling` is cleared in the generate loop's `finally`, so a
+        // Cancel pressed with no loop running left it set, and `unloading` was
+        // cleared only on the success path. Either one still set here made
+        // RunPhase read Stopping over a run that was starting -- which used to
+        // be a wrong label and, now that the phase also decides `enabled`, is a
+        // button that can never be pressed again.
         _state.value = _state.value.copy(
             generating = true,
+            cancelling = false,
+            unloading = false,
             step = 0,
             usedSeed = seed,
             error = null,
@@ -667,6 +683,14 @@ class ImageViewModel @Inject constructor(
         // sd.cpp's LLMEmbedder, which does not expect one and takes the process
         // down with it. So during that phase the press is recorded and lands at
         // the end of it.
+        // Nothing to stop is not a stop.
+        //
+        // `reset()` calls this, and the New-image button calls `reset()`, so a
+        // press with no run in flight used to set `cancelling` with nothing
+        // left to clear it -- the generate loop's `finally` is the only thing
+        // that does, and there was no loop. The flag then outlived the screen
+        // and made the next run read as Stopping before it had started.
+        if (!_state.value.generating && !_state.value.loadingModel) return
         _state.value = _state.value.copy(cancelling = true)
         diffusion.cancel()
         generationJob?.cancel()

@@ -503,15 +503,18 @@ class VideoViewModel @Inject constructor(
         if (_state.value.unloading) return
         _state.value = _state.value.copy(unloading = true)
         runScope.launch {
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                diffusion.unload("you asked for the memory back")
+            try {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    diffusion.unload("you asked for the memory back")
+                }
+                _state.value = _state.value.copy(
+                    residentComponents = emptyList(),
+                    recognisedAs = null,
+                    supportsVideo = false,
+                )
+            } finally {
+                _state.value = _state.value.copy(unloading = false)
             }
-            _state.value = _state.value.copy(
-                residentComponents = emptyList(),
-                recognisedAs = null,
-                supportsVideo = false,
-                unloading = false,
-            )
         }
     }
 
@@ -584,8 +587,12 @@ class VideoViewModel @Inject constructor(
             _state.value.seed
         }
         stopPlayback()
+        // See ImageViewModel.generate — a stale stopping flag now wedges the
+        // button rather than merely mislabelling it.
         _state.value = _state.value.copy(
             generating = true,
+            cancelling = false,
+            unloading = false,
             step = 0,
             usedSeed = seed,
             error = null,
@@ -840,6 +847,9 @@ class VideoViewModel @Inject constructor(
     }
 
     fun cancel() {
+        // See ImageViewModel.cancel — a press with nothing running used to set
+        // a flag only the generate loop clears, and there was no loop.
+        if (!_state.value.generating && !_state.value.loadingModel) return
         _state.value = _state.value.copy(cancelling = true)
         diffusion.cancel()
         generationJob?.cancel()
