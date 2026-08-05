@@ -11,6 +11,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import ai.ondevice.ui.OnDeviceApp
@@ -18,8 +23,14 @@ import ai.ondevice.ui.theme.NocturneColors
 import ai.ondevice.ui.theme.NocturneTheme
 import dagger.hilt.android.AndroidEntryPoint
 
+/** Distinguishes "nothing was ever saved" from "not read yet". */
+private const val NOTHING_SAVED = ""
+
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    @javax.inject.Inject
+    lateinit var prefs: ai.ondevice.data.prefs.AppPrefs
 
     /**
      * The one permission this app asks for, and it asks for it once.
@@ -54,10 +65,29 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             NocturneTheme {
-                OnDeviceApp(
-                    modifier = Modifier.fillMaxSize().background(NocturneColors.Bg),
-                    initialDestination = destination.value,
-                )
+                // Read before the NavHost is built, because a start
+                // destination cannot be changed once it is. Null means the
+                // read has not landed; the app waits for it rather than
+                // starting on Chat and jumping a frame later.
+                // Mapped through a sentinel so the two nulls stay apart: null
+                // is "the read has not landed", and blank is "it landed and
+                // there was nothing saved". Collapsing them left a first run
+                // waiting forever for a value that was never coming, which is
+                // a blank screen rather than a slow one.
+                val stored by prefs.lastRoute
+                    .map { it ?: NOTHING_SAVED }
+                    .collectAsStateWithLifecycle(initialValue = null)
+
+                if (stored != null || destination.value != null) {
+                    OnDeviceApp(
+                        modifier = Modifier.fillMaxSize().background(NocturneColors.Bg),
+                        initialDestination = destination.value,
+                        startRoute = stored?.takeIf { it != NOTHING_SAVED },
+                        onRouteChanged = { route ->
+                            lifecycleScope.launch { prefs.setLastRoute(route) }
+                        },
+                    )
+                }
             }
         }
     }

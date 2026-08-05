@@ -24,6 +24,15 @@ class AppPrefs(private val context: Context) {
         val storageReserveMb = intPreferencesKey("storage_reserve_mb")
         val blockPickle = booleanPreferencesKey("block_pickle")
         val lastConversationId = stringPreferencesKey("last_conversation_id")
+
+        /**
+         * The tab last looked at, so closing the app and opening it again does
+         * not always land on Chat.
+         *
+         * Video is a pushed destination rather than a tab of its own, so this
+         * is the route and it distinguishes the two visual modes on its own.
+         */
+        val lastRoute = stringPreferencesKey("last_route")
         val exportFolder = stringPreferencesKey("export_folder")
         val toolsEnabled = booleanPreferencesKey("tools_enabled")
         val enabledToolProviders = androidx.datastore.preferences.core.stringSetPreferencesKey("enabled_tool_providers")
@@ -47,6 +56,11 @@ class AppPrefs(private val context: Context) {
     val blockPickle: Flow<Boolean> = context.dataStore.data.map { it[Keys.blockPickle] ?: true }
 
     val lastConversationId: Flow<String?> = context.dataStore.data.map { it[Keys.lastConversationId] }
+    val lastRoute: Flow<String?> = context.dataStore.data.map { it[Keys.lastRoute] }
+
+    suspend fun setLastRoute(v: String) {
+        edit { p -> p[Keys.lastRoute] = v }
+    }
 
     /** The SAF tree the user picked for exports, as a URI string. */
     val exportFolder: Flow<String?> = context.dataStore.data.map { it[Keys.exportFolder] }

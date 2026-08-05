@@ -148,10 +148,28 @@ val BottomDestinations = listOf(
 fun OnDeviceApp(
     modifier: Modifier = Modifier,
     initialDestination: String? = null,
+    /**
+     * The tab this device was last looking at, or null on a first run.
+     *
+     * Read once, before the NavHost is built, because a start destination
+     * cannot be changed afterwards. Null while the read is in flight, which is
+     * why the caller waits rather than passing a default: starting on Chat and
+     * then jumping would be a worse answer than a moment of nothing.
+     */
+    startRoute: String? = null,
+    onRouteChanged: (String) -> Unit = {},
     navController: NavHostController = rememberNavController(),
 ) {
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
+
+    // Remembered as it changes rather than on the way out: onStop is not
+    // guaranteed, and the whole point of this is to survive the case where the
+    // process is killed rather than closed -- which is now something the app
+    // does to itself when a run cannot be cancelled any other way.
+    LaunchedEffect(currentRoute) {
+        currentRoute?.takeIf { it != Routes.GRAPH }?.let(onRouteChanged)
+    }
 
     // A notification tapped while the app is already open arrives as a change
     // to this value rather than as a start destination: the activity is
@@ -168,9 +186,11 @@ fun OnDeviceApp(
 
     NavHost(
         navController = navController,
-        startDestination = when (initialDestination) {
-            ai.ondevice.MainActivity.DEST_DOWNLOADS -> Routes.DOWNLOADS
-            else -> Routes.CHAT
+        startDestination = when {
+            initialDestination == ai.ondevice.MainActivity.DEST_DOWNLOADS -> Routes.DOWNLOADS
+            // A notification's destination outranks where you happened to be.
+            initialDestination != null -> Routes.CHAT
+            else -> startRoute ?: Routes.CHAT
         },
         route = Routes.GRAPH,
         modifier = modifier,
