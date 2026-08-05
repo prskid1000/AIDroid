@@ -355,7 +355,13 @@ private fun ClipStage(state: VideoState, viewModel: VideoViewModel) {
                 )
 
             else -> Text(
-                if (state.generating) state.phase.label else "No clip yet",
+                ai.ondevice.ui.components.runStatusLine(
+                    run = state.runPhase,
+                    stage = state.phase,
+                    step = state.step,
+                    idle = "No clip yet",
+                    sampling = "sampling · frames arrive together at the end",
+                ),
                 style = NocturneType.Help,
                 color = NocturneColors.TextMuted,
             )
@@ -383,7 +389,7 @@ private fun ClipStage(state: VideoState, viewModel: VideoViewModel) {
             trace = trace,
             expanded = traceExpanded,
             onToggle = { traceExpanded = !traceExpanded },
-            live = state.generating,
+            live = state.runPhase.showsProgress,
             modifier = Modifier.padding(top = 8.dp),
         )
     }

@@ -790,36 +790,16 @@ private fun LivePreview(state: ImageState) {
         // "Warming up" is only true before the first step.
         if (preview == null) {
             Text(
-                // Driven by the phase, because the phase is the thing that knows.
-                when {
-                    state.loadingModel -> "loading model…"
-                    !state.generating -> "No preview yet"
-                    // Said out loud, because the press is honoured but not
-                    // instantly and a silent wait reads as a hang.
-                    //
-                    // Encoding the prompt is one ggml graph — FLUX.2 reads it
-                    // through a 4B language model, half a minute of it — and
-                    // abandoning that graph hands sd.cpp an empty result it
-                    // asserts on rather than checks, which is an abort and
-                    // takes the process with it. So the press waits for the
-                    // encode and lands on the first step. Sampling and the
-                    // decode stop inside the current graph, in about a step.
-                    state.cancelling &&
-                        state.phase == ai.ondevice.engine.DiffusionPhase.PREPARING ->
-                        "stopping · the prompt encode can't be interrupted, so it finishes first"
-                    state.cancelling -> "stopping · leaving the current step"
-                    state.phase == ai.ondevice.engine.DiffusionPhase.PREPARING ->
-                        "preparing · loading weights, no steps to count yet"
-                    state.phase == ai.ondevice.engine.DiffusionPhase.DECODING ->
-                        "decoding the latent to pixels · almost done"
-                    state.step <= 0 -> "warming up…"
-                    // Not "no preview decoder installed", which describes a
-                    // missing file. There is none to install: previews are a
-                    // linear projection of the latent and need no decoder at
-                    // all, so the line named a remedy that does not exist for a
-                    // problem nobody has. A preview simply has not arrived yet.
-                    else -> "sampling · first preview at the next step"
-                },
+                // Shared with the clip screen — see runStatusLine. It was
+                // written here and only here, which is exactly why the other
+                // screen still printed "preparing" through a cancel.
+                ai.ondevice.ui.components.runStatusLine(
+                    run = state.runPhase,
+                    stage = state.phase,
+                    step = state.step,
+                    idle = "No preview yet",
+                    sampling = "sampling · first preview at the next step",
+                ),
                 style = NocturneType.MonoSm,
                 color = if (state.generating) {
                     NocturneColors.Accent200.copy(alpha = 0.9f)
