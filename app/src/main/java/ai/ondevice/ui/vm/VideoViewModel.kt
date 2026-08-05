@@ -850,6 +850,28 @@ class VideoViewModel @Inject constructor(
         // See ImageViewModel.cancel — a press with nothing running used to set
         // a flag only the generate loop clears, and there was no loop.
         if (!_state.value.generating && !_state.value.loadingModel) return
+        // Two phases cannot honour a cancel, so pretending is the wrong answer.
+        //
+        // `new_sd_ctx` reads a checkpoint off storage with no callback and no
+        // flag. The prompt encode is one graph whose abandonment hands sd.cpp
+        // an empty result it asserts on rather than checks -- abandoning it is
+        // a crash, not a cancel. In both, upstream records the press and
+        // applies it whenever it next reaches somewhere that can take it, which
+        // on this device was measured at three and a half minutes of a button
+        // that looked broken because nothing it could do would have helped.
+        //
+        // So there it kills the process and comes back. Checkpoints are on
+        // disk, settings and history are committed, and the run being ended is
+        // one somebody has just said they do not want. Everywhere else -- the
+        // sampling and the decode, which is most of a run and all of the long
+        // part -- the eval callback aborts inside the current graph and the
+        // ordinary cancel is both honoured and quick.
+        if (_state.value.loadingModel ||
+            _state.value.phase == ai.ondevice.engine.DiffusionPhase.PREPARING
+        ) {
+            ai.ondevice.core.forceStopAndRestart(context)
+            return
+        }
         _state.value = _state.value.copy(cancelling = true)
         diffusion.cancel()
         generationJob?.cancel()

@@ -139,29 +139,6 @@ fun VideoScreen(
                 modifier = Modifier.padding(top = 12.dp),
             )
 
-            // The escape hatch, and only where it is needed.
-            //
-            // Shown while stopping and not before: a press the runtime can honour
-            // needs no help, and a button that kills the process should not sit
-            // beside Generate waiting to be hit by accident. While stopping it is
-            // the honest option -- the model load and the prompt encode have
-            // nowhere to take a cancel, and the alternative on offer is a spinner
-            // that means "possibly minutes".
-            if (state.runPhase == ai.ondevice.core.RunPhase.Stopping) {
-                val restartFrom = androidx.compose.ui.platform.LocalContext.current
-                NButton(
-                    "Force stop · restarts the app",
-                    onClick = { ai.ondevice.core.forceStopAndRestart(restartFrom) },
-                    style = NButtonStyle.Ghost,
-                    block = true,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-                NHelp(
-                    "Ends the run by ending the app, which always works. Models and " +
-                        "settings are on disk; only this run is lost.",
-                    Modifier.padding(top = 4.dp),
-                )
-            }
 
             if (!state.runtimeInstalled) {
                 NCard(Modifier.padding(top = 10.dp), ring = NocturneColors.Accent800) {
