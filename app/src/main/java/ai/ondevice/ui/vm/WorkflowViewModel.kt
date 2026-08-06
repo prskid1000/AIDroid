@@ -25,6 +25,7 @@ class WorkflowViewModel @Inject constructor(
     private val db: OnDeviceDatabase,
     private val launcher: ai.ondevice.engine.workflow.WorkflowLauncher,
     private val shortcuts: ai.ondevice.workflow.ShortcutPublisher,
+    private val scheduler: ai.ondevice.engine.workflow.Scheduler,
     private val toolProviders: ai.ondevice.tools.ToolProviderFactory,
     private val prefs: ai.ondevice.data.prefs.AppPrefs,
 ) : ViewModel() {
@@ -34,7 +35,47 @@ class WorkflowViewModel @Inject constructor(
     private val runScope get() = session.scope
 
     init {
-        if (session.claimObservers()) attachObservers()
+        if (session.claimObservers()) {
+            attachObservers()
+            findInterruptedRun()
+        }
+    }
+
+    /**
+     * Look for a run the system stopped without telling anybody.
+     *
+     * A row still reading RUNNING when nothing is running means the process was
+     * reclaimed mid-graph. Checked once, when the session is first observed,
+     * because that is the moment the app has come back.
+     */
+    private fun findInterruptedRun() {
+        runScope.launch {
+            val stale = db.workflows().unfinishedRun() ?: return@launch
+            if (_state.value.running) return@launch
+            _state.value = _state.value.copy(interrupted = stale)
+        }
+    }
+
+    /** Carry on from where the interrupted run stopped. */
+    fun resumeInterrupted() {
+        val stale = _state.value.interrupted ?: return
+        _state.value = _state.value.copy(interrupted = null)
+        launcher.launch(stale.workflowId, resumeFrom = stale)
+    }
+
+    /** Let it go, and stop the row claiming to be running. */
+    fun discardInterrupted() {
+        val stale = _state.value.interrupted ?: return
+        _state.value = _state.value.copy(interrupted = null)
+        runScope.launch {
+            db.workflows().upsertRun(
+                stale.copy(
+                    state = "CANCELLED",
+                    finishedAt = System.currentTimeMillis(),
+                    error = "The app was closed before this finished.",
+                ),
+            )
+        }
     }
 
     private fun attachObservers() {
@@ -95,6 +136,31 @@ class WorkflowViewModel @Inject constructor(
     }
 
     fun rename(name: String) = edit { it.copy(name = name) }
+
+    // ── scheduling ───────────────────────────────────────────────────────
+
+    /** The schedule on the workflow being edited. */
+    fun schedule(): ai.ondevice.core.workflow.Schedule =
+        ai.ondevice.core.workflow.Schedule.decode(_state.value.editing?.scheduleJson)
+
+    /**
+     * Save a schedule and set the alarm to match, in that order.
+     *
+     * Both, always: an alarm without the row is forgotten on the next reboot,
+     * and a row without the alarm is a schedule that silently never fires —
+     * which is the failure that looks exactly like the feature not existing.
+     */
+    fun setSchedule(schedule: ai.ondevice.core.workflow.Schedule) {
+        val current = _state.value.editing ?: return
+        edit { it.copy(scheduleJson = schedule.encode()) }
+        scheduler.arm(current.id, schedule)
+    }
+
+    /** Whether a scheduled run may start on its own, or must wait for a tap. */
+    fun canRunUnattended(): Boolean = scheduler.canRunUnattended
+
+    /** Where to send somebody to allow it, or null when there is nothing to ask. */
+    fun exactAlarmSettings(): android.content.Intent? = scheduler.permissionIntent()
 
     fun addNode(kind: NodeKind) {
         val node = NodeRecord(
@@ -255,9 +321,18 @@ class WorkflowViewModel @Inject constructor(
      * two being a share from another app and a launcher shortcut, neither of
      * which has an editor or a screen behind it.
      */
-    fun run() {
-        _state.value.editing?.let { launcher.launch(it.id) }
+    fun run(answers: Map<String, String> = emptyMap()) {
+        _state.value.editing?.let { launcher.launch(it.id, answers = answers) }
     }
+
+    /**
+     * The steps that want to be asked before this runs, if any.
+     *
+     * Read by the screen so it can put a sheet in front of the run rather than
+     * the run discovering mid-graph that it has nothing to work on.
+     */
+    fun askedInputs(): List<ai.ondevice.core.workflow.NodeRecord> =
+        ai.ondevice.core.workflow.Triggers.askedInputs(_state.value.graph)
 
     fun cancel() = launcher.cancel()
 

@@ -33,7 +33,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.StateFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -344,6 +348,77 @@ fun TriggerConfirm(
                 block = true,
             )
         }
+        SheetFooterSpace()
+    }
+}
+
+/**
+ * Held over the calling app while the run answers its selection.
+ *
+ * The one screen here that waits. It exists because `ACTION_PROCESS_TEXT`
+ * replaces a selection only if the activity is alive to return a result, so the
+ * run has to be watched rather than started and left — and because somebody is
+ * standing there holding a phone, it says which step it is on and offers a way
+ * out that does not cost them their selection.
+ */
+@Composable
+fun TriggerWorking(
+    workflow: WorkflowEntity,
+    state: StateFlow<ai.ondevice.ui.vm.WorkflowState>,
+    onCancel: () -> Unit,
+    onDone: (String?) -> Unit,
+) {
+    val run by state.collectAsStateWithLifecycle()
+
+    // Fires once the run has stopped, whichever way it stopped. Reading it in a
+    // LaunchedEffect rather than in the composition keeps the result-and-finish
+    // out of a frame.
+    LaunchedEffect(run.running, run.finishedAt, run.error) {
+        if (!run.running && run.finishedAt != null) onDone(run.resultText)
+    }
+
+    val graph = remember(workflow.graphJson) { WorkflowGraph.decode(workflow.graphJson) }
+    val done = graph.nodes.count {
+        run.nodeStates[it.id]?.state == ai.ondevice.engine.workflow.NodeRunState.DONE
+    }
+    val active = run.activeNodeId?.let { id -> graph.nodes.firstOrNull { it.id == id } }
+
+    TriggerSheet(
+        workflow.name,
+        onDismiss = onCancel,
+        note = "$done of ${graph.nodes.size}",
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .background(NocturneColors.Bg, Radius.Md)
+                .ring(NocturneColors.Divider, Radius.Md)
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+        ) {
+            Text(
+                when {
+                    run.error != null -> "Stopped"
+                    active != null -> active.label.ifBlank { NodeKind.of(active.type).title }
+                    else -> "Starting…"
+                },
+                style = NocturneType.Row,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                run.error ?: "The result will replace what you selected.",
+                style = NocturneType.MonoXs,
+                color = NocturneColors.TextMuted,
+                modifier = Modifier.padding(top = 3.dp),
+            )
+        }
+        NButton(
+            "Stop",
+            onClick = onCancel,
+            style = NButtonStyle.Secondary,
+            block = true,
+            modifier = Modifier.padding(top = 14.dp),
+        )
         SheetFooterSpace()
     }
 }

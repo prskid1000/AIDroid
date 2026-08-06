@@ -85,6 +85,37 @@ step that finishes in the background parks its result in a notification *and* on
 run screen, because the notification permission is optional here and losing a result
 to a permission somebody declined would be worse than the wait.
 
+## A workflow you do not have to be present for
+
+Three ways a run starts without somebody opening the editor, and one way it
+finishes without being lost.
+
+**Ask when it runs.** An Input marked that way is prompted for before each run,
+seeded with whatever was typed in the editor. It is what makes a workflow a tool
+rather than a macro — without it every reuse begins by editing the graph.
+
+**On a schedule.** Once, daily, or on chosen days. An exact alarm rather than
+`WorkManager`, and not for precision: every run needs a foreground service,
+Android forbids starting one from the background, and an app woken by an *exact*
+alarm is explicitly exempt. The permission for that is denied by default from
+Android 13, so refusal is a supported state — the schedule still wakes the phone
+and offers the run as a notification you tap. Guards come first either way:
+charging, a battery floor, thermal headroom, and nothing already running. A
+skipped slot is recorded and shown, because a schedule that quietly does nothing
+is indistinguishable from one that was never saved.
+
+A schedule is a wall-clock time, never an instant, so *"every morning at seven"*
+survives a flight and a daylight-saving change. That costs a re-arm when the
+clock or the zone moves, and buys not being an hour wrong twice a year.
+
+**Carried on after being killed.** A phone holding ten gigabytes of weights is
+the first thing Android reclaims, so being stopped at step five of seven is an
+ordinary event. Each step's outputs are written into the run row as they are
+made, and the next launch offers to carry on rather than repeat five model
+loads. A graph with a loop in it is refused and offered a restart instead:
+"this step finished" is a fact about a step that runs once, and inside a loop it
+says nothing about the next pass.
+
 ## Colour discipline
 
 Nocturne is a mono, dark-only system, and the design canvas is explicit that verdicts

@@ -13,6 +13,35 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!--
+        A workflow that starts itself at a chosen time.
+
+        Exact rather than inexact, and the reason is not precision: every run
+        needs a foreground service, Android 12 and later forbid starting one from
+        the background, and an app woken by an *exact* alarm is explicitly exempt
+        from that. An inexact alarm wakes us with no way to do the one thing we
+        were woken for.
+
+        Denied by default from Android 13 onward, so it is asked for through
+        Settings and refusal is a supported state rather than a broken feature —
+        see Scheduler.armInexact, which falls back to a notification and a tap.
+        USE_EXACT_ALARM is the version that needs no prompt and is restricted by
+        Play to alarm clocks and calendars, which this is not.
+    -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!--
+        A scheduled run needs a foreground service, and an app woken by an exact
+        alarm is exempt from the rule forbidding one from the background — which
+        is the whole reason scheduling takes this shape rather than WorkManager's.
+
+        Denied by default from Android 13 onward, and this app targets 35, so it
+        is asked for rather than assumed. USE_EXACT_ALARM, which is granted
+        automatically, is restricted by Play to alarm clocks and calendars and
+        this app would not qualify. Refusal is not fatal: see ScheduleReceiver,
+        which falls back to a notification and a tap.
+    -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <!-- SPEC 17.2 Channel A only: in-app runtime bundle install. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
@@ -203,6 +232,26 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+            Where a scheduled run begins, and where every armed alarm is rebuilt.
+
+            Alarms do not survive a reboot, and a schedule is stored as a
+            wall-clock time — "every morning at seven" has to stay seven o'clock
+            across a flight — so moving the clock or the zone invalidates every
+            one of them. All three of these broadcasts are themselves exempt from
+            the rule forbidding a foreground-service start from the background,
+            which is what makes re-arming from here safe.
+        -->
+        <receiver
+            android:name=".workflow.ScheduleReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
             </intent-filter>
         </receiver>
 

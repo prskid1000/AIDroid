@@ -80,7 +80,7 @@ abstract class OnDeviceDatabase : RoomDatabase() {
                 MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
                 MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
                 MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
-                MIGRATION_13_14,
+                MIGRATION_13_14, MIGRATION_14_15,
             )
     }
 }
@@ -270,7 +270,7 @@ private val MIGRATION_9_10 = object : androidx.room.migration.Migration(9, 10) {
     }
 }
 
-internal const val DATABASE_VERSION = 14
+internal const val DATABASE_VERSION = 15
 
 /**
  * v11 — OAuth on `mcp_servers`.
@@ -364,5 +364,18 @@ private val MIGRATION_13_14 = object : androidx.room.migration.Migration(13, 14)
         )
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_workflow_runs_workflowId` ON `workflow_runs` (`workflowId`)")
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_workflow_runs_startedAt` ON `workflow_runs` (`startedAt`)")
+    }
+}
+
+/**
+ * A workflow can carry a schedule.
+ *
+ * Additive, and a default of `{}` rather than null so every existing row decodes
+ * to a Schedule that is simply not enabled — no branch anywhere has to know
+ * whether a workflow predates scheduling.
+ */
+private val MIGRATION_14_15 = object : androidx.room.migration.Migration(14, 15) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `workflows` ADD COLUMN `scheduleJson` TEXT NOT NULL DEFAULT '{}'")
     }
 }

@@ -2,6 +2,7 @@ package ai.ondevice.ui.vm
 
 import ai.ondevice.core.workflow.WorkflowGraph
 import ai.ondevice.data.db.WorkflowEntity
+import ai.ondevice.data.db.WorkflowRunEntity
 import ai.ondevice.engine.workflow.NodeProgress
 import ai.ondevice.engine.workflow.ResidencyPlan
 import kotlinx.coroutines.CompletableDeferred
@@ -96,6 +97,26 @@ data class WorkflowState(
     val error: String? = null,
     val errorHint: String? = null,
     val finishedAt: Long? = null,
+
+    /**
+     * What the run said, for a caller that is waiting to be handed it back.
+     *
+     * The last text a step produced, in list order. Only `ACTION_PROCESS_TEXT`
+     * reads it — that caller has an activity open over another app and a
+     * selection to replace, and the whole run exists to answer it. Everything
+     * else finds its results in the library, where they belong.
+     */
+    val resultText: String? = null,
+
+    /**
+     * A run that stopped without saying so, offered back.
+     *
+     * A row still reading RUNNING with no process behind it means the system
+     * reclaimed the app mid-graph — which on a phone holding ten gigabytes of
+     * weights is an ordinary event rather than a fault. What it made is on disk
+     * and recorded, so the offer is to carry on rather than to start again.
+     */
+    val interrupted: WorkflowRunEntity? = null,
     val liveTrace: ai.ondevice.engine.ResourceTrace? = null,
     val runtimeBuffers: List<ai.ondevice.engine.RuntimeBuffer> = emptyList(),
 )

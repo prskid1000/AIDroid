@@ -11,15 +11,21 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ai.ondevice.core.Fmt
 import ai.ondevice.core.workflow.NodeKind
+import ai.ondevice.core.workflow.RunOutputs
+import ai.ondevice.core.workflow.Schedule
 import ai.ondevice.core.workflow.WorkflowGraph
+import ai.ondevice.core.workflow.canResume
 import ai.ondevice.ui.BottomDestinations
 import ai.ondevice.ui.components.NBottomBar
+import ai.ondevice.ui.components.NButton
+import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NCard
 import ai.ondevice.ui.components.NCardKicker
 import ai.ondevice.ui.components.NCardTitle
@@ -61,6 +67,58 @@ fun WorkflowScreen(
         contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 18.dp),
     ) {
         Column(Modifier.verticalScroll(rememberScrollState())) {
+
+            /*
+             * A run the system stopped without telling anybody.
+             *
+             * Offered before anything else on this screen, because it is the one
+             * thing here with work already sunk into it. What the finished steps
+             * made is on disk and recorded, so carrying on skips them rather
+             * than spending their model loads again — which for a graph of
+             * several generations is most of an hour.
+             */
+            state.interrupted?.let { stale ->
+                val graph = remember(stale.graphJson) { WorkflowGraph.decode(stale.graphJson) }
+                val done = remember(stale.nodeStatesJson) {
+                    RunOutputs.decode(stale.nodeStatesJson).completedNodes.size
+                }
+                NCard(
+                    Modifier.fillMaxWidth().padding(top = 12.dp),
+                    ring = NocturneColors.Accent800,
+                ) {
+                    NCardTitle("A run did not finish")
+                    NHelp(
+                        if (graph.canResume()) {
+                            "It stopped after $done of ${graph.nodes.size} steps — the app was " +
+                                "closed or the system reclaimed it. What those steps made was kept."
+                        } else {
+                            "It stopped after $done of ${graph.nodes.size} steps. This one has a " +
+                                "loop in it, so it can only start again: a step inside a loop runs " +
+                                "many times, and one pass finishing says nothing about the next."
+                        },
+                        Modifier.padding(top = 4.dp),
+                    )
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        NButton(
+                            "Forget it",
+                            onClick = viewModel::discardInterrupted,
+                            style = NButtonStyle.Secondary,
+                            modifier = Modifier.weight(1f),
+                            block = true,
+                        )
+                        NButton(
+                            if (graph.canResume()) "Carry on" else "Start again",
+                            onClick = viewModel::resumeInterrupted,
+                            style = NButtonStyle.Primary,
+                            modifier = Modifier.weight(1f),
+                            block = true,
+                        )
+                    }
+                }
+            }
 
             if (state.workflows.isEmpty()) {
                 NCard(Modifier.fillMaxWidth().padding(top = 12.dp)) {
@@ -117,12 +175,35 @@ fun WorkflowScreen(
                                 NTag(family.label, style = NTagStyle.Outline)
                             }
                     }
-                    workflow.lastRunAt?.let {
+                    /*
+                     * When it last ran, when it next will, and why it did not.
+                     *
+                     * The last of those is the point. A schedule that quietly
+                     * skips is indistinguishable from one that was never saved,
+                     * and this line is the only place that can tell them apart —
+                     * so a skip is said here in the same breath as a success.
+                     */
+                    val schedule = remember(workflow.scheduleJson) {
+                        Schedule.decode(workflow.scheduleJson)
+                    }
+                    val line = listOfNotNull(
+                        workflow.lastRunAt?.let { "last run ${Fmt.relative(it)}" },
+                        schedule.describe().takeIf { it.isNotBlank() },
+                    ).joinToString(" · ")
+                    if (line.isNotBlank()) {
                         Text(
-                            "last run ${Fmt.relative(it)}",
+                            line,
                             style = NocturneType.MonoXs,
                             color = NocturneColors.TextMuted,
                             modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
+                    schedule.lastSkipReason?.takeIf { schedule.enabled }?.let { why ->
+                        Text(
+                            "skipped — $why",
+                            style = NocturneType.MonoXs,
+                            color = NocturneColors.Accent300,
+                            modifier = Modifier.padding(top = 3.dp),
                         )
                     }
                 }

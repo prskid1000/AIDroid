@@ -68,6 +68,21 @@ that knowledge exists. Match the density and voice of the file you are editing.
   receiver or a service; use `PendingIntent.getActivity`.
 - **Package visibility.** Anything resolving an intent against other apps needs the
   `<queries>` block. `QUERY_ALL_PACKAGES` is not available to us.
+- **Exact alarms are exempt from the foreground-service background-start rule;
+  inexact ones are not.** That single fact picks the scheduling mechanism: a run
+  needs an FGS, so an inexact alarm wakes us with no way to do the thing we were
+  woken for. `WorkManager` would run the graph inside *its* foreground service,
+  which since Android 14 must declare a type — meaning `specialUse` merged onto a
+  service we do not own, beside `InferenceService` which already does the job.
+- **`SCHEDULE_EXACT_ALARM` is denied by default** from Android 13; `USE_EXACT_ALARM`
+  is Play-restricted to alarm clocks and calendars. Refusal is a supported state,
+  not a broken feature — fall back to a notification and a tap.
+- **Alarms are lost on more than a reboot.** Force-stop drops them and a reinstall
+  clears them, so re-arm at app start as well as on `BOOT_COMPLETED`,
+  `TIME_SET` and `TIMEZONE_CHANGED`.
+- **A host app decides which `PROCESS_TEXT` items its selection menu shows.**
+  Resolving correctly is not the same as being offered: Keep's custom rich-text
+  editor filters ours out, and that is the host's choice, not a manifest fault.
 
 ## Native
 

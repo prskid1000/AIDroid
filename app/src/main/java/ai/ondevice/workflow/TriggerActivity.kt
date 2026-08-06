@@ -49,6 +49,9 @@ class TriggerActivity : ComponentActivity() {
 
     @Inject lateinit var launcher: WorkflowLauncher
 
+    /** Watched only by the replace-in-place path, which waits for an answer. */
+    @Inject lateinit var session: ai.ondevice.ui.vm.WorkflowSession
+
     private var screen by mutableStateOf<Screen>(Screen.Reading)
 
     /**
@@ -64,6 +67,16 @@ class TriggerActivity : ComponentActivity() {
         data class Pick(val payload: TriggerPayload, val options: List<WorkflowEntity>) : Screen
         data class Confirm(val payload: TriggerPayload, val workflow: WorkflowEntity) : Screen
         data class Refuse(val what: String, val because: String) : Screen
+
+        /**
+         * Held open while a run answers the selection it was handed.
+         *
+         * The only screen here that waits for the run rather than starting it
+         * and standing aside, because `ACTION_PROCESS_TEXT` replaces the
+         * caller's selection only if this activity is still alive to return a
+         * result.
+         */
+        data class Working(val workflow: WorkflowEntity) : Screen
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -93,6 +106,16 @@ class TriggerActivity : ComponentActivity() {
                         what = current.what,
                         because = current.because,
                         onDismiss = ::finish,
+                    )
+                    is Screen.Working -> TriggerWorking(
+                        workflow = current.workflow,
+                        state = session.state,
+                        onCancel = {
+                            launcher.cancel()
+                            setResult(RESULT_CANCELED)
+                            finish()
+                        },
+                        onDone = ::returnToCaller,
                     )
                 }
             }
@@ -287,7 +310,25 @@ class TriggerActivity : ComponentActivity() {
         return "It takes $wants, and what arrived was $got."
     }
 
+    /**
+     * Run it, and decide whether to wait for the answer or stand aside.
+     *
+     * Waiting is only offered where it is honest: the caller asked with
+     * `ACTION_PROCESS_TEXT`, said it would accept a replacement, and the graph
+     * is one this app can finish while somebody holds a phone — see
+     * [Triggers.canReplaceInPlace]. Everything else starts the run and opens the
+     * run screen, which is what a forty-minute graph deserves.
+     */
     private fun start(payload: TriggerPayload, workflow: WorkflowEntity) {
+        val graph = WorkflowGraph.decode(workflow.graphJson)
+        if (
+            intent?.action == Intent.ACTION_PROCESS_TEXT &&
+            !payload.readOnly &&
+            Triggers.canReplaceInPlace(graph)
+        ) {
+            if (launcher.launch(workflow.id, payload)) screen = Screen.Working(workflow)
+            return
+        }
         launcher.launch(workflow.id, payload)
         startActivity(
             Intent(this, ai.ondevice.MainActivity::class.java)
@@ -297,6 +338,26 @@ class TriggerActivity : ComponentActivity() {
                 )
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
         )
+        finish()
+    }
+
+    /**
+     * Hand the answer back so it replaces what was selected.
+     *
+     * `RESULT_OK` with `EXTRA_PROCESS_TEXT` is the whole contract: the calling
+     * app swaps the selection for this. An empty answer returns cancelled
+     * instead, because replacing somebody's paragraph with nothing is the one
+     * outcome worse than doing nothing.
+     */
+    private fun returnToCaller(text: String?) {
+        if (text.isNullOrBlank()) {
+            setResult(RESULT_CANCELED)
+        } else {
+            setResult(
+                RESULT_OK,
+                Intent().putExtra(Intent.EXTRA_PROCESS_TEXT, text),
+            )
+        }
         finish()
     }
 

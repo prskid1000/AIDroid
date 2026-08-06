@@ -27,6 +27,8 @@ class OnDeviceApp : Application() {
 
     @Inject lateinit var shortcuts: ai.ondevice.workflow.ShortcutPublisher
 
+    @Inject lateinit var scheduler: ai.ondevice.engine.workflow.Scheduler
+
     override fun onCreate() {
         super.onCreate()
         scope.launch {
@@ -39,6 +41,16 @@ class OnDeviceApp : Application() {
             // exist once the database is open. Republished once at startup so the
             // rows are there before anybody goes looking for them.
             runCatching { shortcuts.republish() }
+            /*
+             * Alarms are lost more often than a reboot.
+             *
+             * BOOT_COMPLETED covers a restart, but the system also drops an
+             * app's alarms when it is force-stopped, and a reinstall clears them
+             * outright — after which a saved schedule would sit in the database
+             * looking armed and never fire again until somebody happened to edit
+             * it. Re-arming at startup is cheap and makes the row the truth.
+             */
+            runCatching { scheduler.rearmAll() }
         }
         watchForeground()
     }

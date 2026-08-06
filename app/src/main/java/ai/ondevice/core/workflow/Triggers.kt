@@ -1,5 +1,6 @@
 package ai.ondevice.core.workflow
 
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -22,6 +23,15 @@ object Triggers {
 
     /** Filled by whatever app shared into this one. */
     const val FROM_SHARED = "shared"
+
+    /**
+     * Asked for each time the workflow runs.
+     *
+     * The setting that makes a workflow a tool rather than a macro: without it
+     * every reuse begins by opening the editor and retyping the one thing that
+     * changed.
+     */
+    const val FROM_ASKED = "asked"
 
     /** The param an Input stores that choice under. */
     const val PARAM_FROM = "from"
@@ -66,12 +76,65 @@ object Triggers {
     // ── what a graph takes ───────────────────────────────────────────────
 
     /** The Input steps waiting to be filled by another app. */
-    fun sharedInputs(graph: WorkflowGraph): List<NodeRecord> =
+    fun sharedInputs(graph: WorkflowGraph): List<NodeRecord> = inputsFrom(graph, FROM_SHARED)
+
+    /** The Input steps that want to be asked, every time this runs. */
+    fun askedInputs(graph: WorkflowGraph): List<NodeRecord> = inputsFrom(graph, FROM_ASKED)
+
+    private fun inputsFrom(graph: WorkflowGraph, source: String): List<NodeRecord> =
         graph.nodes.filter {
             it.enabled &&
                 it.type == NodeKind.Input.type &&
-                it.params.text(PARAM_FROM) == FROM_SHARED
+                it.params.text(PARAM_FROM) == source
         }
+
+    /**
+     * Answers typed into the run sheet, written into the graph.
+     *
+     * The same act as filling a shared payload, and deliberately the same code
+     * path: an Input does not care whether its value arrived from another app or
+     * from a text field, and the run records what it actually worked on either
+     * way.
+     */
+    fun fillAsked(graph: WorkflowGraph, answers: Map<String, String>): WorkflowGraph {
+        if (answers.isEmpty()) return graph
+        return graph.copy(
+            nodes = graph.nodes.map { node ->
+                val answer = answers[node.id] ?: return@map node
+                val params = node.params.toMutableMap()
+                if (node.declaredPort() == PortType.TEXT) {
+                    params["text"] = JsonPrimitive(answer)
+                } else {
+                    params["path"] = JsonPrimitive(answer)
+                }
+                node.copy(params = JsonObject(params))
+            },
+        )
+    }
+
+    /**
+     * Whether this graph's answer can replace the text it was given.
+     *
+     * `ACTION_PROCESS_TEXT` replaces the selection only if the activity is still
+     * alive to return a result, which means holding a screen over the calling
+     * app for the whole run. That is fine for a translation and completely
+     * unreasonable for a diffusion step: a four-gigabyte load behind a dialog
+     * somebody cannot leave is not a feature.
+     *
+     * So the offer is conditional, and the condition is structural rather than a
+     * guess — text in, text out, at most one model, and nothing that stops to
+     * ask a question of its own.
+     */
+    fun canReplaceInPlace(graph: WorkflowGraph): Boolean {
+        val steps = graph.nodes.filter { it.enabled }
+        if (steps.any { it.type == NodeKind.Pick.type }) return false
+        val processors = steps.filter { it.type == NodeKind.Processor.type }
+        if (processors.any { it.params.text("shape", "NONE") !in TEXT_SHAPES }) return false
+        return processors.mapNotNull { it.params.text("model").ifBlank { null } }
+            .distinct().size <= 1
+    }
+
+    private val TEXT_SHAPES = setOf("TEXT", "NONE", "")
 
     /**
      * The port types this graph will accept from outside.
@@ -99,7 +162,9 @@ object Triggers {
             if (PortType.TEXT in wanted) add(CATEGORY_TEXT)
             if (PortType.IMAGE in wanted) add(CATEGORY_IMAGE)
             if (PortType.AUDIO in wanted) add(CATEGORY_AUDIO)
-            if (PortType.FILE in wanted || PortType.ANY in wanted) {
+            // A list takes whatever it is given, several at a time, so it
+            // belongs in every sheet for the same reason a file does.
+            if (PortType.FILE in wanted || PortType.ANY in wanted || PortType.LIST in wanted) {
                 add(CATEGORY_ANY)
                 add(CATEGORY_TEXT)
                 add(CATEGORY_IMAGE)
@@ -135,30 +200,61 @@ object Triggers {
         if (assigned.isEmpty()) return graph
         return graph.copy(
             nodes = graph.nodes.map { node ->
-                val value = assigned[node.id] ?: return@map node
+                val values = assigned[node.id] ?: return@map node
                 val params = node.params.toMutableMap()
-                if (node.declaredPort() == PortType.TEXT) {
-                    params["text"] = JsonPrimitive(value.text)
-                } else {
-                    params["path"] = JsonPrimitive(value.path)
+                when (node.declaredPort()) {
+                    PortType.TEXT -> params["text"] = JsonPrimitive(values.first().text)
+                    /*
+                     * Everything that arrived, and what kind of thing it is.
+                     *
+                     * Written as an array rather than as one path, because the
+                     * only reason to declare an Input a list is to hand it to a
+                     * For-each — and a share of nine photographs that filled one
+                     * slot and dropped eight would be a worse answer than
+                     * refusing the share outright.
+                     */
+                    PortType.LIST -> {
+                        params["paths"] = JsonArray(values.map { JsonPrimitive(it.listEntry) })
+                        params["elementType"] = JsonPrimitive(values.first().elementType().name)
+                    }
+                    else -> params["path"] = JsonPrimitive(values.first().path)
                 }
                 node.copy(params = JsonObject(params))
             },
         )
     }
 
-    /** Which value fills which Input, or fewer entries than Inputs if it cannot. */
+    /**
+     * Which values fill which Input, or fewer entries than Inputs if they cannot.
+     *
+     * A list-taking Input is greedy and takes everything still unspent that it
+     * can hold; every other Input takes one. Greedy is right because a list is
+     * the only port that can express "and the rest", and a graph with a list
+     * Input and a text Input beside it is asking for the caption and the photos
+     * rather than for two of the photos.
+     */
     private fun assign(
         graph: WorkflowGraph,
         payload: TriggerPayload,
-    ): Map<String, TriggerValue> {
+    ): Map<String, List<TriggerValue>> {
         val spare = payload.values.toMutableList()
-        val out = LinkedHashMap<String, TriggerValue>()
-        sharedInputs(graph).forEach { node ->
+        val out = LinkedHashMap<String, List<TriggerValue>>()
+        // Discrete slots first, so a list does not swallow the one value a
+        // neighbouring text or picture slot needed.
+        val (lists, singles) = sharedInputs(graph).partition {
+            it.declaredPort() == PortType.LIST
+        }
+        singles.forEach { node ->
             val wanted = node.declaredPort()
             val found = spare.firstOrNull { it.canFill(wanted) } ?: return@forEach
             spare.remove(found)
-            out[node.id] = found
+            out[node.id] = listOf(found)
+        }
+        lists.forEach { node ->
+            val taken = spare.filter { it.canFill(PortType.LIST) }
+            if (taken.isEmpty()) return@forEach
+            spare.removeAll(taken)
+            out[node.id] = taken
         }
         return out
     }
@@ -200,9 +296,23 @@ data class TriggerValue(
     fun canFill(slot: PortType): Boolean = when (slot) {
         PortType.TEXT -> text.isNotBlank()
         PortType.ANY -> text.isNotBlank() || path.isNotBlank()
-        PortType.LIST -> false
+        // Anything that arrived can be one item of a list — a share of nine
+        // photographs, or of nine notes. It returned false here, which is why
+        // SEND_MULTIPLE was declared, read, and then had nowhere to go.
+        PortType.LIST -> text.isNotBlank() || path.isNotBlank()
         else -> path.isNotBlank() && type.satisfies(slot)
     }
+
+    /**
+     * What this is worth as one entry of a list.
+     *
+     * A list carries paths or prose in the same field, and which it holds is
+     * decided by [elementType] — see `PortValue.elementType` for why the
+     * distinction has to travel with the value rather than with the port.
+     */
+    val listEntry: String get() = if (path.isNotBlank()) path else text
+
+    fun elementType(): PortType = if (path.isNotBlank()) type else PortType.TEXT
 
     /** One line naming this, for the sheet that asks whether to run. */
     val summary: String

@@ -4,6 +4,7 @@
     <string name="download_channel_name">Model downloads</string>
     <string name="inference_channel_name">Inference</string>
     <string name="handoff_channel_name">Results waiting to be sent</string>
+    <string name="schedule_channel_name">Scheduled runs</string>
     <!-- What another app's share sheet calls this app. -->
     <string name="trigger_label">Run a workflow</string>
 </resources>

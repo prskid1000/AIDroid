@@ -113,6 +113,15 @@ interface RunReporter {
      * notification.
      */
     fun onHandoff(handoff: Handoff)
+
+    /**
+     * A step finished and left these behind.
+     *
+     * Reported as it happens so the run row can be written down incrementally.
+     * A row written only at the end is a row that is never written for exactly
+     * the runs this exists for — the ones the system kills half way through.
+     */
+    fun onProduced(nodeId: String, values: Map<String, PortValue>)
 }
 
 /**
@@ -157,6 +166,8 @@ class WorkflowRunner @Inject constructor(
         val outDir: File,
         val models: Map<String, ModelEntity>,
         val reporter: RunReporter,
+        /** Steps an earlier attempt at this run already finished. */
+        val alreadyDone: Set<String> = emptySet(),
     ) {
         val types: List<String> = graph.nodes.map { it.type }
     }
@@ -165,12 +176,27 @@ class WorkflowRunner @Inject constructor(
         runId: String,
         graph: WorkflowGraph,
         reporter: RunReporter,
+        /**
+         * What an earlier attempt at this same run already produced.
+         *
+         * Seeded into the outputs and its steps skipped, so a run the system
+         * killed carries on rather than repeating every model load to get back
+         * to where it was.
+         */
+        resume: Map<String, PortValue> = emptyMap(),
     ): Result<Map<String, PortValue>> = runCatching {
         val models = db.models().getInstalled().associateBy { it.id }
         val outputs = LinkedHashMap<String, PortValue>()
+        outputs.putAll(resume)
         val outDir = File(storage.root(), "workflows/$runId").apply { mkdirs() }
         batchSeed = null
-        execute(RunContext(graph, outputs, outDir, models, reporter), 0, graph.nodes.size, "")
+        val done = resume.keys.map { it.substringBefore(':') }.toSet()
+        execute(
+            RunContext(graph, outputs, outDir, models, reporter, done),
+            0,
+            graph.nodes.size,
+            "",
+        )
         outputs
     }
 
@@ -201,6 +227,15 @@ class WorkflowRunner @Inject constructor(
             val node = graph.nodes[index]
             if (!node.enabled) {
                 reporter.onNode(node.id, NodeProgress(NodeRunState.SKIPPED))
+                index++
+                continue
+            }
+
+            // Finished by the attempt this one is carrying on from. Its value is
+            // already seeded into the outputs, so the steps after it can read it
+            // without this one spending twenty minutes making it again.
+            if (node.id in c.alreadyDone) {
+                reporter.onNode(node.id, NodeProgress(NodeRunState.DONE, message = "kept from the interrupted run"))
                 index++
                 continue
             }
@@ -383,10 +418,20 @@ class WorkflowRunner @Inject constructor(
             when (val kind = NodeKind.of(node.type)) {
                 NodeKind.Input, NodeKind.LibraryItem -> {
                     val type = PortType.valueOf(node.params.string("portType", "TEXT"))
-                    val value = if (type == PortType.TEXT) {
-                        PortValue.text(node.params.string("text", ""))
-                    } else {
-                        PortValue.file(type, node.params.string("path", ""))
+                    val value = when (type) {
+                        PortType.TEXT -> PortValue.text(node.params.string("text", ""))
+                        // Several of something, which only a share of several
+                        // things or a picked selection can produce. The element
+                        // type travels with the value rather than the port, so a
+                        // For-each over shared photographs hands on pictures and
+                        // one over shared notes hands on prose.
+                        PortType.LIST -> PortValue.list(
+                            node.params.strings("paths"),
+                            runCatching {
+                                PortType.valueOf(node.params.string("elementType", "FILE"))
+                            }.getOrDefault(PortType.FILE),
+                        )
+                        else -> PortValue.file(type, node.params.string("path", ""))
                     }
                     outputs["${node.id}:value"] = value
                     outputs[node.id] = value
@@ -628,6 +673,12 @@ class WorkflowRunner @Inject constructor(
             }
         }.onSuccess {
             reporter.onNode(node.id, NodeProgress(NodeRunState.DONE))
+            // Everything this step published, under its own id and under
+            // `id:output` both — the two spellings a slot and a template use.
+            reporter.onProduced(
+                node.id,
+                outputs.filterKeys { it == node.id || it.startsWith("${node.id}:") },
+            )
         }.onFailure { failure ->
             reporter.onNode(
                 node.id,
@@ -1155,6 +1206,13 @@ class WorkflowRunner @Inject constructor(
 
     private fun kotlinx.serialization.json.JsonObject.string(key: String, fallback: String = ""): String =
         (this[key] as? JsonPrimitive)?.content ?: fallback
+
+    /** A list Input's items, written by whatever filled it. */
+    private fun kotlinx.serialization.json.JsonObject.strings(key: String): List<String> =
+        (this[key] as? kotlinx.serialization.json.JsonArray)
+            ?.mapNotNull { (it as? JsonPrimitive)?.content }
+            ?.filter { it.isNotBlank() }
+            .orEmpty()
 
     private fun kotlinx.serialization.json.JsonObject.toMap(): Map<String, kotlinx.serialization.json.JsonElement> =
         entries.associate { it.key to it.value }

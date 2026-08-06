@@ -16,7 +16,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -28,10 +30,13 @@ import coil3.compose.AsyncImage
 import ai.ondevice.core.Fmt
 import ai.ondevice.core.workflow.NodeKind
 import ai.ondevice.engine.workflow.NodeRunState
+import ai.ondevice.ui.components.NBottomSheet
 import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NCard
 import ai.ondevice.ui.components.NHelp
+import ai.ondevice.ui.components.NInput
+import ai.ondevice.ui.components.NTextArea
 import ai.ondevice.ui.components.NProgressBar
 import ai.ondevice.ui.components.ResidentCard
 import ai.ondevice.ui.components.ResourceBlock
@@ -65,9 +70,21 @@ fun WorkflowRunScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val graph = state.graph
+    var asking by rememberSaveable { mutableStateOf(false) }
 
     // Work out the loads before anybody commits to them.
     LaunchedEffect(graph) { viewModel.preview() }
+
+    if (asking) {
+        AskInputsSheet(
+            inputs = viewModel.askedInputs(),
+            onDismiss = { asking = false },
+            onRun = { answers ->
+                asking = false
+                viewModel.run(answers)
+            },
+        )
+    }
 
     PhoneScaffold(
         toolbar = {
@@ -273,7 +290,16 @@ fun WorkflowRunScreen(
                     state.finishedAt != null || state.error != null -> "Run again"
                     else -> "Run"
                 },
-                onClick = { if (phase.busy) viewModel.cancel() else viewModel.run() },
+                onClick = {
+                    when {
+                        phase.busy -> viewModel.cancel()
+                        // Asked for before the run, not discovered inside it. A
+                        // step reaching an empty prompt fails somewhere else
+                        // entirely, saying something that sounds unrelated.
+                        viewModel.askedInputs().isNotEmpty() -> asking = true
+                        else -> viewModel.run()
+                    }
+                },
                 style = if (phase.busy) NButtonStyle.Secondary else NButtonStyle.Primary,
                 enabled = control?.enabled ?: true,
                 block = true,
@@ -320,6 +346,67 @@ fun WorkflowRunScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * What a run needs from a person before it starts.
+ *
+ * The whole of *ask when it runs*: an Input marked that way is prompted for
+ * here, seeded with whatever was typed in the editor, and the answers are
+ * written into the graph the same way a shared payload is. It is what makes a
+ * workflow a tool rather than a macro — without it every reuse begins by
+ * opening the editor and retyping the one thing that changed.
+ */
+@Composable
+private fun AskInputsSheet(
+    inputs: List<ai.ondevice.core.workflow.NodeRecord>,
+    onDismiss: () -> Unit,
+    onRun: (Map<String, String>) -> Unit,
+) {
+    fun seed(node: ai.ondevice.core.workflow.NodeRecord): String {
+        val key = if (
+            (node.params["portType"] as? kotlinx.serialization.json.JsonPrimitive)?.content ==
+            ai.ondevice.core.workflow.PortType.TEXT.name
+        ) "text" else "path"
+        return (node.params[key] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
+    }
+
+    val answers = remember(inputs) {
+        mutableStateMapOf<String, String>().apply { inputs.forEach { put(it.id, seed(it)) } }
+    }
+
+    NBottomSheet("Before this runs", onDismiss, note = "${inputs.size} to fill in") {
+        inputs.forEach { node ->
+            val isText = (node.params["portType"] as? kotlinx.serialization.json.JsonPrimitive)
+                ?.content == ai.ondevice.core.workflow.PortType.TEXT.name
+            SectionKicker(
+                node.label.ifBlank { "Input" },
+                Modifier.padding(top = 14.dp, bottom = 4.dp),
+            )
+            if (isText) {
+                NTextArea(
+                    value = answers[node.id].orEmpty(),
+                    onValueChange = { answers[node.id] = it },
+                    placeholder = "What this step brings in",
+                    minHeight = 72.dp,
+                )
+            } else {
+                NInput(
+                    value = answers[node.id].orEmpty(),
+                    onValueChange = { answers[node.id] = it },
+                    placeholder = "Path to the file",
+                )
+            }
+        }
+        NButton(
+            "Run",
+            onClick = { onRun(answers.toMap()) },
+            style = NButtonStyle.Primary,
+            block = true,
+            enabled = answers.values.all { it.isNotBlank() },
+            modifier = Modifier.padding(top = 18.dp),
+        )
     }
 }
 

@@ -23,6 +23,14 @@ data class WorkflowEntity(
     val createdAt: Long,
     val updatedAt: Long,
     val lastRunAt: Long? = null,
+    /**
+     * When this should start itself, if it should — see `Schedule`.
+     *
+     * Stored rather than derived, unlike what a workflow accepts from a share:
+     * there is nothing in a graph that says when somebody wants it to run, so
+     * this is genuinely new state and gets a column of its own.
+     */
+    val scheduleJson: String = "{}",
 )
 
 /**

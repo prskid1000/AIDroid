@@ -12,18 +12,18 @@ plugins {
 
 android {
     namespace = "ai.ondevice"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "ai.ondevice"
         minSdk = 31
-        targetSdk = 35
+        targetSdk = 36
         // Bump both on every release. Android refuses an update whose
         // versionCode is not higher than the installed one, and the only way
         // past that refusal is an uninstall — which takes the model files and
         // the database with it.
-        versionCode = 18
-        versionName = "1.9.0"
+        versionCode = 19
+        versionName = "1.10.0"
 
         // SPEC 2.2 — arm64 is the only shipping ABI; armeabi-v7a would double
         // the APK for devices that could never load these models anyway.

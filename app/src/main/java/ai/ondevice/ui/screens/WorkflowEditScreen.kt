@@ -126,6 +126,8 @@ fun WorkflowEditScreen(
                 modifier = Modifier.padding(top = 12.dp),
             )
 
+            ScheduleCard(viewModel)
+
             SectionKicker("Steps", Modifier.padding(top = 20.dp, bottom = 8.dp))
 
             if (graph.nodes.isEmpty()) {
@@ -211,6 +213,156 @@ fun WorkflowEditScreen(
                     slotFor = null
                 },
             )
+        }
+    }
+}
+
+/**
+ * When this workflow should start itself.
+ *
+ * The card says which of two worlds it is in, and says it before the schedule is
+ * saved rather than after it fails to fire. With the exact-alarm permission a
+ * run starts on its own; without it Android will not let this app start the
+ * foreground service every run needs, so the schedule becomes a notification and
+ * a tap. Both are useful; pretending the second is the first is not.
+ */
+@Composable
+private fun ScheduleCard(viewModel: WorkflowViewModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val schedule = viewModel.schedule()
+    val unattended = viewModel.canRunUnattended()
+
+    SectionKicker("Schedule", Modifier.padding(top = 20.dp, bottom = 8.dp))
+    NCard(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(
+                "" to "Off",
+                ai.ondevice.core.workflow.Schedule.ONCE to "Once",
+                ai.ondevice.core.workflow.Schedule.DAILY to "Daily",
+                ai.ondevice.core.workflow.Schedule.WEEKLY to "Weekly",
+            ).forEach { (kind, label) ->
+                val selected = if (kind.isEmpty()) !schedule.enabled else {
+                    schedule.enabled && schedule.kind == kind
+                }
+                NTag(
+                    label,
+                    style = if (selected) NTagStyle.Accent else NTagStyle.Outline,
+                    modifier = Modifier.nClickableFlat {
+                        viewModel.setSchedule(
+                            if (kind.isEmpty()) {
+                                schedule.copy(enabled = false)
+                            } else {
+                                schedule.copy(enabled = true, kind = kind)
+                            },
+                        )
+                    },
+                )
+            }
+        }
+
+        if (schedule.enabled) {
+            SectionKicker("At", Modifier.padding(top = 14.dp, bottom = 4.dp))
+            NInput(
+                value = String.format("%02d:%02d", schedule.atMinute / 60, schedule.atMinute % 60),
+                onValueChange = { typed ->
+                    val parts = typed.split(':')
+                    val h = parts.getOrNull(0)?.filter(Char::isDigit)?.toIntOrNull()
+                    val m = parts.getOrNull(1)?.filter(Char::isDigit)?.toIntOrNull()
+                    if (h != null) {
+                        viewModel.setSchedule(
+                            schedule.copy(
+                                atMinute = (h.coerceIn(0, 23) * 60) + (m ?: 0).coerceIn(0, 59),
+                            ),
+                        )
+                    }
+                },
+                placeholder = "07:00",
+            )
+
+            if (schedule.kind == ai.ondevice.core.workflow.Schedule.WEEKLY) {
+                SectionKicker("On", Modifier.padding(top = 12.dp, bottom = 4.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(1 to "M", 2 to "T", 3 to "W", 4 to "T", 5 to "F", 6 to "S", 7 to "S")
+                        .forEach { (day, label) ->
+                            val on = day in schedule.onDays
+                            NTag(
+                                label,
+                                style = if (on) NTagStyle.Accent else NTagStyle.Outline,
+                                modifier = Modifier.nClickableFlat {
+                                    viewModel.setSchedule(
+                                        schedule.copy(
+                                            onDays = if (on) {
+                                                schedule.onDays - day
+                                            } else {
+                                                schedule.onDays + day
+                                            },
+                                        ),
+                                    )
+                                },
+                            )
+                        }
+                }
+            }
+
+            /*
+             * The two conditions the hardware actually cares about.
+             *
+             * Not a general condition language: a run here can be three quarters
+             * of an hour of GPU at full tilt, and what makes that acceptable
+             * unattended is being plugged in with charge to spare. A hot phone on
+             * a bedside table with nobody watching is a worse outcome than a run
+             * that waited.
+             */
+            SectionKicker("Only when", Modifier.padding(top = 14.dp, bottom = 4.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                NTag(
+                    "Charging",
+                    style = if (schedule.requireCharging) NTagStyle.Accent else NTagStyle.Outline,
+                    modifier = Modifier.nClickableFlat {
+                        viewModel.setSchedule(
+                            schedule.copy(requireCharging = !schedule.requireCharging),
+                        )
+                    },
+                )
+                listOf(0, 40, 70).forEach { floor ->
+                    NTag(
+                        if (floor == 0) "Any battery" else "Over $floor%",
+                        style = if (schedule.minBatteryPercent == floor) {
+                            NTagStyle.Accent
+                        } else {
+                            NTagStyle.Outline
+                        },
+                        modifier = Modifier.nClickableFlat {
+                            viewModel.setSchedule(schedule.copy(minBatteryPercent = floor))
+                        },
+                    )
+                }
+            }
+
+            NHelp(
+                if (unattended) {
+                    "This starts on its own, ${schedule.describe()}."
+                } else {
+                    "This app has not been allowed to start things at an exact time, so it will " +
+                        "notify you ${schedule.describe()} and run when you tap. Allow exact " +
+                        "alarms to have it start on its own."
+                },
+                Modifier.padding(top = 10.dp),
+            )
+            if (!unattended) {
+                viewModel.exactAlarmSettings()?.let { settings ->
+                    NButton(
+                        "Allow exact alarms",
+                        onClick = { runCatching { context.startActivity(settings) } },
+                        style = NButtonStyle.Secondary,
+                        block = true,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            }
+            schedule.lastSkipReason?.let {
+                NHelp("Last time it was skipped: $it.", Modifier.padding(top = 6.dp))
+            }
         }
     }
 }
@@ -413,10 +565,19 @@ private fun StepSettings(
         NodeKind.Input, NodeKind.LibraryItem -> {
             SectionKicker("Brings in", Modifier.padding(top = 12.dp, bottom = 4.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(PortType.TEXT, PortType.IMAGE, PortType.AUDIO, PortType.FILE).forEach { type ->
+                // LIST is offered on an Input only. It is the port a For-each
+                // consumes, and until a share of several things could fill one
+                // there was no way to get a list into a graph from outside at
+                // all — SEND_MULTIPLE was declared, read, and had nowhere to go.
+                val types = if (kind == NodeKind.Input) {
+                    listOf(PortType.TEXT, PortType.IMAGE, PortType.AUDIO, PortType.FILE, PortType.LIST)
+                } else {
+                    listOf(PortType.TEXT, PortType.IMAGE, PortType.AUDIO, PortType.FILE)
+                }
+                types.forEach { type ->
                     val selected = value("portType", "TEXT") == type.name
                     NTag(
-                        type.label,
+                        if (type == PortType.LIST) "Several" else type.label,
                         style = if (selected) NTagStyle.Accent else NTagStyle.Outline,
                         modifier = Modifier.nClickableFlat {
                             viewModel.setParam(node.id, "portType", type.name)
@@ -441,6 +602,7 @@ private fun StepSettings(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf(
                         TRIGGER_TYPED to "Typed here",
+                        ai.ondevice.core.workflow.Triggers.FROM_ASKED to "Ask when it runs",
                         ai.ondevice.core.workflow.Triggers.FROM_SHARED to "From another app",
                     ).forEach { (key, label) ->
                         NTag(
@@ -452,13 +614,22 @@ private fun StepSettings(
                         )
                     }
                 }
-                if (from == ai.ondevice.core.workflow.Triggers.FROM_SHARED) {
-                    NHelp(
+                when (from) {
+                    ai.ondevice.core.workflow.Triggers.FROM_SHARED -> NHelp(
                         "This workflow now appears when you share " +
                             "${sharedBlurb(value("portType", "TEXT"))} from any app. What is typed " +
                             "below is only used when you run it from here.",
                         Modifier.padding(top = 6.dp),
                     )
+                    // The setting that makes a workflow a tool rather than a
+                    // macro: without it every reuse begins by opening the editor
+                    // and retyping the one thing that changed.
+                    ai.ondevice.core.workflow.Triggers.FROM_ASKED -> NHelp(
+                        "Every run starts by asking for this, with what is typed below as the " +
+                            "suggestion.",
+                        Modifier.padding(top = 6.dp),
+                    )
+                    else -> Unit
                 }
             }
 
