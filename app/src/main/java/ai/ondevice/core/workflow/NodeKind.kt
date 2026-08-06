@@ -284,7 +284,7 @@ sealed interface NodeKind {
         override val family = NodeFamily.LOGIC
         override val blurb = "Where the repeat stops. Collects what each pass produced."
         override fun slots(context: NodeContext) =
-            listOf(SlotSpec("collect", PortType.FILE, "Keep from each pass", required = false))
+            listOf(SlotSpec("collect", PortType.ANY, "Keep from each pass", required = false))
         override fun outputs(context: NodeContext) =
             listOf(OutputSpec("items", PortType.LIST, "Everything collected"))
     }
@@ -306,7 +306,7 @@ sealed interface NodeKind {
         override val family = NodeFamily.LOGIC
         override val blurb = "Where the loop stops. Collects what each pass produced."
         override fun slots(context: NodeContext) =
-            listOf(SlotSpec("collect", PortType.FILE, "Keep from each pass", required = false))
+            listOf(SlotSpec("collect", PortType.ANY, "Keep from each pass", required = false))
         override fun outputs(context: NodeContext) =
             listOf(OutputSpec("items", PortType.LIST, "Everything collected"))
     }
@@ -359,7 +359,36 @@ sealed interface NodeKind {
         override val family = NodeFamily.SINK
         override val blurb = "Save this into the library, where the rest of the app can find it."
         override fun slots(context: NodeContext) =
-            listOf(SlotSpec("value", PortType.FILE, "What to keep"))
+            listOf(SlotSpec("value", PortType.ANY, "What to keep"))
+    }
+
+    /**
+     * Hand what was made to another app, or to the clipboard.
+     *
+     * One node with several destinations rather than one per destination, the
+     * same reading as Input: mailing a summary and copying it are the same step
+     * with a different end, and splitting them would double this half of the
+     * palette to no end.
+     *
+     * What it cannot do is worth saying here, because the editor says it too:
+     * **no intent on Android sends a mail.** Handing text to Gmail opens
+     * Gmail's composer with everything filled in, and a person taps send. For
+     * delivery with nobody present the mechanism is a Tool step against a
+     * connected server, not this.
+     */
+    data object Send : NodeKind {
+        override val type = "send"
+        override val title = "Send it somewhere"
+        override val family = NodeFamily.SINK
+        override val blurb =
+            "Hand this to another app — a mail, a note, a chat — or put it on the clipboard."
+        override fun slots(context: NodeContext) = listOf(
+            SlotSpec("value", PortType.ANY, "What to send"),
+            SlotSpec(
+                "subject", PortType.TEXT, "Subject or title", required = false,
+                help = "Used as the mail subject, or the note's title.",
+            ),
+        )
     }
 
     /** Say something about a step without changing it. */
@@ -391,7 +420,7 @@ sealed interface NodeKind {
             FrameExtract, Assemble, Resize, TextSplit, TextJoin,
             Batch, Pick, RepeatStart, RepeatEnd, ForEachStart, ForEachEnd, Branch,
             Script, Extract,
-            Output, Note,
+            Output, Send, Note,
         )
 
         fun of(type: String): NodeKind =

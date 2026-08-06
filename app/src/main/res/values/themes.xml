@@ -8,4 +8,22 @@
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
+
+    <!--
+        For the trampoline that receives a share.
+
+        Transparent rather than the app's own background, because what it shows
+        is a sheet asking a question — the app the share came from should stay
+        visible behind it, the way a share sheet does. Not NoDisplay: this one
+        does draw, briefly, while it copies what arrived onto disk.
+    -->
+    <style name="Theme.OnDeviceAI.Transparent" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
 </resources>

@@ -55,6 +55,36 @@ context slider moves. "Won't run" is an acceptable answer; a crash is not.
 come from GGUF metadata via the HF API, with a maintained header parser as fallback.
 There is no `when (modelName)` anywhere in the resolver.
 
+## Workflows reach the rest of the phone
+
+A workflow can be started by another app and can hand its result back to one.
+
+**In.** An Input step set to *from another app* is the whole switch. What a workflow
+accepts is then derived from that step's port type through `PortType.satisfies`, so it
+appears in exactly the share sheets that can feed it and in no others — there is no
+second setting to keep in step, and a graph that stops taking pictures stops being
+offered them. Text, a picture, a recording and any file all arrive; a shared `.txt`
+counts as both prose and a file, because which one a graph wanted is the graph's
+business and not the boundary's. Selected text in any app reaches the same place
+through `ACTION_PROCESS_TEXT`, and `ai.ondevice://workflow/<id>` reaches it from an
+automation app.
+
+A workflow cannot itself be an activity — the manifest is fixed at build time and
+workflows are rows made long afterwards — so there is one exported activity and a
+shortcut per workflow over it, which is what the share sheet draws as its own row.
+
+**Out.** A Send step hands a result to another app or to the clipboard, and the
+editor says plainly what that is worth: no intent on Android sends a mail. Handing
+text to Gmail opens its composer filled in and a person taps send. For delivery with
+nobody present the mechanism is a Tool step against a connected server, which is an
+API call and already exists.
+
+The interesting half is that the platform refuses an activity start from an app that
+is not on screen, which for a run measured in minutes is the ordinary case. A Send
+step that finishes in the background parks its result in a notification *and* on the
+run screen, because the notification permission is optional here and losing a result
+to a permission somebody declined would be worse than the wait.
+
 ## Colour discipline
 
 Nocturne is a mono, dark-only system, and the design canvas is explicit that verdicts

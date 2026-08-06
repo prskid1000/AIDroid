@@ -19,6 +19,27 @@
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
+    <!--
+        What a Send step is allowed to see.
+
+        Since Android 11, resolveActivity returns null for any app not declared
+        visible here, so without this the target picker would be empty and a
+        step aimed at a named app would look like it had been aimed at nothing.
+        QUERY_ALL_PACKAGES is the alternative and is a restricted Play permission
+        that nothing in this app could justify.
+
+        Declared as a capability rather than a list of package names: the picker
+        is "every app that can receive this type", asked of the system, so a mail
+        client installed tomorrow appears without an app update — the same stance
+        SPEC 1.1 takes about models and 1.3 about metadata.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.SEND" />
+            <data android:mimeType="*/*" />
+        </intent>
+    </queries>
+
     <application
         android:name=".OnDeviceApp"
         android:allowBackup="false"
@@ -41,19 +62,96 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-
-            <!-- SPEC 4.5 / 6 — screenshot and audio share targets. -->
-            <intent-filter>
-                <action android:name="android.intent.action.SEND" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="image/*" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.SEND" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="audio/*" />
-            </intent-filter>
+            <!--
+                The two SEND filters that used to be here are gone, and their
+                absence is the fix rather than a removal of one. Nothing in this
+                app ever read EXTRA_STREAM, so sharing a screenshot in opened the
+                app on whatever tab it was last on and dropped the picture — a
+                share target that silently does nothing, which is the failure
+                SPEC 1.2 exists to forbid. They now live on TriggerActivity,
+                which reads what it is given.
+            -->
         </activity>
+
+        <!--
+            SPEC 4.5 / 6 — where anything shared into this app arrives.
+
+            Its own activity and not a filter on MainActivity, for three
+            reasons. MainActivity is singleTask deliberately, so that a
+            notification tap reuses the instance instead of rebuilding it and
+            killing the generation it holds; a share landing in that same task
+            is the same hazard from another direction. ACTION_PROCESS_TEXT has
+            to return a result to its caller, which the app's main task must not
+            be doing. And taskAffinity="" keeps a share from leaving a second
+            card in recents — the reasoning already written on
+            OAuthCallbackActivity.
+
+            */* puts this app in every share sheet on the device. The narrower
+            alternative is a manifest listing types, which cannot follow what the
+            graphs actually take; the answer is to accept everything and refuse
+            well, which TriggerActivity does by name.
+        -->
+        <activity
+            android:name=".workflow.TriggerActivity"
+            android:exported="true"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:label="@string/trigger_label"
+            android:theme="@style/Theme.OnDeviceAI.Transparent">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/*" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="audio/*" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="application/*" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+
+            <!--
+                The floating toolbar over selected text, in any app. Select,
+                tap, and the workflow runs on it without a share sheet at all.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+
+            <!-- For automation apps: ai.ondevice://workflow/<id> -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="ai.ondevice" android:host="workflow" />
+            </intent-filter>
+
+            <!--
+                The share-target declarations the published shortcuts match
+                against. No chooser_target_service meta-data beside it: that is
+                the API 21-28 back-compat shim, and minSdk here is 31.
+            -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+        </activity>
+
+        <!--
+            Where a parked hand-off's notification lands.
+
+            Since Android 12 a notification may not trampoline an activity start
+            through a receiver or a service, so the pending intent has to be a
+            getActivity and this is what it gets. It draws nothing.
+        -->
+        <activity
+            android:name=".workflow.HandoffActivity"
+            android:exported="false"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay" />
 
         <!--
           Where an MCP sign-in comes back to.

@@ -1,5 +1,6 @@
 package ai.ondevice.engine.workflow
 
+import ai.ondevice.core.Export
 import ai.ondevice.core.Modality
 import ai.ondevice.core.SparseParams
 import ai.ondevice.core.workflow.NodeKind
@@ -102,6 +103,16 @@ interface RunReporter {
     fun onUnload(because: String)
     /** A step wants a person to choose. Returns the chosen path, or null to stop. */
     suspend fun awaitChoice(nodeId: String, options: List<String>): String?
+
+    /**
+     * A step wants something to leave the app.
+     *
+     * Reported rather than done here for the reason written on [Handoff]: the
+     * runner has no activity behind it, and starting one from the background is
+     * refused. The caller decides between firing it now and parking it in a
+     * notification.
+     */
+    fun onHandoff(handoff: Handoff)
 }
 
 /**
@@ -490,6 +501,45 @@ class WorkflowRunner @Inject constructor(
                                 kept.path != null -> "Kept ${File(kept.path!!).name}."
                                 else -> "Kept."
                             },
+                        ),
+                    )
+                }
+
+                /*
+                 * Send — which stages, describes, and stops.
+                 *
+                 * Nothing here starts an activity. A run holds no activity and
+                 * an app in the background is refused one, so a `startActivity`
+                 * from this coroutine would be dropped with the step already
+                 * reported done — a result that never arrives and nothing in
+                 * the log to say why. What leaves this method is a description;
+                 * see Handoff for who acts on it.
+                 */
+                NodeKind.Send -> {
+                    val value = resolve(node, "value", outputs, graph)
+                        ?: throw IllegalStateException("Nothing was given to this step to send.")
+                    val subject = resolve(node, "subject", outputs, graph)?.asText
+                        ?: WorkflowTemplate.render(node.params.string("subject")) { ref ->
+                            lookup(outputs, ref)
+                        }
+                    val target = HandoffTarget.of(node.params.string("target"))
+                    // Text goes as text and not as a file it would have to be
+                    // written to first: a mail composer handed a .txt shows an
+                    // attachment where the body should be.
+                    val export = if (value.type == PortType.TEXT || value.path == null) {
+                        null
+                    } else {
+                        stageForSending(value, node, passLabel)
+                    }
+                    reporter.onHandoff(
+                        Handoff(
+                            nodeId = node.id,
+                            export = export,
+                            text = if (export == null) value.asText else "",
+                            subject = subject,
+                            target = target,
+                            packageName = node.params.string("package").takeIf { it.isNotBlank() },
+                            label = node.params.string("appLabel"),
                         ),
                     )
                 }
@@ -950,12 +1000,39 @@ class WorkflowRunner @Inject constructor(
                     )
                 }
             }
-            PortType.FILE ->
+            // A slot type, never a value type — see PortType.ANY. Kept as an
+            // arm rather than an else so that adding a real port type later
+            // still fails to compile here, which is the point of the when.
+            PortType.FILE, PortType.ANY ->
                 PortValue.file(
                     PortType.FILE,
                     copyInto(storage.galleryDir(), value.path.orEmpty(), 0),
                 )
         }
+    }
+
+    /**
+     * Copy what a Send step is sending into the one folder a URI can be made of.
+     *
+     * A run writes into `workflows/<runId>/`, which the file provider knows
+     * nothing about — asking it for a URI there throws, and it would throw
+     * inside a step that had already succeeded. The exports folder is declared
+     * in `file_paths.xml` and is where every other outbound artifact in this app
+     * is staged, so this is the same route the Library's share button takes.
+     */
+    private fun stageForSending(value: PortValue, node: NodeRecord, passLabel: String): Export {
+        val source = File(value.path ?: error("There is no file to send."))
+        val extension = source.extension.ifBlank { "bin" }
+        val name = "workflow_${System.currentTimeMillis()}$passLabel.$extension"
+        val target = File(storage.exportsDir(), name)
+        source.copyTo(target, overwrite = true)
+        return Export(
+            staged = target,
+            suggestedName = node.label.ifBlank { name }.let {
+                if (it.endsWith(".$extension")) it else "$it.$extension"
+            },
+            mime = Export.mimeFor(name),
+        )
     }
 
     /**
@@ -1093,6 +1170,13 @@ class WorkflowRunner @Inject constructor(
         const val MAX_REPEATS = 32
 
         /** Editor-only keys, kept out of what reaches an engine. */
-        val BOOKKEEPING = setOf("model", "shape", "portType", "times", "by", "separator", "template", "pattern", "condition", "mode", "tool", "script", "timeout_ms")
+        val BOOKKEEPING = setOf(
+            "model", "shape", "portType", "times", "by", "separator", "template",
+            "pattern", "condition", "mode", "tool", "script", "timeout_ms",
+            // Trigger and hand-off bookkeeping. None of these is a runtime
+            // parameter, and passing them through would have every run report a
+            // handful of rejected keys nobody can do anything about.
+            "from", "target", "package", "appLabel", "subject",
+        )
     }
 }

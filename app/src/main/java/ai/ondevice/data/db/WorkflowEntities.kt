@@ -66,6 +66,20 @@ interface WorkflowDao {
     @Query("SELECT * FROM workflows WHERE id = :id")
     suspend fun get(id: String): WorkflowEntity?
 
+    /**
+     * Most recently used first, for the share-sheet rows.
+     *
+     * Ordered by the last run rather than the last edit: which workflows belong
+     * in a share sheet is a question about what somebody actually reaches for,
+     * and `lastRunAt` already answers it — `touch` is called at the end of every
+     * run. A workflow never run falls back to when it was written.
+     */
+    @Query(
+        "SELECT * FROM workflows ORDER BY " +
+            "CASE WHEN lastRunAt IS NULL THEN updatedAt ELSE lastRunAt END DESC LIMIT :limit",
+    )
+    suspend fun mostRecent(limit: Int): List<WorkflowEntity>
+
     @Upsert
     suspend fun upsert(workflow: WorkflowEntity)
 

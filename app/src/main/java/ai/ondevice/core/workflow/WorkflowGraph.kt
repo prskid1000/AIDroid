@@ -122,17 +122,31 @@ enum class PortType(val label: String) {
      * kind this app needs.
      */
     LIST("List"),
+
+    /**
+     * A slot that takes whatever it is given. **Never the type of a value.**
+     *
+     * The two sinks — Keep and Send — genuinely accept anything, and there was
+     * no way to say so. They declared `FILE`, and since text does not satisfy
+     * `FILE`, the editor's source picker offered nothing at all for them: the
+     * step whose whole purpose is to keep a model's answer could not be bound
+     * to one. Widening `FILE` to swallow text instead would have been worse —
+     * every step wanting a file on disk would start accepting prose.
+     */
+    ANY("Anything"),
     ;
 
     /**
      * Whether a value of this type can be handed to a slot wanting [slot].
      *
-     * One rule, in one direction: the three media types are all files, and
-     * nothing is a media type but itself. A lattice with coercions in every
-     * direction is how a graph comes to run and produce nonsense.
+     * One rule per direction: the three media types are all files, nothing is a
+     * media type but itself, and a sink marked [ANY] takes the lot. A lattice
+     * with coercions in every direction is how a graph comes to run and produce
+     * nonsense.
      */
     fun satisfies(slot: PortType): Boolean = when {
         this == slot -> true
+        slot == ANY -> true
         slot == FILE -> this in setOf(IMAGE, AUDIO, CLIP)
         else -> false
     }

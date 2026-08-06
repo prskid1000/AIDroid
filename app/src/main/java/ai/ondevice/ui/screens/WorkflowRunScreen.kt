@@ -209,6 +209,37 @@ fun WorkflowRunScreen(
                 }
             }
 
+            /*
+             * Results that finished while nobody was looking.
+             *
+             * A Send step cannot open a share sheet from the background —
+             * Android refuses the activity start — so it posts a notification
+             * and waits. Listed here as well, because the notification
+             * permission is optional in this app and is asked for exactly once:
+             * without the list, saying no to notifications would silently lose
+             * every result a Send step ever made.
+             */
+            if (state.handoffs.isNotEmpty()) {
+                SectionKicker("Waiting to be sent", Modifier.padding(top = 18.dp, bottom = 6.dp))
+                state.handoffs.forEach { handoff ->
+                    NCard(Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+                        Text(handoff.describe, style = NocturneType.CardTitleSm)
+                        NHelp(
+                            "The run finished while the app was in the background, and Android " +
+                                "does not let an app that is not on screen open another one.",
+                            Modifier.padding(top = 4.dp),
+                        )
+                        NButton(
+                            "Send it now",
+                            onClick = { viewModel.deliver(handoff) },
+                            style = NButtonStyle.Secondary,
+                            block = true,
+                            modifier = Modifier.padding(top = 10.dp),
+                        )
+                    }
+                }
+            }
+
             (state.liveTrace)?.let { trace ->
                 var expanded by rememberSaveable { mutableStateOf(false) }
                 ResourceBlock(

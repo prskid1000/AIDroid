@@ -112,5 +112,8 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_DESTINATION = "destination"
         const val DEST_DOWNLOADS = "downloads"
+
+        /** Where a share from another app sends you, once its run has started. */
+        const val DEST_WORKFLOW_RUN = "workflow-run"
     }
 }

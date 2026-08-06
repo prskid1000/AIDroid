@@ -22,8 +22,8 @@ android {
         // versionCode is not higher than the installed one, and the only way
         // past that refusal is an uninstall — which takes the model files and
         // the database with it.
-        versionCode = 17
-        versionName = "1.8.0"
+        versionCode = 18
+        versionName = "1.9.0"
 
         // SPEC 2.2 — arm64 is the only shipping ABI; armeabi-v7a would double
         // the APK for devices that could never load these models anyway.
@@ -73,7 +73,30 @@ android {
                 // so this only ever showed up in the debug builds we measure on.
                 cFlags += listOf("-O3", "-DNDEBUG", "-ffunction-sections", "-fdata-sections")
 
-                arguments += listOf("-DANDROID_STL=c++_shared")
+                /*
+                 * 16 kB pages, which every one of these libraries was missing.
+                 *
+                 * Android 15 introduced devices whose kernel pages are 16 kB
+                 * rather than 4 kB, and a shared object whose LOAD segments are
+                 * aligned to 4 kB cannot be mapped on one. Since 1 November
+                 * 2025 Google Play refuses an update that uses native code and
+                 * targets Android 15 or above unless it is 16 kB compatible —
+                 * this app targets 35 and ships six of its own libraries, and
+                 * `llvm-readelf -l` reported `LOAD align 0x1000` on all six.
+                 *
+                 * NDK r28 aligns to 16 kB by default; r27, which is what is
+                 * installed here, supports it but does not default to it. So
+                 * the flag is passed explicitly rather than the toolchain
+                 * pinned, which keeps this working either way — on r28 it
+                 * restates the default, and on r27 it supplies it.
+                 *
+                 * It costs padding in the file and nothing at runtime, and the
+                 * same binary still maps on a 4 kB device.
+                 */
+                arguments += listOf(
+                    "-DANDROID_STL=c++_shared",
+                    "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384,-z,common-page-size=16384",
+                )
             }
         }
     }

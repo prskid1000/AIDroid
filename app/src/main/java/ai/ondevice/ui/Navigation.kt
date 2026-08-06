@@ -162,6 +162,22 @@ private val RESUMABLE = setOf(
     Routes.WORKFLOW, Routes.LIBRARY, Routes.SETTINGS,
 )
 
+/**
+ * Where a destination named from outside the NavHost actually goes.
+ *
+ * One table rather than a comparison at each of the two places that ask, which
+ * is how the second one came to be wrong: a share started its run correctly and
+ * then landed on Chat, because the string it passed was not one the router
+ * knew and the fallback is Chat. An unknown name still falls back — a stale
+ * notification from an older build must not crash — but a known one now has to
+ * be added in exactly one place.
+ */
+private fun routeFor(destination: String?): String? = when (destination) {
+    ai.ondevice.MainActivity.DEST_DOWNLOADS -> Routes.DOWNLOADS
+    ai.ondevice.MainActivity.DEST_WORKFLOW_RUN -> Routes.WORKFLOW_RUN
+    else -> null
+}
+
 @Composable
 fun OnDeviceApp(
     modifier: Modifier = Modifier,
@@ -194,18 +210,22 @@ fun OnDeviceApp(
     // singleTask, so the running instance is reused and the NavHost was built
     // with its start route minutes ago. Without this the download notification
     // would open the app and land wherever it was left.
+    //
+    // Read through routeFor rather than compared inline, because there are two
+    // of these now and the second one was added by writing a string the router
+    // did not know: a share started the run correctly and then dropped the
+    // person on Chat, where nothing said a run was happening at all.
     LaunchedEffect(initialDestination) {
-        if (initialDestination == ai.ondevice.MainActivity.DEST_DOWNLOADS &&
-            currentRoute != null && currentRoute != Routes.DOWNLOADS
-        ) {
-            navController.navigate(Routes.DOWNLOADS)
+        val asked = routeFor(initialDestination)
+        if (asked != null && currentRoute != null && currentRoute != asked) {
+            navController.navigate(asked)
         }
     }
 
     NavHost(
         navController = navController,
         startDestination = when {
-            initialDestination == ai.ondevice.MainActivity.DEST_DOWNLOADS -> Routes.DOWNLOADS
+            routeFor(initialDestination) != null -> routeFor(initialDestination)!!
             // A notification's destination outranks where you happened to be.
             initialDestination != null -> Routes.CHAT
             // Checked on the way in as well as on the way out. A value stored

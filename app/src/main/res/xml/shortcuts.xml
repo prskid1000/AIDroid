@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Which share sheets this app's workflows can appear in.
+
+    One category per share-target, deliberately. The rule matching a shortcut's
+    category set against a target's is not clearly documented — intersection or
+    contains-all — and with exactly one category on each target the answer does
+    not matter. The whole set goes on the shortcut instead, computed in Kotlin by
+    Triggers.categoriesFor from the lattice PortType.satisfies already owns, so
+    the type rules are stated once rather than restated here.
+
+    A workflow appears in a sheet only if it has an Input marked "from another
+    app" whose type can take what was shared. That derivation is the only switch;
+    there is nothing to turn on.
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Selected text, a link, a caption — and .txt, .md, .srt read as prose. -->
+    <share-target android:targetClass="ai.ondevice.workflow.TriggerActivity">
+        <data android:mimeType="text/*" />
+        <category android:name="ai.ondevice.category.TEXT" />
+    </share-target>
+
+    <share-target android:targetClass="ai.ondevice.workflow.TriggerActivity">
+        <data android:mimeType="image/*" />
+        <category android:name="ai.ondevice.category.IMAGE" />
+    </share-target>
+
+    <share-target android:targetClass="ai.ondevice.workflow.TriggerActivity">
+        <data android:mimeType="audio/*" />
+        <category android:name="ai.ondevice.category.AUDIO" />
+    </share-target>
+
+    <!--
+        Everything else — a video, a PDF, a document. It is a FILE and not a
+        CLIP: a clip in this app is a directory of frames with a frame rate, and
+        an mp4 somebody shared is neither.
+    -->
+    <share-target android:targetClass="ai.ondevice.workflow.TriggerActivity">
+        <data android:mimeType="*/*" />
+        <category android:name="ai.ondevice.category.ANY" />
+    </share-target>
+</shortcuts>

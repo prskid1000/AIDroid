@@ -8,17 +8,8 @@ import ai.ondevice.core.workflow.WorkflowGraph
 import ai.ondevice.data.db.ModelEntity
 import ai.ondevice.data.db.OnDeviceDatabase
 import ai.ondevice.data.db.WorkflowEntity
-import ai.ondevice.data.db.WorkflowRunEntity
-import ai.ondevice.engine.InferenceService
-import ai.ondevice.engine.record
-import ai.ondevice.engine.workflow.NodeProgress
-import ai.ondevice.engine.workflow.NodeRunState
 import ai.ondevice.engine.workflow.ResidencyPlanner
-import ai.ondevice.engine.workflow.RunReporter
-import ai.ondevice.engine.workflow.WorkflowRunner
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
@@ -30,12 +21,10 @@ import javax.inject.Inject
 
 @HiltViewModel
 class WorkflowViewModel @Inject constructor(
-    @dagger.hilt.android.qualifiers.ApplicationContext
-    private val context: android.content.Context,
     private val session: WorkflowSession,
     private val db: OnDeviceDatabase,
-    private val runner: WorkflowRunner,
-    private val recorder: ai.ondevice.engine.ResourceRecorder,
+    private val launcher: ai.ondevice.engine.workflow.WorkflowLauncher,
+    private val shortcuts: ai.ondevice.workflow.ShortcutPublisher,
     private val toolProviders: ai.ondevice.tools.ToolProviderFactory,
     private val prefs: ai.ondevice.data.prefs.AppPrefs,
 ) : ViewModel() {
@@ -43,10 +32,6 @@ class WorkflowViewModel @Inject constructor(
     private val _state get() = session.state
     val state: StateFlow<WorkflowState> = session.state.asStateFlow()
     private val runScope get() = session.scope
-
-    private var runJob: Job?
-        get() = session.runJob
-        set(value) { session.runJob = value }
 
     init {
         if (session.claimObservers()) attachObservers()
@@ -200,6 +185,10 @@ class WorkflowViewModel @Inject constructor(
         val graph = block(_state.value.graph)
         _state.value = _state.value.copy(graph = graph)
         edit { it.copy(graphJson = graph.encode()) }
+        // Which share sheets this workflow belongs in is derived from the graph,
+        // so any edit can change it — adding the Input that makes it a share
+        // target, or deleting the one that made it one.
+        runScope.launch { shortcuts.republish() }
     }
 
     private fun edit(block: (WorkflowEntity) -> WorkflowEntity) {
@@ -216,6 +205,10 @@ class WorkflowViewModel @Inject constructor(
             if (_state.value.editing?.id == workflowId) {
                 _state.value = _state.value.copy(editing = null, graph = WorkflowGraph())
             }
+            // Long-lived shortcuts survive being unpublished, so a deleted
+            // workflow would otherwise keep its row in the share sheet and
+            // start a run against a graph that is no longer there.
+            shortcuts.forget(workflowId)
         }
     }
 
@@ -253,118 +246,38 @@ class WorkflowViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Run what is open in the editor.
+     *
+     * The body of this used to live here and started `val workflow =
+     * _state.value.editing ?: return`, which made the editor the only door into
+     * a run. It is now one caller of [WorkflowLauncher] among three — the other
+     * two being a share from another app and a launcher shortcut, neither of
+     * which has an editor or a screen behind it.
+     */
     fun run() {
-        if (_state.value.running) return
-        val workflow = _state.value.editing ?: return
-        val graph = _state.value.graph
-        val runId = UUID.randomUUID().toString()
-
-        _state.value = _state.value.copy(
-            running = true,
-            cancelling = false,
-            runId = runId,
-            nodeStates = emptyMap(),
-            error = null,
-            errorHint = null,
-            finishedAt = null,
-        )
-
-        runJob = runScope.launch {
-            // One wake lock for the whole graph. The bracket rather than the
-            // pair, because the release has to happen on every way out.
-            InferenceService.holdingWakeLock(context) {
-                val recording = recorder.start(runScope)
-                val live = runScope.launch {
-                    recording.live.collect { trace ->
-                        _state.value = _state.value.copy(liveTrace = trace)
-                    }
-                }
-                db.workflows().upsertRun(
-                    WorkflowRunEntity(
-                        id = runId,
-                        workflowId = workflow.id,
-                        graphJson = graph.encode(),
-                        state = "RUNNING",
-                        startedAt = System.currentTimeMillis(),
-                    ),
-                )
-                try {
-                    val outcome = runner.run(runId, graph, reporter())
-                    val failure = outcome.exceptionOrNull()
-                    _state.value = _state.value.copy(
-                        error = failure?.message,
-                        errorHint = failure?.let { "The steps before it kept what they made." },
-                        finishedAt = System.currentTimeMillis(),
-                    )
-                    db.workflows().upsertRun(
-                        WorkflowRunEntity(
-                            id = runId,
-                            workflowId = workflow.id,
-                            graphJson = graph.encode(),
-                            state = if (failure == null) "DONE" else "FAILED",
-                            startedAt = System.currentTimeMillis(),
-                            finishedAt = System.currentTimeMillis(),
-                            error = failure?.message,
-                        ),
-                    )
-                    db.workflows().touch(workflow.id, System.currentTimeMillis())
-                } finally {
-                    live.cancel()
-                    recording.stop()
-                    _state.value = _state.value.copy(
-                        running = false,
-                        cancelling = false,
-                        activeNodeId = null,
-                        choosingNodeId = null,
-                    )
-                }
-            }
-        }
+        _state.value.editing?.let { launcher.launch(it.id) }
     }
 
-    fun cancel() {
-        if (!_state.value.running) return
-        _state.value = _state.value.copy(cancelling = true)
-        // Reach the native call first: cancelling the job does not.
-        runner.activeCancel?.invoke()
-        session.pending?.complete(null)
-        runJob?.cancel()
-    }
+    fun cancel() = launcher.cancel()
 
     /** Answer a Pick step. */
-    fun choose(path: String?) {
-        session.pending?.complete(path)
-        session.pending = null
-        _state.value = _state.value.copy(choosingNodeId = null, choices = emptyList())
-    }
+    fun choose(path: String?) = launcher.choose(path)
 
-    private fun reporter() = object : RunReporter {
-        override fun onNode(nodeId: String, progress: NodeProgress) {
-            _state.value = _state.value.copy(
-                nodeStates = _state.value.nodeStates + (nodeId to progress),
-                activeNodeId = if (
-                    progress.state == NodeRunState.RUNNING || progress.state == NodeRunState.LOADING
-                ) {
-                    nodeId
-                } else {
-                    _state.value.activeNodeId
-                },
-            )
-        }
+    /** Send a result that was waiting for the app to come back. */
+    fun deliver(handoff: ai.ondevice.engine.workflow.Handoff) = launcher.deliver(handoff)
 
-        override fun onLoading(what: List<String>, stage: String?) {
-            _state.value = _state.value.copy(loadingWhat = what)
-        }
-
-        override fun onUnload(because: String) {
-            _state.value = _state.value.copy(unloadReason = because)
-        }
-
-        override suspend fun awaitChoice(nodeId: String, options: List<String>): String? {
-            val deferred = CompletableDeferred<String?>()
-            session.pending = deferred
-            _state.value = _state.value.copy(choosingNodeId = nodeId, choices = options)
-            return deferred.await()
-        }
+    /**
+     * Whether this workflow can be started by another app, and from where.
+     *
+     * Off is not stored: a workflow is reachable from outside exactly when it
+     * has an Input marked *from another app*, because that is the only thing
+     * that can receive what was shared. Turning it on means adding one; turning
+     * it off means the Input goes back to being typed.
+     */
+    fun setInputSource(nodeId: String, from: String) {
+        setParam(nodeId, ai.ondevice.core.workflow.Triggers.PARAM_FROM, from)
+        // Republish, because what appears in a share sheet is derived from this.
+        runScope.launch { shortcuts.republish() }
     }
 }

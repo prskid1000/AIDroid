@@ -72,6 +72,27 @@ data class WorkflowState(
     /** Set when a step is waiting for somebody to choose. */
     val choosingNodeId: String? = null,
     val choices: List<String> = emptyList(),
+
+    /**
+     * Which app asked for this run, when it was not started from the editor.
+     *
+     * A label, never a permission. `getReferrer()` is set by the caller, and a
+     * caller willing to lie about it can — so it belongs on screen and nowhere
+     * near a trust decision.
+     */
+    val startedBy: String? = null,
+
+    /**
+     * Results that want to leave the app and could not yet.
+     *
+     * A Send step that finishes while the app is in the background cannot open
+     * anything — the platform refuses the activity start — so it becomes a
+     * notification and lands here. Listed as well as notified because the
+     * notification permission is optional in this app: without the list, saying
+     * no to notifications once would silently lose every result a Send step
+     * ever produced.
+     */
+    val handoffs: List<ai.ondevice.engine.workflow.Handoff> = emptyList(),
     val error: String? = null,
     val errorHint: String? = null,
     val finishedAt: Long? = null,

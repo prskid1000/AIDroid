@@ -3,4 +3,7 @@
     <string name="app_name">On-Device AI</string>
     <string name="download_channel_name">Model downloads</string>
     <string name="inference_channel_name">Inference</string>
+    <string name="handoff_channel_name">Results waiting to be sent</string>
+    <!-- What another app's share sheet calls this app. -->
+    <string name="trigger_label">Run a workflow</string>
 </resources>

@@ -215,6 +215,17 @@ fun WorkflowEditScreen(
     }
 }
 
+/** The default for an Input's source: what every Input was before triggers existed. */
+private const val TRIGGER_TYPED = ai.ondevice.core.workflow.Triggers.FROM_TYPED
+
+/** What sharing this kind of thing is called, in the sentence under the switch. */
+private fun sharedBlurb(portType: String): String = when (portType) {
+    PortType.IMAGE.name -> "a picture"
+    PortType.AUDIO.name -> "a recording"
+    PortType.FILE.name -> "a file"
+    else -> "text, or a text file"
+}
+
 /**
  * Everything that would stop this graph part-way, found before it starts.
  *
@@ -413,6 +424,44 @@ private fun StepSettings(
                     )
                 }
             }
+
+            /*
+             * Where the value comes from — and the switch that makes a workflow
+             * reachable from every other app on the phone.
+             *
+             * There is no separate "publish this" setting, because there is
+             * nothing a second switch could mean. A workflow can be handed
+             * something from outside exactly when it has a step waiting to
+             * receive it, and which share sheets it turns up in follows from
+             * what that step takes. Adding the step is the whole act.
+             */
+            if (kind == NodeKind.Input) {
+                val from = value(ai.ondevice.core.workflow.Triggers.PARAM_FROM, TRIGGER_TYPED)
+                SectionKicker("Where from", Modifier.padding(top = 14.dp, bottom = 4.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(
+                        TRIGGER_TYPED to "Typed here",
+                        ai.ondevice.core.workflow.Triggers.FROM_SHARED to "From another app",
+                    ).forEach { (key, label) ->
+                        NTag(
+                            label,
+                            style = if (from == key) NTagStyle.Accent else NTagStyle.Outline,
+                            modifier = Modifier.nClickableFlat {
+                                viewModel.setInputSource(node.id, key)
+                            },
+                        )
+                    }
+                }
+                if (from == ai.ondevice.core.workflow.Triggers.FROM_SHARED) {
+                    NHelp(
+                        "This workflow now appears when you share " +
+                            "${sharedBlurb(value("portType", "TEXT"))} from any app. What is typed " +
+                            "below is only used when you run it from here.",
+                        Modifier.padding(top = 6.dp),
+                    )
+                }
+            }
+
             if (value("portType", "TEXT") == PortType.TEXT.name) {
                 NTextArea(
                     value = value("text"),
@@ -427,6 +476,78 @@ private fun StepSettings(
                     onValueChange = { viewModel.setParam(node.id, "path", it) },
                     placeholder = "Path to the file",
                     modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        }
+
+        /*
+         * Where a result goes, and the sentence about background launches.
+         *
+         * Said at the point of choosing rather than in a release note, because
+         * the alternative is a run that reports success while nothing arrives —
+         * which is exactly the silent failure SPEC 1.2 exists to forbid.
+         */
+        NodeKind.Send -> {
+            SectionKicker("Send it to", Modifier.padding(top = 12.dp, bottom = 4.dp))
+            val target = ai.ondevice.engine.workflow.HandoffTarget.of(value("target"))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                ai.ondevice.engine.workflow.HandoffTarget.entries.forEach { option ->
+                    NTag(
+                        option.label,
+                        style = if (target == option) NTagStyle.Accent else NTagStyle.Outline,
+                        modifier = Modifier.nClickableFlat {
+                            viewModel.setParam(node.id, "target", option.name)
+                        },
+                    )
+                }
+            }
+
+            if (target == ai.ondevice.engine.workflow.HandoffTarget.APP) {
+                NInput(
+                    value = value("subject"),
+                    onValueChange = { viewModel.setParam(node.id, "subject", it) },
+                    placeholder = "Subject or title",
+                    modifier = Modifier.padding(top = 10.dp),
+                )
+                NHelp(
+                    "Leave the app unset and you get the share sheet, which is the reliable " +
+                        "choice. Naming one skips it.",
+                    Modifier.padding(top = 6.dp),
+                )
+                NInput(
+                    value = value("package"),
+                    onValueChange = { viewModel.setParam(node.id, "package", it) },
+                    placeholder = "com.google.android.gm",
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                NCard(
+                    Modifier.fillMaxWidth().padding(top = 12.dp),
+                    ring = NocturneColors.Accent800,
+                ) {
+                    Text(
+                        "This needs one tap, and the app to be open",
+                        style = NocturneType.CardTitleSm,
+                        color = NocturneColors.Accent200,
+                    )
+                    NHelp(
+                        "No intent on Android sends a mail or files a note — handing text to " +
+                            "Gmail opens its composer with everything filled in, and you tap " +
+                            "send. And if this app is not on screen when the run finishes, " +
+                            "Android will not let it open anything: the result waits in a " +
+                            "notification and on the run screen instead.",
+                        Modifier.padding(top = 4.dp),
+                    )
+                    NHelp(
+                        "For delivery with nobody present, use a Tool step against a connected " +
+                            "server — that is an API call rather than a share.",
+                        Modifier.padding(top = 6.dp),
+                    )
+                }
+            } else {
+                NHelp(
+                    "The one destination that needs nobody and works whether the app is open " +
+                        "or not.",
+                    Modifier.padding(top = 8.dp),
                 )
             }
         }
