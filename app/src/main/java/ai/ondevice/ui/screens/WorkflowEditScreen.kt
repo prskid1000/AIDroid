@@ -126,7 +126,16 @@ fun WorkflowEditScreen(
                 modifier = Modifier.padding(top = 12.dp),
             )
 
-            ScheduleCard(viewModel)
+            // The schedule is passed in rather than read inside, because a
+            // composable whose only argument is the view model has arguments
+            // that never change — so Compose skips it, and the card sat frozen
+            // while every tap on it wrote to the database.
+            ScheduleCard(
+                schedule = remember(state.editing?.scheduleJson) {
+                    ai.ondevice.core.workflow.Schedule.decode(state.editing?.scheduleJson)
+                },
+                viewModel = viewModel,
+            )
 
             SectionKicker("Steps", Modifier.padding(top = 20.dp, bottom = 8.dp))
 
@@ -227,9 +236,11 @@ fun WorkflowEditScreen(
  * a tap. Both are useful; pretending the second is the first is not.
  */
 @Composable
-private fun ScheduleCard(viewModel: WorkflowViewModel) {
+private fun ScheduleCard(
+    schedule: ai.ondevice.core.workflow.Schedule,
+    viewModel: WorkflowViewModel,
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val schedule = viewModel.schedule()
     val unattended = viewModel.canRunUnattended()
 
     SectionKicker("Schedule", Modifier.padding(top = 20.dp, bottom = 8.dp))
@@ -278,6 +289,36 @@ private fun ScheduleCard(viewModel: WorkflowViewModel) {
                 },
                 placeholder = "07:00",
             )
+
+            /*
+             * A day, for a one-off.
+             *
+             * Optional on purpose: left empty, "once at eight" means the next
+             * eight o'clock there is, which is what somebody setting a reminder
+             * for tonight means. A date makes it a specific one, and a date that
+             * has gone never fires rather than firing late — a once-only run
+             * that arrives a week after the thing it was for is worse than one
+             * that admits it was missed.
+             */
+            if (schedule.kind == ai.ondevice.core.workflow.Schedule.ONCE) {
+                SectionKicker("On", Modifier.padding(top = 12.dp, bottom = 4.dp))
+                NInput(
+                    value = schedule.onDate.orEmpty(),
+                    onValueChange = { typed ->
+                        viewModel.setSchedule(
+                            schedule.copy(onDate = typed.trim().takeIf { it.isNotBlank() }),
+                        )
+                    },
+                    placeholder = "2026-08-09 — or leave empty for the next one",
+                )
+                if (schedule.onDate != null && schedule.nextOccurrence(java.time.ZonedDateTime.now()) == null) {
+                    NHelp(
+                        "That date has gone, so this will not fire. Clear it to mean the next " +
+                            "time the clock reads that, or pick a day still ahead.",
+                        Modifier.padding(top = 4.dp),
+                    )
+                }
+            }
 
             if (schedule.kind == ai.ondevice.core.workflow.Schedule.WEEKLY) {
                 SectionKicker("On", Modifier.padding(top = 12.dp, bottom = 4.dp))
