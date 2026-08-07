@@ -3,7 +3,10 @@ package ai.ondevice.ui
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -155,7 +158,9 @@ val BottomDestinations = listOf(
  *
  * Video earns its place despite being pushed: it is a mode of the Visuals tab
  * rather than a detail screen, and coming back to Stills after making a clip
- * is the thing this was asked to stop doing.
+ * is the thing this was asked to stop doing. It is resumed *onto* Stills
+ * rather than as the root -- see the start destination below, which is where
+ * being in this set stops meaning "can be the bottom of the stack".
  */
 private val RESUMABLE = setOf(
     Routes.CHAT, Routes.IMAGE, Routes.VIDEO, Routes.VOICE,
@@ -222,6 +227,22 @@ fun OnDeviceApp(
         }
     }
 
+    // Resuming on Video is a push over Stills, not a start destination.
+    //
+    // Once, so the toggle keeps working afterwards: keyed on the route it
+    // would fire again the moment Stills popped it, putting Video straight
+    // back and turning the dead toggle into a bouncing one. The flag is
+    // saved because a configuration change re-runs this effect over a back
+    // stack that already has Video on it -- and pushing a second copy makes
+    // Stills need two taps, which reads as the same bug.
+    var videoResumed by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (!videoResumed && initialDestination == null && startRoute == Routes.VIDEO) {
+            videoResumed = true
+            navController.navigate(Routes.VIDEO) { launchSingleTop = true }
+        }
+    }
+
     NavHost(
         navController = navController,
         startDestination = when {
@@ -232,7 +253,18 @@ fun OnDeviceApp(
             // by an older build -- or any route that stops being resumable
             // later -- would otherwise become the root of the back stack, and
             // Back from the root leaves the app rather than going back.
-            else -> startRoute?.takeIf { it in RESUMABLE } ?: Routes.CHAT
+            else -> when (val saved = startRoute?.takeIf { it in RESUMABLE }) {
+                // Video is resumable but not a root. Made the start
+                // destination it is the bottom of the stack with no Stills
+                // beneath it, and the Stills toggle is a popBackStack -- which
+                // found nothing to pop and returned false without a word. So
+                // reopening the app after any clip landed on Video with its
+                // top-left toggle dead: no way back to the image screen at all.
+                // Start on Stills instead and push Video over it below.
+                Routes.VIDEO -> Routes.IMAGE
+                null -> Routes.CHAT
+                else -> saved
+            }
         },
         route = Routes.GRAPH,
         modifier = modifier,
@@ -283,7 +315,19 @@ fun OnDeviceApp(
             VideoScreen(
                 currentRoute = currentRoute,
                 onNavigate = { navController.navigateToRoot(it) },
-                onBack = { navController.popBackStack() },
+                // The Stills toggle. A pop rather than a navigate, so the
+                // image screen comes back as it was left -- but named, and
+                // with somewhere to go when it is not there. A bare
+                // popBackStack() returns false and does nothing when Video is
+                // the bottom of the stack, which is a toolbar button that
+                // looks alive and is not.
+                onBack = {
+                    if (!navController.popBackStack(Routes.IMAGE, inclusive = false)) {
+                        navController.navigate(Routes.IMAGE) {
+                            popUpTo(Routes.VIDEO) { inclusive = true }
+                        }
+                    }
+                },
                 onAddModel = { navController.navigate(Routes.ADD_MODEL) },
                 onOpenAdvanced = { modelId ->
                     navController.navigate(
