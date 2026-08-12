@@ -40,10 +40,10 @@ class EngineManager(
         if (!registry.contractSatisfied(descriptor)) return null
         return engines.getOrPut(runtimeId) {
             when (runtimeId) {
-                RuntimeRegistry.LLAMA -> LlamaEngine(descriptor)
+                RuntimeRegistry.LLAMA -> LlamaEngine(context, descriptor)
                 // The remaining runtimes are not text engines and are driven
                 // through their own managers; nothing asks this for them.
-                else -> LlamaEngine(descriptor)
+                else -> LlamaEngine(context, descriptor)
             }
         }
     }

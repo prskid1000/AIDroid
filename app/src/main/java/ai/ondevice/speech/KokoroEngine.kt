@@ -21,7 +21,10 @@ import java.nio.FloatBuffer
 import java.nio.LongBuffer
 
 /** Kokoro-82M, actually running. */
-class KokoroEngine(private val phonemizer: Phonemizer) {
+class KokoroEngine(
+    private val context: android.content.Context,
+    private val phonemizer: Phonemizer,
+) {
 
     private val mutex = Mutex()
     private val json = Json { ignoreUnknownKeys = true }
@@ -126,24 +129,38 @@ class KokoroEngine(private val phonemizer: Phonemizer) {
                 val pieces = mutableListOf<FloatArray>()
                 val phonemesUsed = StringBuilder()
 
-                mutex.withLock {
-                    chunks.forEach { chunk ->
-                        currentCoroutineContext().ensureActive()
-                        if (phonemesUsed.isNotEmpty()) phonemesUsed.append(' ')
-                        phonemesUsed.append(chunk.phonemes)
-                        // Per chunk, not per request: the style row is chosen by the length of the tokens about to be fed in, and the chunks deliberately differ in length.
-                        val style = styleFor(request, chunk.tokens.size)
-                        val piece = runGraph(active, names, chunk.tokens, style, request.speed)
-                        checkFinite(piece)
-                        val kept = if (request.trimSilence) trimSilence(piece) else piece
-                        // Every stage that can silently produce nothing, on one line.
-                        Log.i(
-                            TAG,
-                            "chunk phonemes=${chunk.phonemes.length} tokens=${chunk.tokens.size} " +
-                                "raw=${piece.size} kept=${kept.size} ${piece.signalSummary()}",
-                        )
-                        pieces += kept
+                // A chunk is one graph run, and the chunks deliberately differ in
+                // length, so the unit counted is the token rather than the chunk
+                // — a target set from one sentence would be wrong for the next
+                // one by however much longer it is. No carry-over key: the rate
+                // is per token, so a request with more than one chunk learns its
+                // own, and a single-chunk request is one graph run with nothing
+                // to steer anyway.
+                val hints = ai.ondevice.engine.CpuHints.open(context, TAG)
+                try {
+                    mutex.withLock {
+                        chunks.forEach { chunk ->
+                            currentCoroutineContext().ensureActive()
+                            if (phonemesUsed.isNotEmpty()) phonemesUsed.append(' ')
+                            phonemesUsed.append(chunk.phonemes)
+                            // Per chunk, not per request: the style row is chosen by the length of the tokens about to be fed in, and the chunks deliberately differ in length.
+                            val style = styleFor(request, chunk.tokens.size)
+                            val piece = hints.unit(chunk.tokens.size.toLong()) {
+                                runGraph(active, names, chunk.tokens, style, request.speed)
+                            }
+                            checkFinite(piece)
+                            val kept = if (request.trimSilence) trimSilence(piece) else piece
+                            // Every stage that can silently produce nothing, on one line.
+                            Log.i(
+                                TAG,
+                                "chunk phonemes=${chunk.phonemes.length} tokens=${chunk.tokens.size} " +
+                                    "raw=${piece.size} kept=${kept.size} ${piece.signalSummary()}",
+                            )
+                            pieces += kept
+                        }
                     }
+                } finally {
+                    hints.close()
                 }
 
                 val joined = amplify(join(pieces), request.volume)

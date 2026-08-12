@@ -30,6 +30,7 @@ import kotlinx.serialization.json.putJsonObject
 
 /** llama.cpp, for real. */
 class LlamaEngine(
+    private val context: android.content.Context,
     override val descriptor: RuntimeDescriptor,
 ) : InferenceEngine {
 
@@ -238,88 +239,102 @@ class LlamaEngine(
         var thinkingStarted = 0L
         var thinkingClosed = false
 
-        while (true) {
-            currentCoroutineContext().ensureActive()
-            val step = json.parseToJsonElement(LlamaBridge.nativeNextToken(handle)).jsonObject
+        // One decode is one unit. The JSON is parsed outside the timing because
+        // it is this class's own bookkeeping, not the model's work, and folding
+        // it in would inflate every reported duration by a constant.
+        //
+        // No carry-over key: a turn has as many units as it has tokens, so the
+        // rate is learned from the run itself and cannot be dragged in from a
+        // different model, a different context length or a different quant.
+        val hints = CpuHints.open(context, TAG)
+        try {
+            while (true) {
+                currentCoroutineContext().ensureActive()
+                val step = json.parseToJsonElement(hints.unit { LlamaBridge.nativeNextToken(handle) }).jsonObject
 
-            val reasoning = step.string("reasoningDelta").orEmpty()
-            if (reasoning.isNotEmpty()) {
-                if (thinkingStarted == 0L) thinkingStarted = System.currentTimeMillis()
-                thinkingTokens++
-                emit(GenerationEvent.ThinkingDelta(reasoning))
-            }
+                val reasoning = step.string("reasoningDelta").orEmpty()
+                if (reasoning.isNotEmpty()) {
+                    if (thinkingStarted == 0L) thinkingStarted = System.currentTimeMillis()
+                    thinkingTokens++
+                    emit(GenerationEvent.ThinkingDelta(reasoning))
+                }
 
-            val content = step.string("contentDelta").orEmpty()
-            if (content.isNotEmpty()) {
-                if (thinkingStarted != 0L && !thinkingClosed) {
-                    thinkingClosed = true
+                val content = step.string("contentDelta").orEmpty()
+                if (content.isNotEmpty()) {
+                    if (thinkingStarted != 0L && !thinkingClosed) {
+                        thinkingClosed = true
+                        emit(
+                            GenerationEvent.ThinkingDone(
+                                thinkingTokens,
+                                System.currentTimeMillis() - thinkingStarted,
+                            ),
+                        )
+                    }
+                    emit(GenerationEvent.Token(content, index))
+                    index++
+                }
+
+                if (index > 0 && index % 8 == 0 && content.isNotEmpty()) {
                     emit(
-                        GenerationEvent.ThinkingDone(
-                            thinkingTokens,
-                            System.currentTimeMillis() - thinkingStarted,
+                        GenerationEvent.Stats(
+                            tokensPerSecond = step.float("tokensPerSecond") ?: 0f,
+                            generatedTokens = step.int("generated") ?: index,
+                            contextUsed = step.int("contextUsed") ?: 0,
                         ),
                     )
                 }
-                emit(GenerationEvent.Token(content, index))
-                index++
-            }
 
-            if (index > 0 && index % 8 == 0 && content.isNotEmpty()) {
-                emit(
-                    GenerationEvent.Stats(
-                        tokensPerSecond = step.float("tokensPerSecond") ?: 0f,
-                        generatedTokens = step.int("generated") ?: index,
-                        contextUsed = step.int("contextUsed") ?: 0,
-                    ),
-                )
-            }
-
-            if (step.bool("done") == true) {
-                if (thinkingStarted != 0L && !thinkingClosed) {
+                if (step.bool("done") == true) {
+                    if (thinkingStarted != 0L && !thinkingClosed) {
+                        emit(
+                            GenerationEvent.ThinkingDone(
+                                thinkingTokens,
+                                System.currentTimeMillis() - thinkingStarted,
+                            ),
+                        )
+                    }
                     emit(
-                        GenerationEvent.ThinkingDone(
-                            thinkingTokens,
-                            System.currentTimeMillis() - thinkingStarted,
+                        GenerationEvent.Stats(
+                            tokensPerSecond = step.float("tokensPerSecond") ?: 0f,
+                            generatedTokens = step.int("generated") ?: index,
+                            contextUsed = step.int("contextUsed") ?: 0,
                         ),
                     )
-                }
-                emit(
-                    GenerationEvent.Stats(
-                        tokensPerSecond = step.float("tokensPerSecond") ?: 0f,
-                        generatedTokens = step.int("generated") ?: index,
-                        contextUsed = step.int("contextUsed") ?: 0,
-                    ),
-                )
-                step["toolCalls"]?.jsonArray?.forEach { call ->
-                    val obj = call.jsonObject
+                    step["toolCalls"]?.jsonArray?.forEach { call ->
+                        val obj = call.jsonObject
+                        emit(
+                            GenerationEvent.ToolCall(
+                                name = obj.string("name").orEmpty(),
+                                argumentsJson = obj.string("arguments").orEmpty(),
+                                id = obj.string("id").orEmpty(),
+                            ),
+                        )
+                    }
+                    val stopReason = runCatching {
+                        StopReason.valueOf(step.string("stopReason") ?: "EOS")
+                    }.getOrDefault(StopReason.EOS)
+                    android.util.Log.i(
+                        TAG,
+                        "generated tokens=${step.int("generated") ?: index} " +
+                            "at ${"%.1f".format(step.float("tokensPerSecond") ?: 0f)} t/s " +
+                            "stop=$stopReason context=${step.int("contextUsed") ?: 0}/" +
+                            "${loaded?.contextLength ?: 0} " +
+                            "thinking=$thinkingTokens toolCalls=${step["toolCalls"]?.jsonArray?.size ?: 0}",
+                    )
                     emit(
-                        GenerationEvent.ToolCall(
-                            name = obj.string("name").orEmpty(),
-                            argumentsJson = obj.string("arguments").orEmpty(),
-                            id = obj.string("id").orEmpty(),
+                        GenerationEvent.Done(
+                            stopReason = stopReason,
+                            generatedTokens = step.int("generated") ?: index,
+                            elapsedMillis = step.long("elapsedMillis") ?: 0L,
                         ),
                     )
+                    return@flow
                 }
-                val stopReason = runCatching {
-                    StopReason.valueOf(step.string("stopReason") ?: "EOS")
-                }.getOrDefault(StopReason.EOS)
-                android.util.Log.i(
-                    TAG,
-                    "generated tokens=${step.int("generated") ?: index} " +
-                        "at ${"%.1f".format(step.float("tokensPerSecond") ?: 0f)} t/s " +
-                        "stop=$stopReason context=${step.int("contextUsed") ?: 0}/" +
-                        "${loaded?.contextLength ?: 0} " +
-                        "thinking=$thinkingTokens toolCalls=${step["toolCalls"]?.jsonArray?.size ?: 0}",
-                )
-                emit(
-                    GenerationEvent.Done(
-                        stopReason = stopReason,
-                        generatedTokens = step.int("generated") ?: index,
-                        elapsedMillis = step.long("elapsedMillis") ?: 0L,
-                    ),
-                )
-                return@flow
             }
+        } finally {
+            // `return@flow` above leaves through here, and so does a cancelled
+            // collector, so this is the only place the session reliably closes.
+            hints.close()
         }
     }.flowOn(Dispatchers.Default).onCompletion {
         // Cancellation has to reach the native loop, not just stop collecting —

@@ -18,8 +18,16 @@ import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import java.nio.LongBuffer
 
-/** OmniVoice, the second voice. */
-class OmniVoiceEngine {
+/**
+ * OmniVoice, the second voice.
+ *
+ * The context is here only to open a [ai.ondevice.engine.CpuHints] session, and
+ * it is nullable because [buildSchedule] is arithmetic that a plain JUnit test
+ * exercises on the JVM, where there is no Context to hand. An engine built
+ * without one synthesises exactly as it did before and tells the platform
+ * nothing.
+ */
+class OmniVoiceEngine(private val context: android.content.Context? = null) {
 
     private val mutex = Mutex()
 
@@ -530,65 +538,79 @@ class OmniVoiceEngine {
         val unguided = FloatArray(AUDIO_VOCAB)
         val ranked = FloatArray(AUDIO_VOCAB)
 
-        for (step in 0 until steps) {
-            val take = schedule[step]
-            if (take <= 0) continue
-            currentCoroutineContext().ensureActive()
+        // One unmasking step is one unit: two forwards through the decoder
+        // when guidance is on and one when it is off, plus the confidence
+        // scoring over the whole grid that decides what the step commits.
+        // All of it is this thread's work and all of it happens once per
+        // step. `take` differs from step to step, but the cost is the
+        // forwards and those do not vary with it, so the unit is the step
+        // and not the slot.
+        val hints = ai.ondevice.engine.CpuHints.open(context, TAG)
+        try {
+            for (step in 0 until steps) {
+                val take = schedule[step]
+                if (take <= 0) continue
+                currentCoroutineContext().ensureActive()
 
-            for (cb in 0 until CODEBOOKS) tokens[cb].copyInto(condIds[cb], gridStart)
-            val conditional = forward(condIds, condAudio, condAttention, condSequence)
-            val unconditional = if (request.guidance != 0f) {
-                forward(tokens, uncondAudio, uncondAttention, frames)
-            } else {
-                null
-            }
-
-            for (cb in 0 until CODEBOOKS) {
-                val penalty = cb * request.layerPenalty
-                for (f in 0 until frames) {
-                    val slot = cb * frames + f
-                    if (tokens[cb][f] != MASK_ID.toLong()) {
-                        // Already committed, and a slot is only decided once.
-                        scores[slot] = Float.NEGATIVE_INFINITY
-                        continue
+                hints.unit {
+                    for (cb in 0 until CODEBOOKS) tokens[cb].copyInto(condIds[cb], gridStart)
+                    val conditional = forward(condIds, condAudio, condAttention, condSequence)
+                    val unconditional = if (request.guidance != 0f) {
+                        forward(tokens, uncondAudio, uncondAttention, frames)
+                    } else {
+                        null
                     }
-                    predicted[slot] = scoreSlot(
-                        conditional = conditional,
-                        condBase = ((cb.toLong() * condSequence + (gridStart + f)) * AUDIO_VOCAB).toInt(),
-                        unconditional = unconditional,
-                        uncondBase = ((cb.toLong() * frames + f) * AUDIO_VOCAB).toInt(),
-                        guidance = request.guidance,
-                        classTemperature = request.classTemperature,
-                        probabilities = probabilities,
-                        unguided = unguided,
-                        ranked = ranked,
-                        random = random,
+
+                    for (cb in 0 until CODEBOOKS) {
+                        val penalty = cb * request.layerPenalty
+                        for (f in 0 until frames) {
+                            val slot = cb * frames + f
+                            if (tokens[cb][f] != MASK_ID.toLong()) {
+                                // Already committed, and a slot is only decided once.
+                                scores[slot] = Float.NEGATIVE_INFINITY
+                                continue
+                            }
+                            predicted[slot] = scoreSlot(
+                                conditional = conditional,
+                                condBase = ((cb.toLong() * condSequence + (gridStart + f)) * AUDIO_VOCAB).toInt(),
+                                unconditional = unconditional,
+                                uncondBase = ((cb.toLong() * frames + f) * AUDIO_VOCAB).toInt(),
+                                guidance = request.guidance,
+                                classTemperature = request.classTemperature,
+                                probabilities = probabilities,
+                                unguided = unguided,
+                                ranked = ranked,
+                                random = random,
+                            )
+                            var best = Float.NEGATIVE_INFINITY
+                            for (v in 0 until AUDIO_VOCAB) {
+                                if (probabilities[v] > best) best = probabilities[v]
+                            }
+                            scores[slot] = perturb(best - penalty, request.positionTemperature, random)
+                        }
+                    }
+
+                    // The `take` most confident still-masked slots, across the whole
+                    // grid rather than per frame.
+                    val order = (0 until slots)
+                        .filter { scores[it] > Float.NEGATIVE_INFINITY }
+                        .sortedByDescending { scores[it] }
+                        .take(take)
+                    order.forEach { slot ->
+                        tokens[slot / frames][slot % frames] = predicted[slot].toLong()
+                    }
+                    committed += order.size
+
+                    // What this step actually decided.
+                    android.util.Log.i(
+                        TAG,
+                        "step ${step + 1}/$steps take=$take committed=$committed/$slots " +
+                            "chose ${LongArray(order.size) { predicted[order[it]].toLong() }.codeSummary()}",
                     )
-                    var best = Float.NEGATIVE_INFINITY
-                    for (v in 0 until AUDIO_VOCAB) {
-                        if (probabilities[v] > best) best = probabilities[v]
-                    }
-                    scores[slot] = perturb(best - penalty, request.positionTemperature, random)
                 }
             }
-
-            // The `take` most confident still-masked slots, across the whole
-            // grid rather than per frame.
-            val order = (0 until slots)
-                .filter { scores[it] > Float.NEGATIVE_INFINITY }
-                .sortedByDescending { scores[it] }
-                .take(take)
-            order.forEach { slot ->
-                tokens[slot / frames][slot % frames] = predicted[slot].toLong()
-            }
-            committed += order.size
-
-            // What this step actually decided.
-            android.util.Log.i(
-                TAG,
-                "step ${step + 1}/$steps take=$take committed=$committed/$slots " +
-                    "chose ${LongArray(order.size) { predicted[order[it]].toLong() }.codeSummary()}",
-            )
+        } finally {
+            hints.close()
         }
 
         for (cb in 0 until CODEBOOKS) {

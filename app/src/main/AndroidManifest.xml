@@ -69,9 +69,43 @@
         </intent>
     </queries>
 
+    <!--
+        `appCategory="game"` is a power setting on this hardware. It is not a
+        description of the app, and that is the whole of the argument against it.
+
+        What it buys. Measured on this phone before it was set: `cmd game
+        list-modes ai.ondevice` answered *"Package ai.ondevice is not of game
+        type"*, and a sustained native arm64 workload ran with the cores at
+        1713-1977 MHz against a 3321/3801 MHz ceiling — under 60% of the clock
+        that was there. Nothing had told the platform the workload mattered, so
+        nothing raised anything. A lot on this device is listening for exactly
+        this answer: `pm list features` reports `com.motorola.software.game_mode`
+        and `com.motorola.game_moment`, and `service list` has
+        `motorola.hardware.power.IMdpfExt` beside Qualcomm's
+        `vendor.qti.hardware.power.powermodule.IPowerModule`. All of it keys off
+        the category, and all of it was being asked to treat sustained inference
+        as a productivity app that had gone quiet.
+
+        What it costs, stated rather than buried. The Game Dashboard draws a
+        floating control over an app that is a chat window and a share target.
+        The launcher and Play read the app as a game, which it is not. And the
+        category is the gate to Game Mode as a whole, including the mode that
+        cuts clocks — which is why `res/xml/game_mode_config.xml` declares
+        Performance and pointedly does not declare Battery.
+
+        `ADPF` in `engine/CpuHints.kt` is the same wish said in a way that needs
+        no category, and it is the honest lever for a non-game. It is also
+        narrower: it only reaches units of work that are frame-scale, so a slow
+        model or a diffusion step gets nothing from it. This is the lever that
+        reaches the rest, and it is the app owner's call, taken knowingly.
+
+        Unmeasured. Argued from the clock figures above, not from a before/after
+        run of this app.
+    -->
     <application
         android:name=".OnDeviceApp"
         android:allowBackup="false"
+        android:appCategory="game"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:networkSecurityConfig="@xml/network_security_config"
         android:icon="@mipmap/ic_launcher"
@@ -80,6 +114,14 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.OnDeviceAI"
         tools:targetApi="34">
+
+        <!--
+            What each Game Mode is allowed to do to this app. Read by GameManager
+            when the mode changes; the file says why each answer is what it is.
+        -->
+        <meta-data
+            android:name="android.game_mode_config"
+            android:resource="@xml/game_mode_config" />
 
         <activity
             android:name=".MainActivity"

@@ -156,12 +156,15 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideKokoroEngine(phonemizer: ai.ondevice.speech.Phonemizer) =
-        ai.ondevice.speech.KokoroEngine(phonemizer)
+    fun provideKokoroEngine(
+        @ApplicationContext context: Context,
+        phonemizer: ai.ondevice.speech.Phonemizer,
+    ) = ai.ondevice.speech.KokoroEngine(context, phonemizer)
 
     @Provides
     @Singleton
-    fun provideOmniVoiceEngine() = ai.ondevice.speech.OmniVoiceEngine()
+    fun provideOmniVoiceEngine(@ApplicationContext context: Context) =
+        ai.ondevice.speech.OmniVoiceEngine(context)
 
     @Provides
     @Singleton

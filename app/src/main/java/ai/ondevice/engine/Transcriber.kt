@@ -256,7 +256,23 @@ class Transcriber(private val context: Context) {
 
     private fun decode(samples: FloatArray): List<TranscriptSegment> = nativeLock.withLock {
         if (handle == 0L) return emptyList()
-        val result = json.parseToJsonElement(WhisperBridge.nativeTranscribe(handle, samples)).jsonObject
+
+        // A take is one uninterruptible JNI call, so there is no step inside it
+        // to hint: the unit is the whole take, counted in audio samples, and the
+        // rate has to be carried between calls or it would be learned only after
+        // the run it was meant to steer had finished. The first two takes after a
+        // load are therefore unhinted — that is CpuHints refusing to target a
+        // number it has only seen once — and every one after them is hinted.
+        // Keyed on the model because tiny and large-v3 do not decode a second of
+        // audio at the same rate.
+        val hints = CpuHints.open(context, TAG, carryOver = "whisper:${loadedModelId.orEmpty()}")
+        val transcribed = try {
+            hints.unit(samples.size.toLong()) { WhisperBridge.nativeTranscribe(handle, samples) }
+        } finally {
+            hints.close()
+        }
+
+        val result = json.parseToJsonElement(transcribed).jsonObject
         // A stopped pass has no segments and is not a failure. Reported as an
         // empty list, which is what every caller already does nothing with.
         if (result["cancelled"]?.jsonPrimitive?.content == "true") return emptyList()

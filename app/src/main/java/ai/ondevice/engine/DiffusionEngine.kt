@@ -444,6 +444,59 @@ class DiffusionEngine(
         json.parseToJsonElement(SdBridge.nativeBuffers()).jsonObject
 
     /**
+     * Tells the platform what a sampler step is costing, from outside the call.
+     *
+     * A run is one blocking `nativeGenerate`, so there is nowhere inside it to
+     * bracket a step from Kotlin — but the step counter the progress poller
+     * already reads moves once per step, and the wall time between two sightings
+     * of it is what a step cost. That is enough for [CpuHints], provided the hint
+     * names the thread sitting in the JNI call rather than the poller watching
+     * it, which is why [workerTid] is filled in by the worker itself.
+     *
+     * **Sampling only.** The VAE decode is one long pass of a different shape and
+     * preparing is loading and conditioning; folding those into the same per-unit
+     * rate would leave a rate that describes none of the three.
+     *
+     * **The durations are quantised** by [POLL_MILLIS]. A sampler step on this
+     * class of device runs in seconds, so the error is small — but it is there,
+     * and one reported figure is not a measurement of a step.
+     */
+    private class SamplerHints(private val context: Context) : AutoCloseable {
+
+        /** Set by the worker as it starts. Zero until then, and nothing is hinted. */
+        @Volatile
+        var workerTid: Int = 0
+
+        private var hints: CpuHints? = null
+        private var lastStep = 0
+        private var lastNanos = 0L
+
+        /** One reading of the progress counter. */
+        fun saw(step: Int, phase: DiffusionPhase) {
+            val tid = workerTid
+            if (tid == 0 || phase != DiffusionPhase.SAMPLING || step <= 0) return
+
+            val now = System.nanoTime()
+            val advanced = step - lastStep
+            if (advanced <= 0) return
+            // The first sighting has nothing to measure from: it records where
+            // the counter was, and the step after it is the first unit.
+            if (lastNanos != 0L) {
+                val open = hints
+                    ?: CpuHints.open(context, TAG, tids = intArrayOf(tid)).also { hints = it }
+                open.observed(advanced.toLong(), now - lastNanos)
+            }
+            lastStep = step
+            lastNanos = now
+        }
+
+        override fun close() {
+            hints?.close()
+            hints = null
+        }
+    }
+
+    /**
      * The second progress counter, as a phrase, or null when there is none.
      *
      * Read the same way for a picture and for a clip, because both go through
@@ -592,7 +645,9 @@ class DiffusionEngine(
 
         var done = false
         val started = System.currentTimeMillis()
+        val sampler = SamplerHints(context)
         val worker = launch(Dispatchers.Default) {
+            sampler.workerTid = android.os.Process.myTid()
             try {
                 val bytes = SdBridge.nativeGenerate(
                     handle,
@@ -649,6 +704,7 @@ class DiffusionEngine(
             }
             val stage = progress["stage"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
             send(DiffusionEvent.Progress(step, steps, secondsPerStep, phase, stage, subDetail(progress)))
+            sampler.saw(step, phase)
 
             val serial = progress["previewSerial"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
             if (serial != lastPreviewSerial) {
@@ -656,6 +712,7 @@ class DiffusionEngine(
                 SdBridge.nativePreview(handle)?.let { send(DiffusionEvent.Preview(unpack(it))) }
             }
         }
+        sampler.close()
         worker.join()
     }
 
@@ -730,7 +787,9 @@ class DiffusionEngine(
 
         var done = false
         val started = System.currentTimeMillis()
+        val sampler = SamplerHints(context)
         val worker = launch(Dispatchers.Default) {
+            sampler.workerTid = android.os.Process.myTid()
             try {
                 val manifest = SdBridge.nativeGenerateVideo(
                     handle,
@@ -787,6 +846,7 @@ class DiffusionEngine(
             }
             val stage = progress["stage"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
             send(DiffusionEvent.Progress(step, steps, secondsPerStep, phase, stage, subDetail(progress)))
+            sampler.saw(step, phase)
 
             val serial = progress["previewSerial"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
             if (serial != lastPreviewSerial) {
@@ -794,6 +854,7 @@ class DiffusionEngine(
                 SdBridge.nativePreview(handle)?.let { send(DiffusionEvent.Preview(unpack(it))) }
             }
         }
+        sampler.close()
         worker.join()
     }
 

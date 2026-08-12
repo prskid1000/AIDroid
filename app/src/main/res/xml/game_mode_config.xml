@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Which Game Modes this app supports, and what it refuses.
+
+  It is not a game. The category above it in the manifest is there for the power
+  path, and this file is the part that decides what the platform is allowed to do
+  with that category — which for a compute app is mostly "nothing".
+
+  `supportsBatteryGameMode` is deliberately **absent**, and that is the load-
+  bearing line in this file. A mode not declared here is a mode the Game
+  Dashboard does not offer, and Battery mode exists to cut clocks. Offering it on
+  an app whose whole job is sustained CPU inference would hand the user a switch
+  labelled "make generation slower", and an OEM that defaults games to Battery
+  would flip it for them. The category is being taken *for* the clocks; declaring
+  the mode that gives them back would undo the reason for the change.
+
+  `allowGameDownscaling="false"`. The platform's downscale works by resizing the
+  app's own surface. This app's surface is a Compose UI — chat text, a token
+  inspector, a resource graph. Shrinking it blurs the text and saves nothing at
+  all, because the cost of a run is ggml on the CPU and not the pixels drawn over
+  it. The rendering was never the expensive part.
+
+  `allowGameFpsOverride="false"`, for the same reason and a sharper one: an FPS
+  cap applied to a UI that is streaming tokens makes the stream stutter while
+  leaving the decode exactly as expensive as it was. It would cost the one thing
+  the user can see and save the one thing they cannot.
+
+  What is left is the half worth having: with the category set, Performance mode
+  reaches `motorola.hardware.power.IMdpfExt` and Qualcomm's `IPowerModule`, which
+  is what was measured on this phone holding cores at 1713-1977 MHz against a
+  3321/3801 ceiling with nothing telling the platform the workload mattered.
+
+  Unmeasured for this app. No before/after generation exists yet.
+-->
+<game-mode-config
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:supportsPerformanceGameMode="true"
+    android:allowGameDownscaling="false"
+    android:allowGameFpsOverride="false" />
