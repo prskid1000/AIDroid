@@ -89,6 +89,36 @@ fun ResourceGraph(
             )
         }
 
+        // Clock, on the same canvas as the rest and scaled against its own peak.
+        //
+        // **Against the run's own peak rather than the chip's rated ceiling**,
+        // because the rated figure is not readable from here and guessing one
+        // would put this line on an axis it does not share with anything. What
+        // it therefore shows is *shape*: whether the platform held a rate or
+        // kept backing off. The absolute values are in the captions below, which
+        // is where a number belongs anyway.
+        //
+        // Dotted, and third in the drawing order, so it reads as background
+        // context behind CPU and GPU rather than as a fourth thing competing
+        // with them. A run where this line sags while CPU stays high is the
+        // whole reason it was added: busy is a measure of *time*, and says
+        // nothing about the rate the work was done at.
+        series(trace.clockMhz, floor = 0, ceiling = trace.peakClockMhz ?: 0)?.let { points ->
+            drawPath(
+                path = Path().apply {
+                    moveTo(points.first().x, points.first().y)
+                    points.drop(1).forEach { lineTo(it.x, it.y) }
+                },
+                color = NocturneColors.TextMeta,
+                style = Stroke(
+                    width = 1.2.dp.toPx(),
+                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
+                        floatArrayOf(2f, 5f),
+                    ),
+                ),
+            )
+        }
+
         // Memory is a level, not a quantity of work, so it is a line and never
         // a fill — nothing meaningful sits underneath it.
         series(trace.rssMb, floor = trace.floorRssMb, ceiling = trace.peakRssMb)?.let { points ->
@@ -180,6 +210,13 @@ fun ResourceDetail(trace: ResourceTrace, modifier: Modifier = Modifier) {
                 // client of the GPU, this app included but not only.
                 GraphLegend("GPU", "device 0–100%", NocturneColors.Accent500)
             }
+            trace.peakClockMhz?.let { peak ->
+                // The scale names the peak because the line is drawn against it,
+                // and a viewer reading the shape needs to know what "the top"
+                // was. See the drawing site for why the rated ceiling is not
+                // used.
+                GraphLegend("CLK", "0-$peak MHz", NocturneColors.TextMeta)
+            }
             val floor = Fmt.bytes(trace.floorRssMb.toLong() * ResourceTrace.BYTES_PER_MB)
             val peak = Fmt.bytes(trace.peakRssBytes)
             // "2.50 GB–2.50 GB" is a range that is not one. A run whose memory
@@ -200,6 +237,11 @@ fun ResourceDetail(trace: ResourceTrace, modifier: Modifier = Modifier) {
                 )
                 trace.peakGpuPercent?.let { add("gpu peak" to "$it% device-wide") }
                 trace.meanGpuPercent?.let { add("gpu mean" to "$it%") }
+                // Mean first: it is what the run actually ran at, where the peak
+                // is only what the device was briefly willing to give. A wide gap
+                // between the two is a platform that kept backing off.
+                trace.meanClockMhz?.let { add("cpu clock mean" to "$it MHz") }
+                trace.peakClockMhz?.let { add("cpu clock peak" to "$it MHz") }
                 add("sampled" to "${trace.cpuPercent.size} × ${trace.intervalMillis} ms")
             }
             rows.forEach { (key, value) ->

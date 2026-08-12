@@ -31,6 +31,25 @@ data class ResourceTrace(
     val availMb: List<Int>,
     /** GPU busy, 0..100, or empty when this device does not expose it. */
     val gpuPercent: List<Int> = emptyList(),
+    /**
+     * Mean CPU clock across the cores that reported one, in MHz. Empty when
+     * `/sys` will not say.
+     *
+     * **The number that separates "the model is slow" from "the platform never
+     * clocked up", and it was the one thing this trace could not answer.** On
+     * this phone a run has been observed sitting at 1713 MHz against a
+     * 3321/3801 MHz ceiling — under 60% of the clock that was available — with
+     * CPU busy reading high the whole time, because busy is a *time* measure
+     * and says nothing about the rate the work was done at. Two runs can report
+     * the same 95% and differ twofold in throughput.
+     *
+     * A mean rather than every core: the question here is what the run got, not
+     * which core got it. `cpuPercent` is already normalised across cores for the
+     * same reason.
+     *
+     * Defaulted so every trace already in the database still parses.
+     */
+    val clockMhz: List<Int> = emptyList(),
     /** RSS before the run started, so the model's own footprint is legible. */
     val baselineRssMb: Int,
     val totalRamMb: Int,
@@ -45,6 +64,10 @@ data class ResourceTrace(
     /** Null when unmeasured, so a caption can say so rather than print 0%. */
     val peakGpuPercent: Int? get() = gpuPercent.maxOrNull()
     val meanGpuPercent: Int? get() = if (gpuPercent.isEmpty()) null else gpuPercent.average().toInt()
+
+    /** Null when unmeasured, for the same reason the GPU pair is. */
+    val peakClockMhz: Int? get() = clockMhz.maxOrNull()
+    val meanClockMhz: Int? get() = if (clockMhz.isEmpty()) null else clockMhz.average().toInt()
 
     /** The lowest memory reading of the run, and the bottom of the graph's RAM axis. */
     val floorRssMb: Int get() = rssMb.minOrNull() ?: 0
@@ -63,6 +86,7 @@ data class ResourceTrace(
         intervalMillis = intervalMillis * 2,
         cpuPercent = cpuPercent.mergePairs { a, b -> (a + b) / 2 },
         gpuPercent = gpuPercent.mergePairs { a, b -> (a + b) / 2 },
+        clockMhz = clockMhz.mergePairs { a, b -> (a + b) / 2 },
         rssMb = rssMb.mergePairs { a, b -> maxOf(a, b) },
         availMb = availMb.mergePairs { a, b -> minOf(a, b) },
     )
@@ -77,6 +101,7 @@ data class ResourceTrace(
             rssMb = emptyList(),
             availMb = emptyList(),
             gpuPercent = emptyList(),
+            clockMhz = emptyList(),
             baselineRssMb = 0,
             totalRamMb = 0,
             cores = 1,
@@ -167,6 +192,7 @@ class ResourceRecorder(private val capabilities: DeviceCapabilities) {
         private val rss = mutableListOf<Int>()
         private val avail = mutableListOf<Int>()
         private val gpu = mutableListOf<Int>()
+        private val clock = mutableListOf<Int>()
 
         private val _live = MutableStateFlow(ResourceTrace.EMPTY)
         override val live: StateFlow<ResourceTrace> = _live.asStateFlow()
@@ -204,6 +230,7 @@ class ResourceRecorder(private val capabilities: DeviceCapabilities) {
             rss += (readRssBytes() / ResourceTrace.BYTES_PER_MB).toInt()
             avail += (capabilities.availableRamBytes / ResourceTrace.BYTES_PER_MB).toInt()
             readGpuBusyPercent()?.let { gpu += it }
+            readMeanClockMhz(cores)?.let { clock += it }
 
             if (cpu.size > MAX_TRACE_POINTS) decimate()
         }
@@ -214,6 +241,7 @@ class ResourceRecorder(private val capabilities: DeviceCapabilities) {
             rss.replaceWith(halved.rssMb)
             avail.replaceWith(halved.availMb)
             gpu.replaceWith(halved.gpuPercent)
+            clock.replaceWith(halved.clockMhz)
             intervalMillis = halved.intervalMillis
         }
 
@@ -230,6 +258,7 @@ class ResourceRecorder(private val capabilities: DeviceCapabilities) {
             rssMb = rss.toList(),
             availMb = avail.toList(),
             gpuPercent = gpu.toList(),
+            clockMhz = clock.toList(),
             baselineRssMb = baselineRssMb,
             totalRamMb = totalRamMb,
             cores = cores,
@@ -256,6 +285,36 @@ class ResourceRecorder(private val capabilities: DeviceCapabilities) {
         }.getOrNull()
 
         const val GPU_BUSY_PATH = "/sys/class/kgsl/kgsl-3d0/gpubusy"
+
+        /**
+         * Mean current clock across the cores that will say, in MHz.
+         *
+         * `scaling_cur_freq` per cpu, in kHz. Cores that are offline or that
+         * deny the read are skipped rather than counted as zero: a parked core
+         * is not running at 0 MHz, it is not running, and averaging it in would
+         * report a throttle that never happened. Null when none of them answered,
+         * which is a device that does not expose cpufreq to apps at all.
+         *
+         * Read every tick, and cheap enough to be: eight small `/sys` reads at
+         * 2 Hz. `scaling_cur_freq` is the governor's *requested* rate rather than
+         * a hardware measurement — `cpuinfo_cur_freq` is the measured one and is
+         * root-only on Android — so this tracks what the platform decided to give
+         * the run, which is exactly the question being asked of it.
+         */
+        fun readMeanClockMhz(cores: Int): Int? {
+            var total = 0L
+            var counted = 0
+            for (cpu in 0 until cores) {
+                val khz = runCatching {
+                    java.io.File("/sys/devices/system/cpu/cpu$cpu/cpufreq/scaling_cur_freq")
+                        .readText().trim().toLong()
+                }.getOrNull() ?: continue
+                if (khz <= 0L) continue
+                total += khz
+                counted++
+            }
+            return if (counted == 0) null else (total / counted / 1000L).toInt()
+        }
 
         private val WHITESPACE = Regex("""\s+""")
     }
