@@ -19,6 +19,10 @@ import android.content.pm.ActivityInfo
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -81,19 +85,23 @@ fun ResourceGraph(
         // this graph from silently losing a digit.
         val widest = measurer.measure("100%", axis)
         val labelled = size.height > 90f
+        // The same breathing room on all four sides: the left and bottom get
+        // theirs from the labels, and without this the top and right had none —
+        // a line at 100% sat on the border and the last sample ran off the edge.
+        val inset = if (labelled) 4.dp.toPx() else 0f
         val yGutter = if (labelled) widest.size.width + 6.dp.toPx() else 0f
         val xGutter = if (labelled) widest.size.height + 2.dp.toPx() else 0f
-        val plot = Size(size.width - yGutter, size.height - xGutter)
+        val plot = Size(size.width - yGutter - inset, size.height - xGutter - inset)
 
         // Percentage guides. Four lines rather than one: the midline alone said
         // "more or less than half", which is the question you ask of a graph you
         // are not really reading.
         for (pct in intArrayOf(0, 25, 50, 75, 100)) {
-            val y = plot.height - plot.height * pct / 100f
+            val y = inset + plot.height - plot.height * pct / 100f
             drawLine(
                 color = NocturneColors.Divider.copy(alpha = if (pct == 50) 1f else 0.45f),
                 start = Offset(yGutter, y),
-                end = Offset(size.width, y),
+                end = Offset(yGutter + plot.width, y),
                 strokeWidth = 1f,
             )
             if (yGutter > 0f && pct % 50 == 0) {
@@ -102,7 +110,7 @@ fun ResourceGraph(
                     label,
                     topLeft = Offset(
                         yGutter - label.size.width - 4.dp.toPx(),
-                        (y - label.size.height / 2f).coerceIn(0f, plot.height - label.size.height),
+                        (y - label.size.height / 2f).coerceIn(0f, size.height - label.size.height),
                     ),
                 )
             }
@@ -112,22 +120,30 @@ fun ResourceGraph(
         // run's own length rather than a round number, because that is the fact
         // somebody reading this wants and rounding it would invent one.
         if (xGutter > 0f) {
+            // A run under a second would otherwise label every tick `0s`. The
+            // sample count is the honest fallback: it says how much history the
+            // line covers, which is what the axis is for.
             val seconds = (trace.elapsedMillis / 1000).toInt()
-            for ((frac, text) in listOf(0f to "0s", 0.5f to "${seconds / 2}s", 1f to "${seconds}s")) {
+            val ticks = if (seconds > 1) {
+                listOf(0f to "0s", 0.5f to "${seconds / 2}s", 1f to "${seconds}s")
+            } else {
+                listOf(0f to "0", 1f to "${trace.cpuPercent.size} samples")
+            }
+            for ((frac, text) in ticks) {
                 val label = measurer.measure(text, axis)
                 val x = yGutter + (plot.width - label.size.width) * frac
-                drawText(label, topLeft = Offset(x, plot.height + 1.dp.toPx()))
+                drawText(label, topLeft = Offset(x, inset + plot.height + 1.dp.toPx()))
             }
         }
 
-        series(trace.cpuPercent, 0, 100, yGutter, plot)?.let { points ->
+        series(trace.cpuPercent, 0, 100, yGutter, inset, plot)?.let { points ->
             // Filled, because CPU is a proportion of a fixed whole and the area
             // under it is the work done.
             drawPath(
                 path = Path().apply {
-                    moveTo(yGutter, plot.height)
+                    moveTo(yGutter, inset + plot.height)
                     points.forEach { lineTo(it.x, it.y) }
-                    lineTo(size.width, plot.height)
+                    lineTo(yGutter + plot.width, inset + plot.height)
                     close()
                 },
                 color = NocturneColors.Accent.copy(alpha = 0.22f),
@@ -142,7 +158,7 @@ fun ResourceGraph(
             )
         }
 
-        series(trace.gpuPercent, 0, 100, yGutter, plot)?.let { points ->
+        series(trace.gpuPercent, 0, 100, yGutter, inset, plot)?.let { points ->
             drawPath(
                 path = Path().apply {
                     moveTo(points.first().x, points.first().y)
@@ -172,7 +188,7 @@ fun ResourceGraph(
         // with them. A run where this line sags while CPU stays high is the
         // whole reason it was added: busy is a measure of *time*, and says
         // nothing about the rate the work was done at.
-        series(trace.clockMhz, 0, trace.peakClockMhz ?: 0, yGutter, plot)?.let { points ->
+        series(trace.clockMhz, 0, trace.peakClockMhz ?: 0, yGutter, inset, plot)?.let { points ->
             drawPath(
                 path = Path().apply {
                     moveTo(points.first().x, points.first().y)
@@ -190,7 +206,7 @@ fun ResourceGraph(
 
         // Memory is a level, not a quantity of work, so it is a line and never
         // a fill — nothing meaningful sits underneath it.
-        series(trace.rssMb, trace.floorRssMb, trace.peakRssMb, yGutter, plot)?.let { points ->
+        series(trace.rssMb, trace.floorRssMb, trace.peakRssMb, yGutter, inset, plot)?.let { points ->
             drawPath(
                 path = Path().apply {
                     moveTo(points.first().x, points.first().y)
@@ -209,6 +225,7 @@ private fun DrawScope.series(
     floor: Int,
     ceiling: Int,
     left: Float = 0f,
+    top: Float = 0f,
     plot: Size = size,
 ): List<Offset>? {
     if (values.size < 2 || ceiling < floor) return null
@@ -216,7 +233,7 @@ private fun DrawScope.series(
     val step = plot.width / (values.size - 1)
     return values.mapIndexed { index, value ->
         val fraction = if (span <= 0f) 0.5f else ((value - floor) / span).coerceIn(0f, 1f)
-        Offset(left + index * step, plot.height - fraction * plot.height)
+        Offset(left + index * step, top + plot.height - fraction * plot.height)
     }
 }
 
@@ -310,6 +327,20 @@ private fun ResourceGraphDialog(trace: ResourceTrace, onDismiss: () -> Unit) {
         onDispose { previous?.let { activity?.requestedOrientation = it } }
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        // **The bars are chrome and the chart is the content.** A status bar
+        // with a battery icon over a resource graph is thirty pixels of the time
+        // axis spent on something the graph is not about. Hidden for as long as
+        // the dialog lives and shown again on dispose — the dialog has its own
+        // window, so this cannot leak into the screen behind it.
+        val view = LocalView.current
+        DisposableEffect(Unit) {
+            val window = (view.parent as? DialogWindowProvider)?.window
+            val bars = window?.let { WindowInsetsControllerCompat(it, it.decorView) }
+            bars?.hide(WindowInsetsCompat.Type.systemBars())
+            bars?.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            onDispose { bars?.show(WindowInsetsCompat.Type.systemBars()) }
+        }
         Box(
             Modifier
                 .fillMaxSize()
