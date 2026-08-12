@@ -12,6 +12,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
+import androidx.compose.foundation.layout.Box
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -45,7 +52,7 @@ fun ResourceGraph(
     Canvas(
         modifier
             .fillMaxWidth()
-            .height(height)
+            .then(if (height > 0.dp) Modifier.height(height) else Modifier)
             .background(NocturneColors.Neutral900, Radius.Sm)
             .padding(horizontal = 6.dp, vertical = 5.dp),
     ) {
@@ -207,76 +214,73 @@ fun ResourceBlock(
             // On the graph rather than on a button: the thing you want bigger is
             // the thing you tap, and there is no room beside it for a control
             // that would only ever mean "bigger".
-            var full by rememberSaveable { mutableStateOf(false) }
-            ResourceDetail(trace, onExpandGraph = { full = true })
-            if (full) ResourceGraphDialog(trace) { full = false }
+            ResourceDetail(trace)
         }
     }
 }
 
 /**
- * The same graph and the same numbers, given the whole screen.
+ * The graph alone, landscape, edge to edge.
  *
- * `usePlatformDefaultWidth = false` because the default dialog width is a dialog
- * width — the point of this is the horizontal axis, which is time, and a run of
- * three hundred samples squeezed into 280 dp is the problem rather than the fix.
+ * **Only the chart.** The first version put the legends and the numbers under
+ * it, which is the detail view again at a larger size — and the detail view is
+ * what you already have inline. What is missing at 64 dp is the *shape*: where a
+ * line sagged, how long it held, whether a dip was one sample or twenty. That
+ * needs pixels along the time axis and nothing else competing for them.
+ *
+ * **Forced landscape.** The axis that matters is time and the phone is twice as
+ * long as it is wide; in portrait this is the inline graph with more height,
+ * which is the one dimension it did not need. The host activity's
+ * `requestedOrientation` is set for as long as the dialog lives and put back
+ * exactly as it was found — restored rather than set to portrait, because the
+ * app may have been in landscape already or following the sensor, and forcing a
+ * value it never asked for is its own bug.
+ *
+ * A tap anywhere closes it. There is no chrome to hang a button on, and adding
+ * some would spend the pixels this exists to free.
  */
 @Composable
 private fun ResourceGraphDialog(trace: ResourceTrace, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    DisposableEffect(Unit) {
+        val activity = context.findHostActivity()
+        val previous = activity?.requestedOrientation
+        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        onDispose { previous?.let { activity?.requestedOrientation = it } }
+    }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(
+        Box(
             Modifier
                 .fillMaxSize()
                 .background(NocturneColors.Bg)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .nClickableFlat(onClick = onDismiss)
+                .padding(12.dp),
         ) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Resources", style = NocturneType.SectionKicker, color = NocturneColors.Text)
-                Text(
-                    "Close",
-                    style = NocturneType.Row,
-                    color = NocturneColors.Accent300,
-                    modifier = Modifier.nClickableFlat(onClick = onDismiss).padding(8.dp),
-                )
-            }
-            // Four times the inline height. Tall enough that a sag in the clock
-            // line has somewhere to be seen, short enough to leave the captions
-            // and the table on screen with it — reading the shape and reading the
-            // number are the same act.
-            ResourceGraph(trace, Modifier.fillMaxWidth().height(280.dp))
-            ResourceDetail(trace, graphHeight = 0.dp)
+            ResourceGraph(trace, Modifier.fillMaxSize(), height = 0.dp)
         }
     }
 }
 
+/** The Activity behind a Compose context, through any number of wrappers. */
+private tailrec fun Context.findHostActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findHostActivity()
+    else -> null
+}
+
 /** The graph plus every number behind it. Used expanded and on the detail screen. */
 @Composable
-fun ResourceDetail(
-    trace: ResourceTrace,
-    modifier: Modifier = Modifier,
-    /** Tapping the chart. Null leaves it inert, which is what the full-screen view wants. */
-    onExpandGraph: (() -> Unit)? = null,
-    /** Zero means the caller has already drawn the chart above these numbers. */
-    graphHeight: androidx.compose.ui.unit.Dp = 64.dp,
-) {
+fun ResourceDetail(trace: ResourceTrace, modifier: Modifier = Modifier) {
     if (trace.isEmpty) return
+    // **The zoom lives here, not at the call sites.** It was a callback the
+    // caller passed, so `ResourceBlock` got it and the Library screen — which
+    // draws this directly — did not, and tapping its chart did nothing. A
+    // component that behaves differently depending on which screen drew it has a
+    // bug in every screen that forgot the argument.
+    var full by rememberSaveable { mutableStateOf(false) }
+    if (full) ResourceGraphDialog(trace) { full = false }
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (graphHeight > 0.dp) {
-            ResourceGraph(
-                trace,
-                if (onExpandGraph != null) {
-                    Modifier.nClickableFlat(onClick = onExpandGraph)
-                } else {
-                    Modifier
-                },
-                height = graphHeight,
-            )
-        }
+        ResourceGraph(trace, Modifier.nClickableFlat(onClick = { full = true }))
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
