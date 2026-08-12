@@ -75,8 +75,14 @@ fun ResourceGraph(
             .background(NocturneColors.Neutral900, Radius.Sm)
             .padding(horizontal = 6.dp, vertical = 5.dp),
     ) {
-        val yGutter = if (size.height > 90f) 26.dp.toPx() else 0f
-        val xGutter = if (size.height > 90f) 13.dp.toPx() else 0f
+        // Measured, not guessed: a flat gutter clips any label wider than it,
+        // and the leading character is the one that goes. `100%` is the widest
+        // here, but taking it from the text is what stops the next unit added to
+        // this graph from silently losing a digit.
+        val widest = measurer.measure("100%", axis)
+        val labelled = size.height > 90f
+        val yGutter = if (labelled) widest.size.width + 6.dp.toPx() else 0f
+        val xGutter = if (labelled) widest.size.height + 2.dp.toPx() else 0f
         val plot = Size(size.width - yGutter, size.height - xGutter)
 
         // Percentage guides. Four lines rather than one: the midline alone said
@@ -95,7 +101,7 @@ fun ResourceGraph(
                 drawText(
                     label,
                     topLeft = Offset(
-                        yGutter - label.size.width - 3.dp.toPx(),
+                        yGutter - label.size.width - 4.dp.toPx(),
                         (y - label.size.height / 2f).coerceIn(0f, plot.height - label.size.height),
                     ),
                 )
