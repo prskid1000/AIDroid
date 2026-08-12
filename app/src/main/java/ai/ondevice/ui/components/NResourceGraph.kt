@@ -16,6 +16,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
+import android.view.WindowManager
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalContext
@@ -326,7 +327,10 @@ private fun ResourceGraphDialog(trace: ResourceTrace, onDismiss: () -> Unit) {
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         onDispose { previous?.let { activity?.requestedOrientation = it } }
     }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
         // **The bars are chrome and the chart is the content.** A status bar
         // with a battery icon over a resource graph is thirty pixels of the time
         // axis spent on something the graph is not about. Hidden for as long as
@@ -335,6 +339,18 @@ private fun ResourceGraphDialog(trace: ResourceTrace, onDismiss: () -> Unit) {
         val view = LocalView.current
         DisposableEffect(Unit) {
             val window = (view.parent as? DialogWindowProvider)?.window
+            // **Edge to edge, or the screen behind shows down the sides.** A
+            // dialog window is sized to its content and inset out of the display
+            // cutout, so hiding the system bars left the chat visible in the
+            // margins — immersive in name only.
+            window?.setLayout(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+            )
+            window?.attributes = window?.attributes?.apply {
+                layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            }
             val bars = window?.let { WindowInsetsControllerCompat(it, it.decorView) }
             bars?.hide(WindowInsetsCompat.Type.systemBars())
             bars?.systemBarsBehavior =
