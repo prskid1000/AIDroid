@@ -126,6 +126,19 @@ class ChatViewModel @Inject constructor(
             systemPrompt = conversation.systemPrompt ?: "",
             availableModels = chatModels,
         )
+        // **Messages without their traces is a half-loaded conversation.**
+        //
+        // `traces` is only ever filled by `refreshMessages`, and three places
+        // loaded `messages` without it — this one, `openConversation` and the
+        // delete path. The symptom was that a reply's resource graph was missing
+        // on every screen open, with the run sitting in `prediction_runs` the
+        // whole time and joining correctly. It looked like a recording bug and
+        // was a loading bug.
+        //
+        // Called after rather than merged into the assignment above so the
+        // messages appear immediately and the traces follow, rather than the
+        // whole screen waiting on one query per assistant message.
+        refreshMessages()
     }
 
     private suspend fun newConversation(): ConversationEntity {
@@ -245,6 +258,10 @@ class ChatViewModel @Inject constructor(
                 model = conversation.modelId?.let { db.models().get(it) } ?: _state.value.model,
                 messages = db.messages().getFor(conversation.id),
             )
+            // The conversation being switched to has its own runs. Without this
+            // the traces of the *previous* one would be carried across, keyed by
+            // ids that are no longer on screen — invisible, but wrong.
+            refreshMessages()
         }
     }
 
@@ -261,6 +278,7 @@ class ChatViewModel @Inject constructor(
                     messages = db.messages().getFor(next.id),
                     streaming = null,
                 )
+                refreshMessages()
             }
         }
     }

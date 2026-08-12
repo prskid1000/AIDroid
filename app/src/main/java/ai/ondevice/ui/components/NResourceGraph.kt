@@ -6,12 +6,17 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -19,6 +24,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.Dialog
 import ai.ondevice.core.Fmt
 import ai.ondevice.engine.ResourceTrace
 import ai.ondevice.ui.theme.NIcons
@@ -190,16 +197,86 @@ fun ResourceBlock(
                 color = NocturneColors.Accent300,
             )
         }
-        if (expanded) ResourceDetail(trace)
+        if (expanded) {
+            // **Tap the chart to fill the screen with it.**
+            //
+            // Inline it is about 70 dp tall in a chat bubble, which is enough to
+            // see that a line sagged and not enough to see where. The numbers
+            // underneath were doing all the work and the picture almost none.
+            //
+            // On the graph rather than on a button: the thing you want bigger is
+            // the thing you tap, and there is no room beside it for a control
+            // that would only ever mean "bigger".
+            var full by rememberSaveable { mutableStateOf(false) }
+            ResourceDetail(trace, onExpandGraph = { full = true })
+            if (full) ResourceGraphDialog(trace) { full = false }
+        }
+    }
+}
+
+/**
+ * The same graph and the same numbers, given the whole screen.
+ *
+ * `usePlatformDefaultWidth = false` because the default dialog width is a dialog
+ * width — the point of this is the horizontal axis, which is time, and a run of
+ * three hundred samples squeezed into 280 dp is the problem rather than the fix.
+ */
+@Composable
+private fun ResourceGraphDialog(trace: ResourceTrace, onDismiss: () -> Unit) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .background(NocturneColors.Bg)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Resources", style = NocturneType.SectionKicker, color = NocturneColors.Text)
+                Text(
+                    "Close",
+                    style = NocturneType.Row,
+                    color = NocturneColors.Accent300,
+                    modifier = Modifier.nClickableFlat(onClick = onDismiss).padding(8.dp),
+                )
+            }
+            // Four times the inline height. Tall enough that a sag in the clock
+            // line has somewhere to be seen, short enough to leave the captions
+            // and the table on screen with it — reading the shape and reading the
+            // number are the same act.
+            ResourceGraph(trace, Modifier.fillMaxWidth().height(280.dp))
+            ResourceDetail(trace, graphHeight = 0.dp)
+        }
     }
 }
 
 /** The graph plus every number behind it. Used expanded and on the detail screen. */
 @Composable
-fun ResourceDetail(trace: ResourceTrace, modifier: Modifier = Modifier) {
+fun ResourceDetail(
+    trace: ResourceTrace,
+    modifier: Modifier = Modifier,
+    /** Tapping the chart. Null leaves it inert, which is what the full-screen view wants. */
+    onExpandGraph: (() -> Unit)? = null,
+    /** Zero means the caller has already drawn the chart above these numbers. */
+    graphHeight: androidx.compose.ui.unit.Dp = 64.dp,
+) {
     if (trace.isEmpty) return
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        ResourceGraph(trace)
+        if (graphHeight > 0.dp) {
+            ResourceGraph(
+                trace,
+                if (onExpandGraph != null) {
+                    Modifier.nClickableFlat(onClick = onExpandGraph)
+                } else {
+                    Modifier
+                },
+                height = graphHeight,
+            )
+        }
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
