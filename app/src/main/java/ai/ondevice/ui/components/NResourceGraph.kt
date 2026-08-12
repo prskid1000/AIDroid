@@ -211,11 +211,14 @@ fun ResourceDetail(trace: ResourceTrace, modifier: Modifier = Modifier) {
                 GraphLegend("GPU", "device 0–100%", NocturneColors.Accent500)
             }
             trace.peakClockMhz?.let { peak ->
-                // The scale names the peak because the line is drawn against it,
-                // and a viewer reading the shape needs to know what "the top"
-                // was. See the drawing site for why the rated ceiling is not
-                // used.
-                GraphLegend("CLK", "0-$peak MHz", NocturneColors.TextMeta)
+                // **"peak" said out loud.** The other two legends name a range a
+                // reader already understands -- CPU is 0-100%, RAM is a span of
+                // bytes -- but a lone clock figure reads as a live value, and this
+                // one is the highest of the run. It was reported as a bug for
+                // exactly that reason: 2433 MHz sitting still while the phone was
+                // thermally capped to a mean of 1924, which is impossible as a
+                // current reading and correct as a maximum.
+                GraphLegend("CLK", "peak $peak MHz", NocturneColors.TextMeta)
             }
             val floor = Fmt.bytes(trace.floorRssMb.toLong() * ResourceTrace.BYTES_PER_MB)
             val peak = Fmt.bytes(trace.peakRssBytes)
