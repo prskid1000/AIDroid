@@ -1,5 +1,7 @@
 package ai.ondevice.speech
 
+import ai.ondevice.engine.EngineLog
+
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -81,14 +83,14 @@ class Phonemizer(private val context: Context) {
                     PhonemizerBridge.nativePhonemize(text.trim()).also { ipa ->
                         // espeak returning nothing is not an error it reports — it hands back an empty string, which tokenises to no ids, which the model turns into silence.
                         if (ipa.isBlank()) {
-                            android.util.Log.w(
+                            EngineLog.w(
                                 TAG,
                                 "espeak returned nothing for voice=$voice, ${text.length} chars",
                             )
                         }
                     }
                 }
-            }.onFailure { android.util.Log.e(TAG, "phonemize failed", it) }
+            }.onFailure { EngineLog.e(TAG, "phonemize failed", it) }
         }
 
     /** For the runtimes screen: what is actually installed. */

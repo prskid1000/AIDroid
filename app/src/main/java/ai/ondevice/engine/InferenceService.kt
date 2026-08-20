@@ -240,7 +240,7 @@ class InferenceService : LifecycleService() {
                 // as a run that has stalled rather than one that is working.
                 if (line.determinate) {
                     setProgress(line.steps, line.step, false)
-                } else if (line.title != "Model in memory" && line.title != "Serving the API") {
+                } else if (line.title !in RESTING) {
                     setProgress(0, 0, true)
                 }
             }
@@ -384,6 +384,11 @@ class InferenceService : LifecycleService() {
         const val ACTION_RELEASE_WAKELOCK = "ai.ondevice.inference.SLEEP"
         private const val WAKELOCK_TAG = "OnDeviceAI::generation"
 
+        /** Titles that describe a state rather than work, so they get no spinner. */
+        private val RESTING = setOf(
+            "Model in memory", "Serving the API", "Proxy not listening", "Idle",
+        )
+
         /**
          * A backstop against a leaked lock, not a budget for a run.
          *
@@ -412,6 +417,17 @@ class InferenceService : LifecycleService() {
                 context.startForegroundService(
                     Intent(context, InferenceService::class.java)
                         .setAction(ACTION_ACQUIRE_WAKELOCK),
+                )
+            }.onFailure {
+                // Logged rather than swallowed. Since Android 12 this start is
+                // refused outright when the app is in the background, and the
+                // run then proceeds with nothing holding the CPU and nothing in
+                // the shade to say it is happening — which is indistinguishable
+                // from the request never having arrived, and was.
+                EngineLog.w(
+                    "InferenceService",
+                    "could not start the foreground service for a run: ${it.message}",
+                    it,
                 )
             }
         }

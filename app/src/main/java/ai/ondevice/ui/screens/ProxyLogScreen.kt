@@ -1,5 +1,6 @@
 package ai.ondevice.ui.screens
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -7,6 +8,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,6 +29,7 @@ import ai.ondevice.ui.components.NButton
 import ai.ondevice.ui.components.NButtonStyle
 import ai.ondevice.ui.components.NCard
 import ai.ondevice.ui.components.NDot
+import ai.ondevice.ui.components.NIconButton
 import ai.ondevice.ui.components.NHelp
 import ai.ondevice.ui.components.NRowRule
 import ai.ondevice.ui.components.NTag
@@ -34,6 +38,7 @@ import ai.ondevice.ui.components.PhoneScaffold
 import ai.ondevice.ui.components.PushToolbar
 import ai.ondevice.ui.components.SectionKicker
 import ai.ondevice.ui.components.nClickableFlat
+import ai.ondevice.ui.theme.NIcons
 import ai.ondevice.ui.theme.NocturneColors
 import ai.ondevice.ui.theme.NocturneType
 import ai.ondevice.ui.vm.ProxyViewModel
@@ -188,6 +193,17 @@ private fun RequestRow(
         if (record.status != 0) Detail("status", record.status.toString())
         record.error?.let { Detail("error", it) }
 
+        // The bodies, which are the point of opening one of these rows: the
+        // intercept list says what the proxy did and these say why — a tool the
+        // model would not call, a system prompt that was not what you thought,
+        // a history the client re-sent with something extra in it.
+        record.requestBody.takeIf { it.isNotBlank() }?.let {
+            Body("Request", it, record.frames)
+        }
+        record.responseBody.takeIf { it.isNotBlank() }?.let {
+            Body(if (record.streaming) "Response · ${record.frames} frames" else "Response", it, 0)
+        }
+
         record.intercepts.forEach { intercept ->
             Row(
                 Modifier.fillMaxWidth().padding(top = 4.dp),
@@ -212,6 +228,67 @@ private fun RequestRow(
         }
     }
 }
+
+/**
+ * One body, foldable and copyable.
+ *
+ * Collapsed to a few lines by default, because the interesting part of a
+ * request is usually its head and the rest is a conversation being re-sent.
+ * Horizontally scrollable rather than wrapped: this is JSON, and a wrapped
+ * line of JSON on a phone is unreadable in a different way from a clipped one.
+ */
+@Composable
+private fun Body(label: String, body: String, frames: Int) {
+    val clipboard = LocalClipboardManager.current
+    var open by rememberSaveable(label, body.length) { mutableStateOf(false) }
+
+    Column(Modifier.padding(top = 8.dp)) {
+        Row(
+            Modifier.fillMaxWidth().nClickableFlat { open = !open },
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                label.uppercase(),
+                style = NocturneType.SectionKicker,
+                color = NocturneColors.Neutral500,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                "${body.length} chars",
+                style = NocturneType.Mono2Xs,
+                color = NocturneColors.TextMuted,
+            )
+            NIconButton(
+                NIcons.Copy,
+                "Copy",
+                onClick = { clipboard.setText(AnnotatedString(body)) },
+                size = 26.dp,
+                iconSize = 12.dp,
+                style = NButtonStyle.Ghost,
+            )
+        }
+        Text(
+            if (open) body else body.lineSequence().take(COLLAPSED_LINES).joinToString("\n"),
+            style = NocturneType.MonoXs,
+            color = NocturneColors.Text.copy(alpha = 0.85f),
+            modifier = Modifier
+                .padding(top = 4.dp)
+                .horizontalScroll(rememberScrollState()),
+        )
+        if (!open && body.length > COLLAPSED_CHARS) {
+            Text(
+                "show all",
+                style = NocturneType.Help,
+                color = NocturneColors.Accent,
+                modifier = Modifier.padding(top = 3.dp).nClickableFlat { open = true },
+            )
+        }
+    }
+}
+
+private const val COLLAPSED_LINES = 6
+private const val COLLAPSED_CHARS = 400
 
 @Composable
 private fun VideoJobRow(job: VideoJobs.Job, onCancel: () -> Unit) {

@@ -142,6 +142,17 @@ object NIcons {
         )
     }
 
+    /**
+     * Log: lines of text on a page, the last one short.
+     *
+     * Not a document icon and not a terminal: a document is a file and this is
+     * a tail, a terminal is a place you type and this is a place you read. Four
+     * rules of decreasing certainty, the last one still being written.
+     */
+    val Logs: ImageVector by lazy {
+        icon(1.7f, stroked = listOf("M5 6h14M5 10h14M5 14h10M5 18h6"))
+    }
+
     /** Runtimes: a chip with pins — the engines are the silicon-facing part. */
     val Runtime: ImageVector by lazy {
         icon(

@@ -1,5 +1,7 @@
 package ai.ondevice.speech
 
+import ai.ondevice.engine.EngineLog
+
 import android.content.Context
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
@@ -148,7 +150,19 @@ class SpeechSynthesizer(
     }
 
     /** Speak now. */
-    fun speak(request: SpeechRequest): Flow<SpeechEvent> = when (request.provider) {
+    fun speak(request: SpeechRequest): Flow<SpeechEvent> = run {
+        // Which engine ran, on the record. Kokoro and OmniVoice both produce a
+        // WAV, so picking the wrong one is a difference you hear and cannot
+        // otherwise trace.
+        EngineLog.i(
+            "SpeechSynthesizer",
+            "speak provider=${request.provider.name} voice=${request.voiceId ?: "default"} " +
+                "chars=${request.text.length} speed=${request.speed}",
+        )
+        speakWith(request)
+    }
+
+    private fun speakWith(request: SpeechRequest): Flow<SpeechEvent> = when (request.provider) {
         SynthProvider.KOKORO -> speakWithKokoro(request)
         SynthProvider.OMNIVOICE -> speakWithNeural(request) { renderOmniVoice(it) }
         SynthProvider.SYSTEM -> speakWithSystem(request)
@@ -227,9 +241,9 @@ class SpeechSynthesizer(
                 SynthProvider.SYSTEM -> null
             }
             if (neural != null) {
-                neural.onFailure { android.util.Log.e(TAG, "render failed", it) }
+                neural.onFailure { EngineLog.e(TAG, "render failed", it) }
                 return@withContext neural.mapCatching { audio ->
-                    android.util.Log.i(
+                    EngineLog.i(
                         TAG,
                         "writing ${audio.samples.size} samples at ${audio.sampleRate} Hz " +
                             "to ${destination.name}",

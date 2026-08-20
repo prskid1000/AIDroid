@@ -4,7 +4,6 @@ import android.content.Context
 import android.os.Build
 import android.os.PerformanceHintManager
 import android.os.Process
-import android.util.Log
 
 /**
  * Tells the platform how long a unit of inference is supposed to take (ADPF).
@@ -158,7 +157,7 @@ class CpuHints private constructor(
         val open = session ?: return
         session = null
         runCatching { open.close() }
-        Log.i(tag, "cpu hints closed after $reports report(s), last target ${millis(targetNanos)}")
+        EngineLog.i(tag, "cpu hints closed after $reports report(s), last target ${millis(targetNanos)}")
     }
 
     // — the session —
@@ -172,7 +171,7 @@ class CpuHints private constructor(
         // Out of range, so nothing is said at all — see [MAX_UNIT_NANOS].
         if (perUnit > MAX_UNIT_NANOS) {
             declined = true
-            Log.i(
+            EngineLog.i(
                 tag,
                 "a unit costs ${millis(perUnit)}, which is not a deadline this API is for; " +
                     "not hinting",
@@ -196,12 +195,12 @@ class CpuHints private constructor(
                 // has no hint support answers null, and inference then runs
                 // exactly as it did before this class existed.
                 declined = true
-                Log.i(tag, "the platform declined a hint session; this run is not hinted")
+                EngineLog.i(tag, "the platform declined a hint session; this run is not hinted")
                 return
             }
             session = opened
             targetNanos = target
-            Log.i(
+            EngineLog.i(
                 tag,
                 "cpu hints armed on ${threads.size} thread(s), " +
                     "target ${millis(target)} for $units unit(s)",
@@ -244,7 +243,7 @@ class CpuHints private constructor(
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             if (!saidThreadMoved) {
                 saidThreadMoved = true
-                Log.i(tag, "the work moved to tid $tid; setThreads needs API 34, so hints stay put")
+                EngineLog.i(tag, "the work moved to tid $tid; setThreads needs API 34, so hints stay put")
             }
             return
         }

@@ -95,7 +95,7 @@ class RuntimeRegistry(private val context: Context) {
 
         runCatching {
             val names = json.decodeFromString(ReportedInfo.serializer(), info).backends
-            android.util.Log.i("RuntimeRegistry", "$runtimeId registered ${names.joinToString()}")
+            EngineLog.i("RuntimeRegistry", "$runtimeId registered ${names.joinToString()}")
             names.distinct()
         }.getOrElse { emptyList() }
     }

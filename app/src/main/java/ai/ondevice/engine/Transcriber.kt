@@ -61,7 +61,7 @@ class Transcriber(private val context: Context) {
                 }
                 nativeLock.withLock {
                     unload()
-                    android.util.Log.i(TAG, "loading ${File(path).name}")
+                    EngineLog.i(TAG, "loading ${File(path).name}")
                     val newHandle = WhisperBridge.nativeLoad(path)
                     check(newHandle != 0L) { "The runtime returned no handle for $path." }
                     handle = newHandle
@@ -69,7 +69,7 @@ class Transcriber(private val context: Context) {
                     if (!params.isEmpty) {
                         WhisperBridge.nativeApplyParams(handle, params.toJsonString())
                     }
-                    android.util.Log.i(TAG, "loaded ${File(path).name}")
+                    EngineLog.i(TAG, "loaded ${File(path).name}")
                     WhisperBridge.nativeInfo(handle)
                 }
                 // A half-loaded context is worse than none: it reports a model
@@ -78,6 +78,7 @@ class Transcriber(private val context: Context) {
         }
 
     fun unload() = nativeLock.withLock {
+        if (handle != 0L) EngineLog.i(TAG, "unloading ${loadedModelId.orEmpty()}")
         if (handle != 0L) {
             WhisperBridge.nativeFree(handle)
             handle = 0L
@@ -266,11 +267,26 @@ class Transcriber(private val context: Context) {
         // Keyed on the model because tiny and large-v3 do not decode a second of
         // audio at the same rate.
         val hints = CpuHints.open(context, TAG, carryOver = "whisper:${loadedModelId.orEmpty()}")
+        val startedAt = System.currentTimeMillis()
         val transcribed = try {
             hints.unit(samples.size.toLong()) { WhisperBridge.nativeTranscribe(handle, samples) }
         } finally {
             hints.close()
         }
+        // The decode said nothing about itself, which made the two ways it goes
+        // wrong indistinguishable from the outside: audio that arrived empty or
+        // at the wrong rate, and audio that arrived fine and decoded to nothing.
+        // The realtime factor is the number worth having — under 1.0 means this
+        // device is transcribing faster than the recording plays.
+        val audioSeconds = samples.size.toFloat() / SAMPLE_RATE
+        val tookSeconds = (System.currentTimeMillis() - startedAt) / 1000f
+        EngineLog.i(
+            TAG,
+            "decoded ${"%.1f".format(audioSeconds)}s of audio in " +
+                "${"%.1f".format(tookSeconds)}s " +
+                "(${"%.2f".format(if (audioSeconds > 0f) tookSeconds / audioSeconds else 0f)}x realtime) " +
+                "${samples.signalSummary(head = 0)}",
+        )
 
         val result = json.parseToJsonElement(transcribed).jsonObject
         // A stopped pass has no segments and is not a failure. Reported as an

@@ -21,6 +21,7 @@ import ai.ondevice.ui.screens.AddModelScreen
 import ai.ondevice.ui.screens.AllParametersScreen
 import ai.ondevice.ui.screens.ChatScreen
 import ai.ondevice.ui.screens.DownloadQueueScreen
+import ai.ondevice.ui.screens.EngineLogScreen
 import ai.ondevice.ui.screens.ImageScreen
 import ai.ondevice.ui.screens.LibraryDetailScreen
 import ai.ondevice.ui.screens.LibraryScreen
@@ -121,6 +122,15 @@ object Routes {
      */
     const val PROXY = "settings/proxy"
     const val PROXY_LOG = "settings/proxy/log"
+
+    /**
+     * What the engines are saying, live.
+     *
+     * Beside Proxy rather than under it: llama.cpp, sd.cpp, whisper and the two
+     * ONNX voices all report here, and only one of the five has anything to do
+     * with serving HTTP.
+     */
+    const val ENGINE_LOG = "settings/logs"
 
     const val WORKFLOW_EDIT = "workflow/edit"
 
@@ -396,6 +406,7 @@ fun OnDeviceApp(
                 onOpenModels = { navController.navigate(Routes.MODELS) },
                 onOpenTools = { navController.navigate(Routes.TOOLS) },
                 onOpenProxy = { navController.navigate(Routes.PROXY) },
+                onOpenLogs = { navController.navigate(Routes.ENGINE_LOG) },
             )
         }
 
@@ -498,6 +509,9 @@ fun OnDeviceApp(
         }
         composable(Routes.PROXY_LOG) {
             ProxyLogScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Routes.ENGINE_LOG) {
+            EngineLogScreen(onBack = { navController.popBackStack() })
         }
     }
 }

@@ -356,6 +356,35 @@ class ChatPipeline(
             }
         }
 
+        // An answer that is empty because the whole budget went to reasoning
+        // is a failure that looks exactly like a success: the frames are
+        // well-formed, the stop reason is legal, and there is simply nothing
+        // in it. The engine's own workflow runner refuses this case by name and
+        // so does this one — said as text, because a client that has already
+        // received `message_start` cannot be handed a 400 instead.
+        if (text.isBlank() && finalCalls.isEmpty()) {
+            val excuse: String = when {
+                thinking.isNotEmpty() && stop == StopReason.MAX_TOKENS ->
+                    "[This model spent all $generatedTokens tokens reasoning and produced no " +
+                        "answer. Raise max_tokens, or leave `thinking` unset to turn reasoning off.]"
+                stop == StopReason.MAX_TOKENS ->
+                    "[This model hit the $generatedTokens-token limit before answering. " +
+                        "Raise max_tokens.]"
+                thinking.isNotEmpty() ->
+                    "[This model reasoned for ${thinking.length} characters and then " +
+                        "answered with nothing.]"
+                // The branch that used to be `null`, and saying nothing here is
+                // how an empty answer reached a client as a valid, silent,
+                // contentless message. Measured: three tokens, EOS, no content,
+                // and a stream that carried only its own opening frame.
+                else ->
+                    "[This model stopped after $generatedTokens tokens without producing " +
+                        "an answer. Its template may be refusing the request as posed.]"
+            }
+            sink.event(GenerationEvent.Token(excuse, 0))
+            text.append(excuse)
+        }
+
         return Result(
             text = text.toString(),
             thinking = thinking.toString(),

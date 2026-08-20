@@ -175,7 +175,7 @@ class DiffusionEngine(
             if (loadCancelled) {
                 SdBridge.nativeFree(newHandle)
                 loadCancelled = false
-                android.util.Log.i(TAG, "load of ${File(modelPath).name} finished after Cancel; freed")
+                EngineLog.i(TAG, "load of ${File(modelPath).name} finished after Cancel; freed")
                 throw LoadCancelled()
             }
             handle = newHandle
@@ -209,7 +209,7 @@ class DiffusionEngine(
             residentBytes = File(modelPath).length() +
                 taken.sumOf { (_, path) -> File(path).length().takeIf { it > 0 } ?: 0L }
             lastUnloadReason = null
-            android.util.Log.i(
+            EngineLog.i(
                 TAG,
                 "loaded ${File(modelPath).name} (${File(modelPath).length() / 1024 / 1024} MB) " +
                     "threads=$threads " +
@@ -229,7 +229,7 @@ class DiffusionEngine(
             // variants disagree: a T2V one drops a first frame in silence.
             val desc = SdBridge.nativeModelDesc(newHandle).takeIf { it.isNotBlank() }
             modelDesc = desc
-            android.util.Log.i(TAG, "model desc read: '${desc ?: ""}'")
+            EngineLog.i(TAG, "model desc read: '${desc ?: ""}'")
             supportsStartFrame = supportsVideo && VideoConditioning.supportsStartFrame(desc)
             supportsEndFrame = supportsVideo && VideoConditioning.supportsEndFrame(desc)
             // What the loader decided this checkpoint is, now that it has read
@@ -237,7 +237,7 @@ class DiffusionEngine(
             detectedVersion = SdBridge.nativeDetectedVersion().takeIf { it.isNotBlank() }
             bareDiffusion = SdBridge.nativeIsBareDiffusion()
             detectedVersion?.let {
-                android.util.Log.i(TAG, "recognised as $it" + if (bareDiffusion) " (denoiser only)" else "")
+                EngineLog.i(TAG, "recognised as $it" + if (bareDiffusion) " (denoiser only)" else "")
             }
             Unit
         }
@@ -540,7 +540,7 @@ class DiffusionEngine(
         val claimed = handle
         if (claimed != 0L) {
             handle = 0L
-            android.util.Log.i(
+            EngineLog.i(
                 TAG,
                 "unloading " + (residentModel ?: loadedModelId ?: "?") +
                     residentComponents.joinToString("") { " -${it.role.name}" } +
@@ -597,7 +597,7 @@ class DiffusionEngine(
         }
 
         val report = applyParams(request.params)
-        android.util.Log.i(
+        EngineLog.i(
             TAG,
             "params applied=${report.applied.size} rejected=${
                 report.rejected.ifEmpty { listOf("none") }.joinToString(",")
@@ -660,22 +660,22 @@ class DiffusionEngine(
                     attachmentsJson,
                 )
                 if (bytes == null) {
-                    android.util.Log.e(TAG, "the run returned no pixels")
+                    EngineLog.e(TAG, "the run returned no pixels")
                     send(DiffusionEvent.Failed("The run produced no image.", null))
                 } else {
                     val image = unpack(bytes)
-                    android.util.Log.i(
+                    EngineLog.i(
                         TAG,
                         "generated ${image.summary()} in " +
                             "${(System.currentTimeMillis() - started) / 1000f}s",
                     )
                     loraReport().forEach {
-                        android.util.Log.i(TAG, "lora ${it.file}: ${it.applied}/${it.total} applied")
+                        EngineLog.i(TAG, "lora ${it.file}: ${it.applied}/${it.total} applied")
                     }
                     send(DiffusionEvent.Completed(image, loraReport()))
                 }
             } catch (t: Throwable) {
-                android.util.Log.e(TAG, "generation failed", t)
+                EngineLog.e(TAG, "generation failed", t)
                 send(
                     DiffusionEvent.Failed(
                         t.message ?: "The diffusion run failed.",
@@ -741,7 +741,7 @@ class DiffusionEngine(
         }
 
         val report = applyParams(request.params)
-        android.util.Log.i(
+        EngineLog.i(
             TAG,
             "video params applied=${report.applied.size} rejected=${
                 report.rejected.ifEmpty { listOf("none") }.joinToString(",")
@@ -804,20 +804,20 @@ class DiffusionEngine(
                     send(DiffusionEvent.Failed("The run produced no frames.", null))
                 } else {
                     val clip = parseClip(manifest)
-                    android.util.Log.i(
+                    EngineLog.i(
                         TAG,
                         "generated ${clip.frames.size} frames at ${clip.width}x${clip.height} in " +
                             "${(System.currentTimeMillis() - started) / 1000f}s" +
                             (clip.audioPath?.let { " with audio" } ?: ""),
                     )
                     loraReport().forEach {
-                        android.util.Log.i(TAG, "lora ${it.file}: ${it.applied}/${it.total} applied")
+                        EngineLog.i(TAG, "lora ${it.file}: ${it.applied}/${it.total} applied")
                     }
                     send(DiffusionEvent.ClipCompleted(clip, loraReport()))
                 }
             } catch (t: Throwable) {
                 outputDir.deleteRecursively()
-                android.util.Log.e(TAG, "video generation failed", t)
+                EngineLog.e(TAG, "video generation failed", t)
                 send(
                     DiffusionEvent.Failed(
                         t.message ?: "The run failed.",

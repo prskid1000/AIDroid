@@ -72,6 +72,17 @@ class ProxyServer @Inject constructor(
 ) {
 
     data class Status(
+        /**
+         * Whether the proxy is switched on, as distinct from listening.
+         *
+         * The two come apart for a second at a time and something depends on
+         * the difference: `sync()` closes the socket before it opens the new
+         * one, so `listening` is briefly false during every rebind — and the
+         * service was reading that as "nothing to do here" and stopping itself
+         * mid-restart. What survived was a frozen background process still
+         * holding the port, which accepts a connection and then never answers.
+         */
+        val enabled: Boolean = false,
         val listening: Boolean = false,
         val address: String? = null,
         val port: Int = 0,
@@ -142,6 +153,7 @@ class ProxyServer @Inject constructor(
                 // tailnet default exists to prevent.
                 stop()
                 _status.value = Status(
+                    enabled = true,
                     refusal = "Tailscale is not connected, so there is no 100.x address to " +
                         "bind to. Open the Tailscale app, or change Listen on.",
                 )
@@ -171,6 +183,7 @@ class ProxyServer @Inject constructor(
             server = engine
             val onTailnet = Reachability.isTailscale(address)
             _status.value = Status(
+                enabled = true,
                 listening = true,
                 address = address,
                 port = port,
@@ -188,6 +201,7 @@ class ProxyServer @Inject constructor(
             }
         }.onFailure { failure ->
             _status.value = Status(
+                enabled = true,
                 refusal = "Could not listen on $address:$port — ${failure.message}",
             )
         }

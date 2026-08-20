@@ -22,6 +22,12 @@ import kotlinx.serialization.json.put
  */
 object OpenAiCodec {
 
+    // What each effort tier is worth in thinking tokens. The manifest caps
+    // `reasoning_budget` at 8192, and these sit under it on purpose.
+    private const val LOW_EFFORT_TOKENS = 512
+    private const val MEDIUM_EFFORT_TOKENS = 2048
+    private const val HIGH_EFFORT_TOKENS = 8192
+
     // ── inbound ─────────────────────────────────────────────────────────
 
     fun decode(
@@ -86,16 +92,24 @@ object OpenAiCodec {
             is JsonArray -> out = out.with("stop", stop.mapNotNull { (it as? JsonPrimitive)?.content })
             else -> Unit
         }
-        // `reasoning_effort` has no numeric equivalent here — reasoning is a
-        // template switch, not a budget — so the only faithful reading is
-        // on/off, and "none"/"minimal" are the two spellings that mean off.
-        body.str("reasoning_effort")?.let { effort ->
-            val on = effort != "none" && effort != "minimal"
-            out = out.with(
-                "chat_template_kwargs",
-                JsonObject(mapOf("enable_thinking" to JsonPrimitive(on))),
-            )
+        // `reasoning_effort` onto `--reasoning-budget`, which is the knob that
+        // exists — see the Anthropic codec for the two wrong answers that came
+        // before this one.
+        //
+        // The tiers are given real numbers rather than being collapsed to
+        // on/off. "high" is deliberately not unbounded: a phone that thinks
+        // until it stops on its own is a hot device and a flat battery, and a
+        // client asking for high effort is asking for more thinking rather than
+        // for all of it.
+        val budget = when (body.str("reasoning_effort")) {
+            null, "none", "minimal" -> AnthropicCodec.NO_THINKING
+            "low" -> LOW_EFFORT_TOKENS
+            "medium" -> MEDIUM_EFFORT_TOKENS
+            else -> HIGH_EFFORT_TOKENS
         }
+        // Only the budget. The template switch belongs to the model's own row —
+        // see the note in AnthropicCodec for why a proxy must not write it.
+        out = out.with("reasoning_budget", budget)
         return out
     }
 

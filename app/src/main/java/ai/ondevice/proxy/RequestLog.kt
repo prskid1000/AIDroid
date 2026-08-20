@@ -71,6 +71,21 @@ data class RequestRecord(
     val status: Int = 0,
     val error: String? = null,
     val finishedAt: Long? = null,
+    /**
+     * What the client actually sent, and what went back.
+     *
+     * Kept because the intercept list says *what* the proxy did and these say
+     * *why* — a tool the model would not call, a system prompt that was not
+     * what you thought, a history the client re-sent with something extra in
+     * it. Telecode writes the same pair to disk under `proxy_full_*.json`; this
+     * keeps them in memory, so they last a session and no longer.
+     *
+     * Redacted and capped on the way in: see [RequestLog.forDisplay].
+     */
+    val requestBody: String = "",
+    val responseBody: String = "",
+    /** SSE frames written, for a streamed answer that has no single body. */
+    val frames: Int = 0,
 ) {
     val durationMillis: Long get() = (finishedAt ?: System.currentTimeMillis()) - startedAt
     val inFlight: Boolean get() = finishedAt == null
@@ -157,6 +172,51 @@ class RequestLog @Inject constructor() {
     /** Set once, by the route, before any work starts. */
     fun phase(id: String, phase: String) = update(id) { it.copy(phase = phase) }
 
+    fun request(id: String, body: String) =
+        update(id) { it.copy(requestBody = forDisplay(body)) }
+
+    fun response(id: String, body: String, frames: Int = 0) =
+        update(id) { it.copy(responseBody = forDisplay(body), frames = frames) }
+
+    companion object {
+        /**
+         * A body, made safe to keep and possible to read.
+         *
+         * Two things happen here. Base64 payloads are replaced by a note of
+         * their size: a single screenshot on a chat turn is four megabytes of
+         * text, twenty of those is the whole ring buffer, and none of it is
+         * legible anyway. Then the result is capped, because a long
+         * conversation re-sends its entire history every turn and the tail is
+         * the part nobody is reading.
+         */
+        fun forDisplay(body: String): String {
+            if (body.isEmpty()) return body
+            val stripped = BASE64.replace(body) { match ->
+                val bytes = match.groupValues[1].length * 3 / 4
+                "\"<${bytes / 1024} kB of base64, not kept>\""
+            }
+            return if (stripped.length <= MAX_BODY_CHARS) {
+                stripped
+            } else {
+                stripped.take(MAX_BODY_CHARS) +
+                    "\n\n… ${stripped.length - MAX_BODY_CHARS} more characters not kept"
+            }
+        }
+
+        /** Long runs of base64, whether bare or inside a data URI. */
+        private val BASE64 = Regex("\"(?:data:[^;\"]*;base64,)?([A-Za-z0-9+/=]{512,})\"")
+
+        private const val MAX_BODY_CHARS = 20_000
+
+        /**
+         * Enough to cover a working session, small enough that what the records
+         * hold cannot grow without bound — each carries an intercept list and
+         * two request bodies, and a long agentic run produces fifteen
+         * intercepts per request.
+         */
+        const val CAPACITY = 200
+    }
+
     fun record(id: String): RequestRecord? = _records.value.firstOrNull { it.id == id }
 
     fun clear() {
@@ -164,12 +224,4 @@ class RequestLog @Inject constructor() {
         recomputeActivity()
     }
 
-    private companion object {
-        /**
-         * Enough to cover a working session, small enough that the intercept
-         * traces inside it cannot grow without bound — each record holds a list
-         * of its own, and a long agentic run can produce fifteen per request.
-         */
-        const val CAPACITY = 200
-    }
 }

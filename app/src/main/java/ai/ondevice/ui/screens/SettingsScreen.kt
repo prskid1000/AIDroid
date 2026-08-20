@@ -45,6 +45,7 @@ fun SettingsScreen(
     onOpenModels: () -> Unit,
     onOpenTools: () -> Unit,
     onOpenProxy: () -> Unit,
+    onOpenLogs: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.settings.collectAsStateWithLifecycle()
@@ -73,6 +74,15 @@ fun SettingsScreen(
                     NIcons.Models,
                     "Models",
                     onClick = onOpenModels,
+                    size = 34.dp,
+                    iconSize = 15.dp,
+                )
+                // Last, because it is the only one that is about what already
+                // happened rather than about what the device can do.
+                NIconButton(
+                    NIcons.Logs,
+                    "Engine log",
+                    onClick = onOpenLogs,
                     size = 34.dp,
                     iconSize = 15.dp,
                 )

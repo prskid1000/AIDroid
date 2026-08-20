@@ -142,16 +142,48 @@ object RunStatus {
             // the address is what makes it recognisable rather than alarming.
             s.served.listening -> RunLine(
                 title = "Serving the API",
-                detail = parts(s.served.url, s.engine.loaded?.modelId),
+                detail = parts(
+                    s.served.url,
+                    s.engine.loaded?.modelId?.let { "$it loaded" } ?: "no model loaded",
+                ),
             )
 
-            else -> RunLine("Model in memory", parts(s.engine.loaded?.modelId))
+            // Switched on and not serving. This is a state worth naming: the
+            // service is alive precisely so it can start listening again, and
+            // saying nothing here is how a proxy that has quietly given up
+            // looks exactly like one that is working.
+            s.served.enabled -> RunLine(
+                title = "Proxy not listening",
+                detail = parts(s.served.refusal?.substringBefore('.'), s.engine.loaded?.modelId),
+            )
+
+            s.engine.loaded != null -> RunLine(
+                title = "Model in memory",
+                detail = parts(s.engine.loaded.modelId),
+            )
+
+            // Reachable only for the instant between the service starting and
+            // the first real state arriving. It used to read "Model in memory"
+            // with nothing after it, which is a claim rather than a gap — and
+            // it was read, reasonably, as the model being loaded.
+            else -> RunLine("Idle", "")
         }
     }
 
-    /** Whether the service still has a reason to exist. */
+    /**
+     * Whether the service still has a reason to exist.
+     *
+     * The proxy term asks whether it is *switched on*, not whether it is
+     * listening this instant. Those come apart during every rebind — `sync()`
+     * closes the old socket before opening the new one — and reading the
+     * instantaneous value meant a Tailscale reconnect stopped the service in
+     * the gap. The process stayed up, still holding the port, but with nothing
+     * keeping it foreground it was frozen: connections were accepted by the
+     * kernel and then answered by nobody, so a client saw a timeout rather than
+     * a refusal, which is the harder of the two to diagnose.
+     */
     fun shouldStop(s: RunSnapshot): Boolean =
-        s.engine.loaded == null && s.count == 0 && !s.served.listening
+        s.engine.loaded == null && s.count == 0 && !s.served.enabled
 
     /**
      * The flag, not the fraction.

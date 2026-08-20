@@ -1,10 +1,11 @@
 package ai.ondevice.speech
 
+import ai.ondevice.engine.EngineLog
+
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import ai.ondevice.engine.signalSummary
-import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -94,7 +95,7 @@ class KokoroEngine(
                 inputNames = names
                 loadedPath = model.absolutePath
                 vocabulary = readVocabulary(directory) ?: DEFAULT_VOCABULARY
-                Log.i(
+                EngineLog.i(
                     TAG,
                     "loaded ${model.name} (${model.length() / 1024 / 1024} MB) " +
                         "inputs=${created.inputNames.joinToString()} " +
@@ -103,7 +104,7 @@ class KokoroEngine(
             }
         }.onFailure {
             lastError = it.message
-            Log.e(TAG, "load failed", it)
+            EngineLog.e(TAG, "load failed", it)
         }
     }
 
@@ -151,7 +152,7 @@ class KokoroEngine(
                             checkFinite(piece)
                             val kept = if (request.trimSilence) trimSilence(piece) else piece
                             // Every stage that can silently produce nothing, on one line.
-                            Log.i(
+                            EngineLog.i(
                                 TAG,
                                 "chunk phonemes=${chunk.phonemes.length} tokens=${chunk.tokens.size} " +
                                     "raw=${piece.size} kept=${kept.size} ${piece.signalSummary()}",
@@ -164,7 +165,7 @@ class KokoroEngine(
                 }
 
                 val joined = amplify(join(pieces), request.volume)
-                Log.i(
+                EngineLog.i(
                     TAG,
                     "synthesised chunks=${chunks.size} samples=${joined.size} " +
                         "(${"%.2f".format(joined.size.toFloat() / SAMPLE_RATE)}s)",
@@ -177,7 +178,7 @@ class KokoroEngine(
                 )
             }.onFailure {
                 lastError = it.message
-                Log.e(TAG, "synthesis failed", it)
+                EngineLog.e(TAG, "synthesis failed", it)
             }
         }
 

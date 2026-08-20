@@ -132,7 +132,7 @@ class LlamaEngine(
                 loadMillis = System.currentTimeMillis() - started,
             )
             loaded = model
-            android.util.Log.i(
+            EngineLog.i(
                 TAG,
                 "loaded ${request.modelPath.substringAfterLast('/')} in ${model.loadMillis}ms " +
                     "context=${model.contextLength} " +
@@ -142,7 +142,7 @@ class LlamaEngine(
             )
             model
         }.onFailure {
-            if (it !is LoadCancelled) android.util.Log.e(TAG, "load failed", it)
+            if (it !is LoadCancelled) EngineLog.e(TAG, "load failed", it)
         }
         } finally {
             loading = false
@@ -185,7 +185,7 @@ class LlamaEngine(
         ).jsonObject
         val rejected = report.strings("rejected")
         if (rejected.isNotEmpty()) {
-            android.util.Log.w(TAG, "parameters refused: ${rejected.joinToString(",")}")
+            EngineLog.w(TAG, "parameters refused: ${rejected.joinToString(",")}")
         }
 
         val formatted = formatPrompt(request, addGenerationPrompt = true)
@@ -202,19 +202,19 @@ class LlamaEngine(
         // Stop pressed while the prompt or the image was still going in. There
         // is nothing to report and nothing went wrong.
         if (start.bool("cancelled") == true) {
-            android.util.Log.i(TAG, "generation cancelled during prompt processing")
+            EngineLog.i(TAG, "generation cancelled during prompt processing")
             emit(GenerationEvent.Done(StopReason.CANCELLED, generatedTokens = 0, elapsedMillis = 0))
             return@flow
         }
 
         start.string("error")?.let { error ->
-            android.util.Log.e(TAG, "generation refused: $error")
+            EngineLog.e(TAG, "generation refused: $error")
             emit(GenerationEvent.Failed(error, start.string("suggestion")))
             return@flow
         }
 
         // Counts and template source, never the text.
-        android.util.Log.i(
+        EngineLog.i(
             TAG,
             "prompt tokens=${start.int("promptTokens") ?: 0} " +
                 "cached=${start.int("cachedTokens") ?: 0} " +
@@ -313,7 +313,7 @@ class LlamaEngine(
                     val stopReason = runCatching {
                         StopReason.valueOf(step.string("stopReason") ?: "EOS")
                     }.getOrDefault(StopReason.EOS)
-                    android.util.Log.i(
+                    EngineLog.i(
                         TAG,
                         "generated tokens=${step.int("generated") ?: index} " +
                             "at ${"%.1f".format(step.float("tokensPerSecond") ?: 0f)} t/s " +

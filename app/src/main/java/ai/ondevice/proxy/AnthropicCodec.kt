@@ -91,17 +91,30 @@ object AnthropicCodec {
         body.i("top_k")?.let { out = out.with("top_k", it) }
         body.strings("stop_sequences").takeIf { it.isNotEmpty() }?.let { out = out.with("stop", it) }
 
-        // `thinking: {type:"enabled"}` is the extended-thinking switch. There is
-        // no budget knob on this side — llama.cpp reasoning is a template
-        // setting, not a token allowance — so the type is honoured and the
-        // budget is not pretended at.
-        body.obj("thinking")?.let { thinking ->
-            val on = thinking.str("type") == "enabled"
-            out = out.with(
-                "chat_template_kwargs",
-                JsonObject(mapOf("enable_thinking" to JsonPrimitive(on))),
-            )
-        }
+        // Extended thinking, mapped onto `--reasoning-budget`.
+        //
+        // Two wrong turns before this one, both worth recording. The kwarg was
+        // only written when `thinking` was present, which left the template's
+        // own default in charge — and Qwen3.5's default is on, so a client that
+        // never asked for reasoning had its whole `max_tokens` spent on it and
+        // got an empty answer with `stop_reason: max_tokens`. Measured: 300
+        // tokens, all 300 of them thinking.
+        //
+        // Then `enable_thinking: false` was written unconditionally, which the
+        // template honours and this model answers badly: three tokens, EOS, no
+        // content at all. Turning the block off is not the same request as
+        // ending it immediately, and this model only does the second one well.
+        //
+        // `reasoning_budget` is the knob that actually says it — upstream's
+        // `--reasoning-budget`, where 0 ends the thinking block straight away
+        // and -1 lets it run. It also gives `budget_tokens` somewhere real to
+        // go, which is what the protocol says it is for.
+        val thinking = body.obj("thinking")
+        val on = thinking?.str("type") == "enabled"
+        out = out.with(
+            "reasoning_budget",
+            if (!on) NO_THINKING else thinking?.i("budget_tokens") ?: UNBOUNDED_THINKING,
+        )
         return out
     }
 
@@ -613,7 +626,13 @@ object AnthropicCodec {
     }
 
     /** `tool_choice:{type:"any"}` — some tool, any tool. */
-    const val ANY_TOOL = " any"
+    const val ANY_TOOL = " any"
+
+    /** `--reasoning-budget 0`: end the thinking block at once and answer. */
+    internal const val NO_THINKING = 0
+
+    /** `-1`: think until it stops, which on a phone is a hot device. */
+    internal const val UNBOUNDED_THINKING = -1
 }
 
 /**

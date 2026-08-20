@@ -45,6 +45,49 @@ class RunStatusTest {
         assertTrue(line.detail.contains("qwen"))
     }
 
+    /**
+     * "Model in memory" with nothing after it is a claim, not a gap — and it
+     * was read as one. The service can now be alive with nothing loaded,
+     * because a listening proxy is reason enough, so this state is reachable
+     * where before it was not.
+     */
+    @Test
+    fun `nothing loaded and nothing running is idle, not a model in memory`() {
+        assertEquals("Idle", RunStatus.describe(snapshot()).title)
+    }
+
+    @Test
+    fun `a serving proxy says whether a model is actually loaded`() {
+        val empty = RunStatus.describe(
+            snapshot(served = ProxyServer.Status(enabled = true, listening = true, address = "100.64.0.1", port = 8080)),
+        )
+        assertTrue(empty.detail.contains("no model loaded"))
+
+        val warm = RunStatus.describe(
+            snapshot(
+                engine = EngineState(loaded = loaded("qwen")),
+                served = ProxyServer.Status(enabled = true, listening = true, address = "100.64.0.1", port = 8080),
+            ),
+        )
+        assertTrue(warm.detail.contains("qwen loaded"))
+    }
+
+    /** A proxy that has given up must not look like one that is working. */
+    @Test
+    fun `a proxy switched on but not listening says so`() {
+        val line = RunStatus.describe(
+            snapshot(
+                served = ProxyServer.Status(
+                    enabled = true,
+                    listening = false,
+                    refusal = "Tailscale is not connected, so there is no address. Open the app.",
+                ),
+            ),
+        )
+        assertEquals("Proxy not listening", line.title)
+        assertTrue(line.detail.contains("Tailscale is not connected"))
+    }
+
     @Test
     fun `an idle server names the address rather than the model`() {
         val line = RunStatus.describe(
@@ -160,11 +203,11 @@ class RunStatusTest {
     @Test
     fun `a progress fraction without the flag is not a transcription`() {
         assertEquals(
-            "Model in memory",
+            "Idle",
             RunStatus.describe(snapshot(voice = VoiceState(fileProgress = 0.74f))).title,
         )
         assertEquals(
-            "Model in memory",
+            "Idle",
             RunStatus.describe(snapshot(voice = VoiceState(fileProgress = 1f))).title,
         )
     }
@@ -199,7 +242,33 @@ class RunStatusTest {
     @Test
     fun `a listening proxy is a reason to stay alive`() {
         assertFalse(
-            RunStatus.shouldStop(snapshot(served = ProxyServer.Status(listening = true))),
+            RunStatus.shouldStop(
+                snapshot(served = ProxyServer.Status(enabled = true, listening = true)),
+            ),
+        )
+    }
+
+    /**
+     * The one that froze the process. `sync()` closes the old socket before it
+     * opens the new one, so a Tailscale reconnect passes through a moment of
+     * enabled-but-not-listening — and stopping there left a background process
+     * still holding the port, accepting connections and answering none.
+     */
+    @Test
+    fun `a proxy mid-rebind is still a reason to stay alive`() {
+        assertFalse(
+            RunStatus.shouldStop(
+                snapshot(served = ProxyServer.Status(enabled = true, listening = false)),
+            ),
+        )
+    }
+
+    @Test
+    fun `a switched-off proxy is not`() {
+        assertTrue(
+            RunStatus.shouldStop(
+                snapshot(served = ProxyServer.Status(enabled = false, listening = false)),
+            ),
         )
     }
 

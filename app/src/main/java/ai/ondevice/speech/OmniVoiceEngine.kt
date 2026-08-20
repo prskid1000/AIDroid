@@ -1,5 +1,7 @@
 package ai.ondevice.speech
 
+import ai.ondevice.engine.EngineLog
+
 import ai.onnxruntime.OnnxJavaType
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
@@ -242,7 +244,7 @@ class OmniVoiceEngine(private val context: android.content.Context? = null) {
                 val cloningGraphs = runCatching {
                     CLONING.map { open(find(directory, it) ?: error("$it is missing")) }
                 }.getOrElse {
-                    android.util.Log.i(TAG, "no voice cloning: ${it.message}")
+                    EngineLog.i(TAG, "no voice cloning: ${it.message}")
                     emptyList()
                 }
 
@@ -267,9 +269,9 @@ class OmniVoiceEngine(private val context: android.content.Context? = null) {
 
                 // Which four files were picked, and how big each one really is.
                 files.forEach { (name, file) ->
-                    android.util.Log.i(TAG, "graph $name ← ${describeFile(directory, file)}")
+                    EngineLog.i(TAG, "graph $name ← ${describeFile(directory, file)}")
                 }
-                android.util.Log.i(
+                EngineLog.i(
                     TAG,
                     "loaded threads=$threads embeds=$llmEmbedType heads=$headsInputType " +
                         "vocoder=${
@@ -319,7 +321,7 @@ class OmniVoiceEngine(private val context: android.content.Context? = null) {
                 if (d > largest) largest = d
             }
         }
-        android.util.Log.i(TAG, "bidirectional probe: max|diff| before the change = $largest")
+        EngineLog.i(TAG, "bidirectional probe: max|diff| before the change = $largest")
         largest > 1e-6f
     }.getOrDefault(true) // Could not ask; do not refuse on a failed measurement.
 
@@ -390,7 +392,7 @@ class OmniVoiceEngine(private val context: android.content.Context? = null) {
 
                 val frames = request.frames ?: estimateFrames(text, request.speed)
                 tracedForwards = 0
-                android.util.Log.i(
+                EngineLog.i(
                     TAG,
                     "synthesising chars=${text.length} tokens=${textTokens.size} frames=$frames " +
                         "(${"%.2f".format(frames.toFloat() / FRAMES_PER_SECOND)}s grid) " +
@@ -453,7 +455,7 @@ class OmniVoiceEngine(private val context: android.content.Context? = null) {
 
                 checkFinite(samples)
                 val kept = if (request.trimSilence) trimTail(samples) else samples
-                android.util.Log.i(
+                EngineLog.i(
                     TAG,
                     "synthesised raw=${samples.size} kept=${kept.size} " +
                         "(${"%.2f".format(kept.size.toFloat() / SAMPLE_RATE)}s)",
@@ -466,7 +468,7 @@ class OmniVoiceEngine(private val context: android.content.Context? = null) {
                 )
             }.onFailure {
                 lastError = it.message
-                android.util.Log.e(TAG, "synthesis failed", it)
+                EngineLog.e(TAG, "synthesis failed", it)
             }
         }
 
@@ -602,7 +604,7 @@ class OmniVoiceEngine(private val context: android.content.Context? = null) {
                     committed += order.size
 
                     // What this step actually decided.
-                    android.util.Log.i(
+                    EngineLog.i(
                         TAG,
                         "step ${step + 1}/$steps take=$take committed=$committed/$slots " +
                             "chose ${LongArray(order.size) { predicted[order[it]].toLong() }.codeSummary()}",
@@ -614,7 +616,7 @@ class OmniVoiceEngine(private val context: android.content.Context? = null) {
         }
 
         for (cb in 0 until CODEBOOKS) {
-            android.util.Log.i(TAG, "grid codebook $cb ${tokens[cb].codeSummary()}")
+            EngineLog.i(TAG, "grid codebook $cb ${tokens[cb].codeSummary()}")
         }
         return tokens
     }
@@ -732,7 +734,7 @@ class OmniVoiceEngine(private val context: android.content.Context? = null) {
         // Once per load.
         if (!describedGraphs) {
             describedGraphs = true
-            android.util.Log.i(
+            EngineLog.i(
                 TAG,
                 "llm outputs=${llm.outputNames.take(4)} (${llm.outputNames.size} total) " +
                     "heads outputs=${head.outputNames} " +
@@ -799,7 +801,7 @@ class OmniVoiceEngine(private val context: android.content.Context? = null) {
                         val logits = scored.pick("logits")
                         if (!describedShapes) {
                             describedShapes = true
-                            android.util.Log.i(
+                            EngineLog.i(
                                 TAG,
                                 "seq=$sequence embeds=${hidden.info.shape.toList()}/${hidden.info.type} " +
                                     "hidden=${states.info.shape.toList()} " +
@@ -810,15 +812,15 @@ class OmniVoiceEngine(private val context: android.content.Context? = null) {
                         val values = readFloats(logits)
                         // Three stages, three lines, once.
                         if (trace) {
-                            android.util.Log.i(
+                            EngineLog.i(
                                 TAG,
                                 "pass seq=$sequence embeds ${readFloats(hidden).signalSummary()}",
                             )
-                            android.util.Log.i(
+                            EngineLog.i(
                                 TAG,
                                 "pass seq=$sequence hidden ${readFloats(states).signalSummary()}",
                             )
-                            android.util.Log.i(
+                            EngineLog.i(
                                 TAG,
                                 "pass seq=$sequence logits ${values.signalSummary()}",
                             )
@@ -900,7 +902,7 @@ class OmniVoiceEngine(private val context: android.content.Context? = null) {
         return try {
             voc.run(mapOf(voc.inputNames.first() to tensor)).use { result ->
                 readAudio(result.pick("waveform_24k")).also { waveform ->
-                    android.util.Log.i(
+                    EngineLog.i(
                         TAG,
                         "vocoder frames=$frames ${waveform.signalSummary()} " +
                             "(${"%.2f".format(waveform.size.toFloat() / SAMPLE_RATE)}s)",

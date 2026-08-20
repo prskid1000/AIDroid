@@ -55,9 +55,10 @@ class ProxyCall(
      */
     fun phase(name: String) = log.phase(requestId, name)
 
-    /** The body, parsed once. */
+    /** The body, parsed once, and kept for the log on the way past. */
     suspend fun body(): JsonObject {
         val raw = call.receiveText()
+        log.request(requestId, raw)
         return runCatching { ProxyJson.parseToJsonElement(raw) as? JsonObject }.getOrNull()
             ?: throw ProxyRefusal.badRequest("The body is not a JSON object.")
     }
@@ -144,6 +145,7 @@ class ProxyCall(
     // ── responding ──────────────────────────────────────────────────────
 
     suspend fun json(body: String) {
+        log.response(requestId, body)
         cors()
         call.respondText(body, ContentType.Application.Json)
     }
@@ -163,12 +165,21 @@ class ProxyCall(
      */
     suspend fun stream(body: suspend (Emit) -> Unit) {
         cors()
+        // The frames are kept as they are written, capped, so a streamed answer
+        // is as inspectable afterwards as a buffered one. A stream has no
+        // single response body, and "streamed to client — not captured" is what
+        // telecode's log says here; it is the one thing in its viewer that
+        // cannot answer the question you opened it to ask.
+        val transcript = StringBuilder()
+        var frames = 0
         call.respondTextWriter(ContentType.Text.EventStream, HttpStatusCode.OK) {
             val writer = this
             body(
                 object : Emit {
                     override suspend fun invoke(chunk: String) {
                         if (chunk.isEmpty()) return
+                        frames++
+                        if (transcript.length < TRANSCRIPT_CEILING) transcript.append(chunk)
                         withContext(Dispatchers.IO) {
                             writer.write(chunk)
                             writer.flush()
@@ -177,6 +188,12 @@ class ProxyCall(
                 },
             )
         }
+        log.response(requestId, transcript.toString(), frames)
+    }
+
+    private companion object {
+        /** Enough to hold a whole answer's frames; the log caps again after. */
+        const val TRANSCRIPT_CEILING = 60_000
     }
 
     /** One frame out. */
