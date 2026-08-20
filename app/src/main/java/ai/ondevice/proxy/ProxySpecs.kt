@@ -189,8 +189,11 @@ object ProxySpecs {
         bool(
             DEBUG, false,
             label = "Write request dumps",
-            help = "Writes full request and response JSON under the app's files directory. That " +
-                "includes every prompt, so leave it off unless something is wrong.",
+            help = "Writes each request and its answer as JSON under the app's own files, in " +
+                "proxy/logs/. The screen above already keeps both while the app is running; " +
+                "this is for the run that ends with the app being killed, which is the one " +
+                "worth looking at afterwards. It includes every prompt, and the previous " +
+                "session's files are cleared when the server starts.",
             tier = Tier.EXPERT,
         ),
     )

@@ -120,6 +120,9 @@ class ProxyServer @Inject constructor(
 
     private val media = FileMediaSink { runner.scratchDir("inbound") }
 
+    /** Written only when `proxy.debug` is on; see [RequestDump]. */
+    private val dump = RequestDump { runner.scratchDir("logs") }
+
     /** Registered once, so a tailnet that comes back brings the server with it. */
     private var networkWatch: android.net.ConnectivityManager.NetworkCallback? = null
 
@@ -171,6 +174,19 @@ class ProxyServer @Inject constructor(
 
         stop()
         if (config.requireAuth && tokens.proxyToken == null) regenerateToken()
+
+        // Last session's dumps go when this one starts. They are worth exactly
+        // as long as the session that produced them, and a folder that only
+        // grows is one somebody eventually finds full of old prompts.
+        if (config.debug) {
+            val removed = dump.clearPrevious()
+            if (removed > 0) {
+                ai.ondevice.engine.EngineLog.i(
+                    "ProxyServer",
+                    "cleared $removed request dump(s) from the previous session",
+                )
+            }
+        }
 
         admissionDepth = config.queueDepth
         admission = Semaphore(admissionDepth)
@@ -428,6 +444,12 @@ class ProxyServer @Inject constructor(
             val refusal = ChatPipeline.refusalFor(failure)
             log.finish(id, refusal.status, refusal.message)
             call.refuse(protocol, refusal)
+        } finally {
+            // After `finish`, so what is written is the whole record rather
+            // than one missing its status and its duration. A refusal is worth
+            // keeping too — it is the one somebody is most likely to be
+            // looking for.
+            if (config.debug) log.record(id)?.let { dump.write(it) }
         }
     }
 
