@@ -7,6 +7,7 @@ import ai.ondevice.engine.InferenceService
 import ai.ondevice.core.Modality
 import ai.ondevice.params.ParamSpec
 import ai.ondevice.params.PathChoice
+import kotlinx.serialization.json.JsonPrimitive
 import ai.ondevice.params.ParamType
 import ai.ondevice.proxy.ProxyConfig
 import ai.ondevice.proxy.ProxyDocument
@@ -59,6 +60,9 @@ data class ProxyState(
 
     fun spec(key: String): ParamSpec? = ProxySpecs.spec(key)
 
+    /** What the dropdown's first entry says, and what clearing the key means. */
+    private val NONE get() = "None"
+
     /**
      * A default-model row, rendered as the app's own model picker.
      *
@@ -80,7 +84,16 @@ data class ProxyState(
      * behaviour before this setting existed, still reachable after it.
      */
     fun picker(key: String): ParamSpec? =
-        ProxySpecs.spec(key)?.copy(type = ParamType.PATH)
+        ProxySpecs.spec(key)?.copy(
+            type = ParamType.PATH,
+            // "None" rather than the empty string these are declared with.
+            //
+            // The row's reset link prints the default, and an empty default
+            // printed "reset to" followed by nothing at all — a link to a value
+            // with no name. "None" is also what the dropdown's own first entry
+            // says, so the two now agree about what clearing this means.
+            default = JsonPrimitive(NONE),
+        )
 
     /**
      * What that row may be pointed at.
@@ -105,17 +118,32 @@ data class ProxyState(
         else -> emptyList()
     }
 
-    private fun modelChoices(wanted: (Modality) -> Boolean): List<PathChoice> = models
-        .filter { it.attachmentRole == null && wanted(it.modality) }
-        .map { model ->
+    /**
+     * The installed models for one surface, as picker rows.
+     *
+     * The **short name is what gets stored**, and that is a layout decision as
+     * much as anything. Every parameter row prints its current value right
+     * aligned on the same line as its label; a full id is
+     * `hum-ma/Wan2.2-TI2V-5B-Turbo-GGUF:Q4_K_M`, which wraps onto a second line
+     * and runs back under the label. The short name fits, and the id sits under
+     * the dropdown where there is room for it.
+     *
+     * Storing a name rather than an id is safe because the resolver accepts
+     * both — and where two rows share a name it falls back to the id for those
+     * two, so the stored value is never ambiguous even though the list is
+     * built from whatever happens to be installed.
+     */
+    private fun modelChoices(wanted: (Modality) -> Boolean): List<PathChoice> {
+        val offered = models.filter { it.attachmentRole == null && wanted(it.modality) }
+        return offered.map { model ->
+            val shared = offered.count { it.label == model.label } > 1
             PathChoice(
                 label = model.label,
-                // The id, because that is what is stored and what a client may
-                // also send — the label is only what it is called here.
                 detail = model.id,
-                path = model.id,
+                path = if (shared) model.id else model.label,
             )
         }
+    }
 }
 
 /**
