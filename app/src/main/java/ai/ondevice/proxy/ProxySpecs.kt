@@ -78,6 +78,37 @@ object ProxySpecs {
                 "and no HTTP connection survives that.",
         ),
 
+        // — default models —
+
+        string(
+            DEFAULT_TEXT, "",
+            label = "Chat model",
+            help = "Which model answers when a request names none, or names one this device " +
+                "does not have. Empty uses whichever text model was used most recently.",
+        ),
+        string(
+            DEFAULT_IMAGE, "",
+            label = "Image model",
+            help = "The checkpoint /v1/images uses. Worth setting: pictures and clips are both " +
+                "diffusion models, so \"most recently used\" cannot be right for both at once.",
+        ),
+        string(
+            DEFAULT_VIDEO, "",
+            label = "Video model",
+            help = "The checkpoint /v1/videos uses, which is almost never the one that makes " +
+                "stills.",
+        ),
+        string(
+            DEFAULT_VOICE, "",
+            label = "Voice",
+            help = "The model /v1/audio/speech speaks with.",
+        ),
+        string(
+            DEFAULT_SPEECH, "",
+            label = "Speech model",
+            help = "The model /v1/audio/transcriptions listens with.",
+        ),
+
         // — behaviour —
 
         bool(
@@ -210,6 +241,13 @@ object ProxySpecs {
     const val SERVE_IMAGES = "proxy.serve_images"
     const val SERVE_AUDIO = "proxy.serve_audio"
     const val SERVE_VIDEO = "proxy.serve_video"
+
+    const val DEFAULT_TEXT = "proxy.default_text_model"
+    const val DEFAULT_IMAGE = "proxy.default_image_model"
+    const val DEFAULT_VIDEO = "proxy.default_video_model"
+    const val DEFAULT_VOICE = "proxy.default_voice_model"
+    const val DEFAULT_SPEECH = "proxy.default_speech_model"
+    const val TTS_VOICE = "proxy.tts_voice"
     const val TOOL_SEARCH = "proxy.tool_search"
     const val AUTO_LOAD_TOOLS = "proxy.auto_load_tools"
     const val STRIP_REMINDERS = "proxy.strip_reminders"

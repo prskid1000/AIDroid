@@ -40,7 +40,7 @@ suspend fun ProxyCall.images(mode: ImageMode) {
 
     val model = body.str("model")
         ?.let { resolveModel(it, setOf(Modality.DIFFUSION), "image generation") }
-        ?: defaultModel(Modality.DIFFUSION, "image generation")
+        ?: defaultModel(Modality.DIFFUSION, "image generation", ProxySpecs.DEFAULT_IMAGE)
 
     val size = parseSize(body.str("size"))
     var params = runner.paramsFor(
@@ -132,7 +132,7 @@ private suspend fun ProxyCall.upscale(body: JsonObject) {
 
     val model = body.str("model")
         ?.let { resolveModel(it, setOf(Modality.DIFFUSION), "upscaling") }
-        ?: defaultModel(Modality.DIFFUSION, "upscaling")
+        ?: defaultModel(Modality.DIFFUSION, "upscaling", ProxySpecs.DEFAULT_IMAGE)
 
     // The ESRGAN graph, from the model's own stored parameters. Named in the
     // refusal rather than left as "it failed": an upscaler is a separate
@@ -291,10 +291,14 @@ suspend fun ProxyCall.speech() {
     val model = body.str("model")
         ?.takeIf { it != DEFAULT_TTS_ALIAS }
         ?.let { resolveModel(it, setOf(Modality.TEXT_TO_SPEECH), "speech") }
-        ?: defaultModel(Modality.TEXT_TO_SPEECH, "speech")
+        ?: defaultModel(Modality.TEXT_TO_SPEECH, "speech", ProxySpecs.DEFAULT_VOICE)
 
     var params = runner.paramsFor(model, SparseParams.EMPTY)
-    body.str("voice")?.takeIf { it.isNotBlank() }?.let { params = params.with("voice", it) }
+    // The request first, then the configured default, then the model's own
+    // stored parameters, then whatever the engine offers first.
+    (body.str("voice")?.takeIf { it.isNotBlank() }
+        ?: config.defaultModel(ProxySpecs.TTS_VOICE).takeIf { it.isNotBlank() })
+        ?.let { params = params.with("voice", it) }
     body.f("speed")?.let { params = params.with("speed", it) }
     body.str("language")?.let { params = params.with("lang_code", it) }
 
@@ -364,7 +368,7 @@ suspend fun ProxyCall.transcription(translate: Boolean) {
     val model = requestedModel
         ?.takeIf { it != DEFAULT_STT_ALIAS }
         ?.let { resolveModel(it, setOf(Modality.SPEECH_TO_TEXT), route) }
-        ?: defaultModel(Modality.SPEECH_TO_TEXT, route)
+        ?: defaultModel(Modality.SPEECH_TO_TEXT, route, ProxySpecs.DEFAULT_SPEECH)
 
     var params = runner.paramsFor(model, SparseParams.EMPTY)
     if (translate) params = params.with("translate", true)
@@ -473,7 +477,7 @@ suspend fun ProxyCall.createVideo() {
 
     val model = body.str("model")
         ?.let { resolveModel(it, setOf(Modality.DIFFUSION), "video generation") }
-        ?: defaultModel(Modality.DIFFUSION, "video generation")
+        ?: defaultModel(Modality.DIFFUSION, "video generation", ProxySpecs.DEFAULT_VIDEO)
 
     var params = runner.paramsFor(
         model,

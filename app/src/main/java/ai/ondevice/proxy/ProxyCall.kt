@@ -85,6 +85,20 @@ class ProxyCall(
                 "GET /v1/models lists what is — by id, by the name you gave it on the model's " +
                     "own screen, and by any alias configured here.",
             )
+        // A part, named as though it were a whole.
+        //
+        // Refused here rather than handed to the runtime, which answers "get sd
+        // version from file failed" — true of the file and useless about the
+        // mistake. A component carries the same modality as the checkpoint it
+        // belongs to, so nothing above this catches it.
+        if (runner.isComponent(model)) {
+            throw ProxyRefusal.badRequest(
+                "`${model.id}` is a ${model.attachmentRole?.name?.lowercase() ?: "component"} " +
+                    "belonging to another model, not something that runs on its own.",
+                "Name the checkpoint instead. GET /v1/models lists what is installed.",
+            )
+        }
+
         ChatPipeline.requireModality(model, expect, route)
         log.update(requestId) { it.copy(requestedModel = requested, resolvedModel = model.id) }
         return model
@@ -115,14 +129,42 @@ class ProxyCall(
         )
     }
 
-    /** The model for a modality when a request named none. */
-    suspend fun defaultModel(modality: Modality, route: String): ModelEntity =
-        runner.defaultFor(modality)
+    /**
+     * The model for a surface when a request named none.
+     *
+     * The configured default first, then whatever was used most recently. The
+     * setting matters most where the modality cannot separate two surfaces:
+     * pictures and clips are both diffusion, so "most recently used" is right
+     * for at most one of them at any moment and the other silently gets the
+     * wrong checkpoint.
+     *
+     * A configured default that has since been uninstalled falls back rather
+     * than failing — the row names a model that is gone, which is a stale
+     * setting rather than a broken request.
+     */
+    suspend fun defaultModel(modality: Modality, route: String, settingKey: String? = null): ModelEntity {
+        val configured = settingKey
+            ?.let { config.defaultModel(it) }
+            ?.takeIf { it.isNotBlank() }
+            ?.let { wanted ->
+                runner.installed().firstOrNull { model ->
+                    model.attachmentRole == null &&
+                        (model.id.equals(wanted, true) || model.label.equals(wanted, true))
+                }
+            }
+        if (configured != null) {
+            ChatPipeline.requireModality(configured, setOf(modality), route)
+            log.update(requestId) { it.copy(resolvedModel = configured.id) }
+            return configured
+        }
+        return runner.defaultFor(modality)
+            ?.also { model -> log.update(requestId) { it.copy(resolvedModel = model.id) } }
             ?: throw ProxyRefusal.notFound(
                 "No ${modality.label.lowercase()} model is installed on this device, " +
                     "so $route cannot be served.",
                 "Install one from the Models screen in the app.",
             )
+    }
 
     /**
      * The tools this device runs itself, if tools are switched on at all.

@@ -171,6 +171,9 @@ class ProxyConfig(
     val servesImages: Boolean get() = bool(ProxySpecs.SERVE_IMAGES)
     val servesAudio: Boolean get() = bool(ProxySpecs.SERVE_AUDIO)
     val servesVideo: Boolean get() = bool(ProxySpecs.SERVE_VIDEO)
+
+    /** The model a surface uses when the request named none. Empty = most recent. */
+    fun defaultModel(key: String): String = string(key).trim()
     val toolSearch: Boolean get() = bool(ProxySpecs.TOOL_SEARCH)
     val autoLoadTools: Boolean get() = bool(ProxySpecs.AUTO_LOAD_TOOLS)
     val stripReminders: Boolean get() = bool(ProxySpecs.STRIP_REMINDERS)

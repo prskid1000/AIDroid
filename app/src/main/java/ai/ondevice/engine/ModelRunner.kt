@@ -343,7 +343,8 @@ class ModelRunner @Inject constructor(
         return synthesizer.synthesizeToFile(
             SpeechRequest(
                 text = text,
-                voiceId = params.string("voice"),
+                voiceId = params.string("voice")?.takeIf { it.isNotBlank() }
+                    ?: defaultVoice(provider),
                 speed = params.float("speed") ?: 1.0f,
                 provider = provider,
                 voiceDesign = params.string("voice_design"),
@@ -357,11 +358,39 @@ class ModelRunner @Inject constructor(
         ).getOrThrow()
     }
 
+    /**
+     * A voice, when the caller named none.
+     *
+     * Kokoro refuses outright without one — "No Kokoro voice was selected" —
+     * and a request over HTTP has no screen to have picked one on. The Voice
+     * tab chooses the first available entry when it opens; this is the same
+     * choice made in the same way, by asking the synthesiser what it has rather
+     * than by naming a voice here. A voice id in this file would be exactly the
+     * hardcoding SPEC 1.3 rules out, and would break the moment somebody
+     * installed a Kokoro pack with a different set.
+     *
+     * Null when nothing is available, so the engine's own refusal still reaches
+     * the caller rather than being replaced by a guess that fails later.
+     */
+    private fun defaultVoice(provider: SynthProvider): String? = when (provider) {
+        SynthProvider.OMNIVOICE -> synthesizer.omniVoiceVoices().firstOrNull { it.available }?.id
+        else -> synthesizer.kokoroVoices().firstOrNull { it.available }?.id
+    }
+
     // ── model lookup ────────────────────────────────────────────────────
 
     suspend fun installed(): List<ModelEntity> = db.models().getInstalled()
 
     suspend fun model(id: String): ModelEntity? = db.models().get(id)
+
+    /**
+     * Whether this row is a part rather than a thing that runs.
+     *
+     * Asked of the row's own `attachmentRole`, which the resolver sets from the
+     * file — SPEC 1.3, and the reason a checkpoint released tomorrow needs no
+     * app update to be told apart from an encoder.
+     */
+    fun isComponent(model: ModelEntity): Boolean = model.attachmentRole != null
 
     /**
      * The model to use for a modality when the request named none.
@@ -370,9 +399,17 @@ class ModelRunner @Inject constructor(
      * by — the same rule the tabs use when they open, so the answer a client
      * gets with no `model` field is the one the person was last working with
      * rather than an arbitrary row.
+     *
+     * **Components are not models.** A VAE, a text encoder and a LoRA are all
+     * stored as rows of the same modality as the checkpoint they belong to, so
+     * without this filter the most recently touched one wins — and a request
+     * for a picture picked `flux2-vae.safetensors`, on which sd.cpp answered
+     * "get sd version from file failed": true of the file, and useless about
+     * the mistake. The Image tab has always filtered these out; this had not.
      */
     suspend fun defaultFor(modality: Modality): ModelEntity? =
-        db.models().getInstalledByModality(modality).firstOrNull()
+        db.models().getInstalledByModality(modality)
+            .firstOrNull { it.attachmentRole == null }
 
     fun scratchDir(name: String): File =
         File(storage.root(), "proxy/$name").apply { mkdirs() }

@@ -4,7 +4,10 @@ import ai.ondevice.core.SparseParams
 import ai.ondevice.data.prefs.AppPrefs
 import ai.ondevice.data.secure.TokenStore
 import ai.ondevice.engine.InferenceService
+import ai.ondevice.core.Modality
 import ai.ondevice.params.ParamSpec
+import ai.ondevice.params.PathChoice
+import ai.ondevice.params.ParamType
 import ai.ondevice.proxy.ProxyConfig
 import ai.ondevice.proxy.ProxyDocument
 import ai.ondevice.proxy.ProxyProfile
@@ -42,6 +45,10 @@ data class ProxyState(
     /** Which client profile is expanded. One at a time, as on the Tools screen. */
     val expandedProfile: String? = null,
     val tailnetAddress: String? = null,
+    /** What is installed, so a default can be chosen from it rather than typed. */
+    val models: List<ai.ondevice.data.db.ModelEntity> = emptyList(),
+    /** What the loaded voice model can actually say. */
+    val voices: List<String> = emptyList(),
 ) {
     val settings: SparseParams get() = document.settings
 
@@ -51,6 +58,64 @@ data class ProxyState(
     val specs: List<ParamSpec> get() = ProxySpecs.ALL
 
     fun spec(key: String): ParamSpec? = ProxySpecs.spec(key)
+
+    /**
+     * A default-model row, rendered as the app's own model picker.
+     *
+     * `PATH` rather than `ENUM`, and the reason is that the two enum controls
+     * are not interchangeable. An enum draws pills, which is right for
+     * `tailnet | loopback | all` and wrong for ten entries spelled
+     * `owner/repo:quant` — the current one is lost in the wall. `PATH` already
+     * draws a dropdown, already puts "None" first, and already shows a detail
+     * line underneath; its own comment in the renderer calls it "the same shape
+     * as the chat model picker: choose from what is installed", which is
+     * exactly what this is.
+     *
+     * The alternative was a size threshold inside the enum branch. That works,
+     * and it would also have turned five existing rows — whisper's `language`,
+     * sd.cpp's two sampler lists and its `schedule`, Kokoro's `voice` — into
+     * dropdowns on screens nobody asked to change.
+     *
+     * "None" is the cleared key, which means "whichever was used last": the
+     * behaviour before this setting existed, still reachable after it.
+     */
+    fun picker(key: String): ParamSpec? =
+        ProxySpecs.spec(key)?.copy(type = ParamType.PATH)
+
+    /**
+     * What that row may be pointed at.
+     *
+     * Derived from the library rather than declared, so a model installed
+     * tomorrow appears without an app change. Components are excluded: a VAE
+     * and a text encoder carry the same modality as the checkpoint they belong
+     * to, and offering one is offering a failure — sd.cpp answers "get sd
+     * version from file failed" when handed a VAE, which reads as a broken
+     * model rather than a wrong pick.
+     */
+    fun choices(key: String): List<PathChoice> = when (key) {
+        ProxySpecs.DEFAULT_TEXT ->
+            modelChoices { it == Modality.TEXT || it == Modality.VISION }
+        ProxySpecs.DEFAULT_IMAGE, ProxySpecs.DEFAULT_VIDEO ->
+            modelChoices { it == Modality.DIFFUSION }
+        ProxySpecs.DEFAULT_VOICE -> modelChoices { it == Modality.TEXT_TO_SPEECH }
+        ProxySpecs.DEFAULT_SPEECH -> modelChoices { it == Modality.SPEECH_TO_TEXT }
+        ProxySpecs.TTS_VOICE -> voices.map { voice ->
+            PathChoice(label = voice, detail = "voice id", path = voice)
+        }
+        else -> emptyList()
+    }
+
+    private fun modelChoices(wanted: (Modality) -> Boolean): List<PathChoice> = models
+        .filter { it.attachmentRole == null && wanted(it.modality) }
+        .map { model ->
+            PathChoice(
+                label = model.label,
+                // The id, because that is what is stored and what a client may
+                // also send — the label is only what it is called here.
+                detail = model.id,
+                path = model.id,
+            )
+        }
 }
 
 /**
@@ -68,6 +133,14 @@ class ProxyViewModel @Inject constructor(
     private val server: ProxyServer,
     private val log: RequestLog,
     private val jobs: VideoJobs,
+    private val db: ai.ondevice.data.db.OnDeviceDatabase,
+    /**
+     * Asked what voices exist rather than told.
+     *
+     * A list of voice ids in this file would be the hardcoding SPEC 1.3 rules
+     * out, and would go stale the moment a different Kokoro pack was installed.
+     */
+    private val synthesizer: ai.ondevice.speech.SpeechSynthesizer,
     @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
 ) : ViewModel() {
 
@@ -88,6 +161,22 @@ class ProxyViewModel @Inject constructor(
         }
         viewModelScope.launch {
             jobs.jobs.collect { _state.value = _state.value.copy(videoJobs = it) }
+        }
+        viewModelScope.launch {
+            db.models().observeInstalled().collect { installed ->
+                _state.value = _state.value.copy(models = installed)
+            }
+        }
+        viewModelScope.launch {
+            // Asked of the synthesiser rather than listed here, so a voice pack
+            // installed tomorrow appears without an app change — the same stance
+            // SPEC 1.3 takes about models.
+            val available = runCatching {
+                (synthesizer.kokoroVoices() + synthesizer.omniVoiceVoices())
+                    .filter { it.available }
+                    .map { it.id }
+            }.getOrDefault(emptyList())
+            _state.value = _state.value.copy(voices = available)
         }
         _state.value = _state.value.copy(
             maskedToken = tokens.maskedProxyToken(),

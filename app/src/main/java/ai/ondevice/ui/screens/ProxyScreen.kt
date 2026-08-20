@@ -116,6 +116,26 @@ fun ProxyScreen(
                 Modifier.padding(top = 6.dp),
             )
 
+            SectionKicker("Models", Modifier.padding(top = 20.dp, bottom = 8.dp))
+            Pickers(
+                viewModel,
+                listOf(
+                    ProxySpecs.DEFAULT_TEXT,
+                    ProxySpecs.DEFAULT_IMAGE,
+                    ProxySpecs.DEFAULT_VIDEO,
+                    ProxySpecs.DEFAULT_VOICE,
+                    ProxySpecs.TTS_VOICE,
+                    ProxySpecs.DEFAULT_SPEECH,
+                ),
+            )
+            NHelp(
+                "Which model each surface uses when a request names none. Pictures and clips " +
+                    "are both diffusion models, so there is one row for each — \"whichever was " +
+                    "used last\" cannot be right for both at once. A request that names a model " +
+                    "still wins.",
+                Modifier.padding(top = 6.dp),
+            )
+
             SectionKicker("Behaviour", Modifier.padding(top = 20.dp, bottom = 8.dp))
             Rows(
                 viewModel,
@@ -367,6 +387,31 @@ private fun Rows(viewModel: ProxyViewModel, keys: List<String>) {
                     spec = spec,
                     values = state.settings,
                     onChange = viewModel::set,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The default-model rows.
+ *
+ * Separate from [Rows] only because their options come from the device rather
+ * than from the spec — the control, the label and the key line are the same
+ * `ParamRow` everything else uses, and the screen still knows nothing about any
+ * particular key.
+ */
+@Composable
+private fun Pickers(viewModel: ProxyViewModel, keys: List<String>) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    NCard(gap = 0.dp, padding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) {
+        keys.forEach { key ->
+            state.picker(key)?.let { spec ->
+                ParamRow(
+                    spec = spec,
+                    values = state.settings,
+                    onChange = viewModel::set,
+                    pathChoices = state.choices(key),
                 )
             }
         }
