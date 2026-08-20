@@ -60,6 +60,17 @@ object ResultAudio {
     private var heading: String = ""
     private var byline: String = ""
 
+    /**
+     * Kept so a transport button can start playback that nothing started yet.
+     *
+     * The session exists from the moment the notification is posted, which is
+     * the point — but it exists with no player behind it, and the carousel's
+     * play button arrives through the session rather than through the
+     * notification's own action. Without somewhere to get a `Context` from,
+     * that first press had nothing to open the file with.
+     */
+    private var appContext: Context? = null
+
     /** The session's token, for `MediaStyle.setMediaSession`. Null before first use. */
     val token: MediaSession.Token? get() = session?.sessionToken
 
@@ -162,6 +173,16 @@ object ResultAudio {
 
     @Synchronized
     fun seekTo(millis: Long) {
+        // Dragging the bar before pressing play is a perfectly ordinary thing
+        // to do, and it has to open the file to be able to honour it.
+        if (player == null) {
+            val path = _state.value.path
+            val context = appContext
+            if (path != null && context != null) {
+                play(context, path)
+                pause()
+            }
+        }
         val active = player ?: return
         runCatching { active.seekTo(millis.toInt()) }
         _state.value = _state.value.copy(positionMillis = millis)
@@ -206,11 +227,28 @@ object ResultAudio {
             .build()
 
     private fun ensureSession(context: Context) {
+        appContext = context.applicationContext
         if (session != null) return
         session = MediaSession(context.applicationContext, TAG).apply {
             setCallback(
                 object : MediaSession.Callback() {
-                    override fun onPlay() = resume()
+                    /**
+                     * Start or resume, and the difference matters here.
+                     *
+                     * The session is created before anything has been played,
+                     * so the first press of the carousel's play button finds
+                     * no player to resume — and resuming nothing looked
+                     * exactly like a dead button.
+                     */
+                    override fun onPlay() {
+                        val path = _state.value.path
+                        val context = appContext
+                        if (player == null && path != null && context != null) {
+                            play(context, path)
+                        } else {
+                            resume()
+                        }
+                    }
                     override fun onPause() = pause()
                     override fun onStop() = stop()
                     override fun onSeekTo(pos: Long) = seekTo(pos)
