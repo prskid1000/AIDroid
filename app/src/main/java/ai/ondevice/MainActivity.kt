@@ -110,6 +110,7 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
+
         const val EXTRA_DESTINATION = "destination"
         const val DEST_DOWNLOADS = "downloads"
 

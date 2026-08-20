@@ -8,6 +8,7 @@ import ai.ondevice.di.ApplicationScope
 import ai.ondevice.engine.RuntimeRegistry
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -28,6 +29,12 @@ class OnDeviceApp : Application() {
     @Inject lateinit var shortcuts: ai.ondevice.workflow.ShortcutPublisher
 
     @Inject lateinit var scheduler: ai.ondevice.engine.workflow.Scheduler
+
+    @Inject lateinit var prefs: ai.ondevice.data.prefs.AppPrefs
+
+    /** So the proxy is brought up once per process, not once per screen. */
+    @Volatile
+    private var proxyStarted = false
 
     override fun onCreate() {
         super.onCreate()
@@ -56,6 +63,47 @@ class OnDeviceApp : Application() {
     }
 
     /**
+     * Start the inference service when the proxy is configured on.
+     *
+     * The service is what holds the socket, so starting it is the only thing
+     * that makes "enabled" mean "listening". Only when it was already switched
+     * on — an app launch is not consent.
+     *
+     * **Called from the first activity start, and that is the whole point.**
+     * This lived in `onCreate` alongside the download sweep and the alarm
+     * re-arm, and it did not work: those two are ordinary background work, and
+     * this is a foreground-service start. Since Android 12 the platform refuses
+     * one from the background, `Application.onCreate` *is* the background as far
+     * as that check is concerned, and the refusal is an exception that a
+     * `runCatching` swallowed without a word. The symptom was a proxy that read
+     * as enabled on its own screen and was listening on nothing until somebody
+     * toggled it off and on again.
+     *
+     * An activity having started is the platform's own definition of the
+     * exemption, so by here it is allowed. Failure is logged rather than
+     * swallowed, because the last one cost an afternoon.
+     */
+    private suspend fun startProxyIfEnabled() {
+        val enabled = runCatching {
+            ai.ondevice.proxy.ProxyConfig(
+                ai.ondevice.proxy.ProxyDocument.parse(prefs.proxyDocument.first()),
+            ).enabled
+        }.getOrDefault(false)
+        if (!enabled) return
+        runCatching {
+            startForegroundService(
+                android.content.Intent(this, ai.ondevice.engine.InferenceService::class.java),
+            )
+        }.onFailure {
+            android.util.Log.w(
+                "OnDeviceApp",
+                "proxy is enabled but the service would not start: ${it.message}",
+                it,
+            )
+        }
+    }
+
+    /**
      * Whether any screen of this app is in front of the user.
      *
      * The question the platform asks before allowing an activity start, and the
@@ -67,7 +115,16 @@ class OnDeviceApp : Application() {
     private fun watchForeground() {
         registerActivityLifecycleCallbacks(
             object : ActivityLifecycleCallbacks {
-                override fun onActivityStarted(activity: Activity) = foreground.onStart()
+                override fun onActivityStarted(activity: Activity) {
+                    foreground.onStart()
+                    // Once, on the first screen to appear. The platform counts
+                    // us as foreground from here, which is what a
+                    // foreground-service start requires.
+                    if (!proxyStarted) {
+                        proxyStarted = true
+                        scope.launch { startProxyIfEnabled() }
+                    }
+                }
                 override fun onActivityStopped(activity: Activity) = foreground.onStop()
                 override fun onActivityCreated(activity: Activity, state: Bundle?) = Unit
                 override fun onActivityResumed(activity: Activity) = Unit

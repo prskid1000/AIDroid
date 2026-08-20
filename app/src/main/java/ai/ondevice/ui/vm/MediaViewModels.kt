@@ -2233,7 +2233,9 @@ class VoiceViewModel @Inject constructor(
         // out from under it — see onCleared.
         session.transcribeJob = runScope.launch {
             db.models().touch(model.id, System.currentTimeMillis())
-            _state.value = _state.value.copy(loading = true, error = null, fileProgress = 0f)
+            _state.value = _state.value.copy(
+                loading = true, error = null, fileProgress = 0f, transcribing = true,
+            )
             if (!transcriber.isCurrent(model.id)) {
                 val loaded = transcriber.load(
                     model.id,
@@ -2297,6 +2299,7 @@ class VoiceViewModel @Inject constructor(
                         segments = segments,
                         title = name,
                         fileProgress = 1f,
+                        transcribing = false,
                         realtimeFactor = realtimeFactor,
                         liveTrace = null,
                         lastTrace = trace,
@@ -2358,6 +2361,7 @@ class VoiceViewModel @Inject constructor(
             sourceIsRecording = false,
             segments = ai.ondevice.core.TranscriptSegments.parse(transcript.segmentsJson),
             fileProgress = 1f,
+            transcribing = false,
             error = null,
             errorHint = null,
         )
@@ -2483,7 +2487,23 @@ data class VoiceState(
     val title: String = "standup-recording",
     /** The decoded file transcript. */
     val segments: List<TranscriptSegment> = emptyList(),
-    val fileProgress: Float = 0.74f,
+    /**
+     * How far through a file the decode is.
+     *
+     * Defaulted to 0.74f, which is a number lifted from the design canvas: a
+     * Voice tab that had transcribed nothing drew its progress bar at
+     * seventy-four percent, and the notification built on top of it concluded a
+     * transcription was permanently in flight.
+     */
+    val fileProgress: Float = 0f,
+    /**
+     * Whether a decode is actually running.
+     *
+     * A flag rather than an inference from [fileProgress], because the fraction
+     * cannot distinguish "not started" from "finished" from "stopped halfway" —
+     * and something outside this screen now has to know.
+     */
+    val transcribing: Boolean = false,
 
     /** One pair for the whole screen, not one per mode. */
     val liveTrace: ai.ondevice.engine.ResourceTrace? = null,

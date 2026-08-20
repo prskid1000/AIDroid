@@ -37,6 +37,7 @@ suspend fun ProxyCall.chat() {
         "chat",
     )
     log.update(requestId) { it.copy(streaming = request.stream) }
+    phase("Answering")
 
     // Refused rather than accepted and ignored.
     //

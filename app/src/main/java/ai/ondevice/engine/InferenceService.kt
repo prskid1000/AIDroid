@@ -42,6 +42,14 @@ class InferenceService : LifecycleService() {
 
     @Inject lateinit var image: ai.ondevice.ui.vm.ImageSession
 
+    // Chat and Voice were not here, and their absence is why the notification
+    // said "Model in memory" through a transcription and had no token rate
+    // during an answer: the service was reading `EngineState.tokensPerSecond`,
+    // which nothing has ever written. The sessions hold the real numbers.
+    @Inject lateinit var chat: ai.ondevice.ui.vm.ChatSession
+
+    @Inject lateinit var voice: ai.ondevice.ui.vm.VoiceSession
+
     /**
      * The HTTP surface.
      *
@@ -53,6 +61,29 @@ class InferenceService : LifecycleService() {
     @Inject lateinit var proxy: ai.ondevice.proxy.ProxyServer
 
     private var wakeLock: PowerManager.WakeLock? = null
+
+    @Inject lateinit var foreground: ai.ondevice.engine.workflow.ForegroundWatcher
+
+    /** Fires the finished-run banners; see [RunResultNotifier]. */
+    private val results by lazy { RunResultNotifier(this, foreground) }
+
+    /** The last snapshot, so a finish can be seen as the edge it is. */
+    private var previous: RunSnapshot? = null
+
+    /** Half a snapshot each, so neither combine exceeds the typed overloads. */
+    private data class LocalRuns(
+        val engine: EngineState,
+        val count: Int,
+        val clip: ai.ondevice.ui.vm.VideoState,
+        val still: ai.ondevice.ui.vm.ImageState,
+    )
+
+    private data class OtherRuns(
+        val chat: ai.ondevice.ui.vm.ChatState,
+        val voice: ai.ondevice.ui.vm.VoiceState,
+        val served: ai.ondevice.proxy.ProxyServer.Status,
+        val remote: ai.ondevice.proxy.ProxyActivity?,
+    )
 
     override fun onCreate() {
         super.onCreate()
@@ -69,36 +100,68 @@ class InferenceService : LifecycleService() {
         // that was not a conversation — and a forty-five minute clip, in a
         // process holding ten gigabytes, is the first thing Android reclaims.
         lifecycleScope.launch {
-            combine(
+            // The socket first, then the watcher that decides whether to stop.
+            //
+            // These were two independent coroutines and the order between them
+            // was a race this lost every time: the collector fires immediately
+            // with the initial state — nothing loaded, nothing running, nothing
+            // listening — decides there is no reason to exist, and calls
+            // `stopSelf()` before `sync()` has opened anything. The service was
+            // started and stopped inside the same eighty milliseconds, which in
+            // logcat reads as "Background started FGS: Allowed" followed by an
+            // FGS stop, and on the device reads as a proxy that is switched on
+            // and listening on nothing.
+            //
+            // Sequenced rather than guarded with a flag, because "look before
+            // deciding there is nothing to do" is the actual requirement and a
+            // flag would be a second way of saying it.
+            runCatching { proxy.sync() }
+
+            // Two typed combines folded into one, because the overloads stop at
+            // five flows and there are eight things that can be happening at
+            // once. Each half is a real tuple rather than an array of Any — the
+            // casts that would need are exactly the sort of thing that survives
+            // a refactor by silently reading the wrong field.
+            val local: kotlinx.coroutines.flow.Flow<LocalRuns> = combine(
                 engines.state,
                 running,
                 video.state,
                 image.state,
+            ) { engine, count, clip, still -> LocalRuns(engine, count, clip, still) }
+
+            val elsewhere: kotlinx.coroutines.flow.Flow<OtherRuns> = combine(
+                chat.state,
+                voice.state,
                 proxy.status,
-            ) { engine, count, clip, still, served ->
-                Progress(engine, count, clip, still, served)
+                proxy.activity,
+            ) { conversation, spoken, served, remote ->
+                OtherRuns(conversation, spoken, served, remote)
             }
-                .collectLatest { progress ->
-                    notificationManager().notify(NOTIFICATION_ID, buildNotification(progress))
-                    // The third term is new and load-bearing. An idle proxy has
-                    // nothing loaded and nothing running, so without it this
-                    // service stopped itself the moment the last generation
-                    // finished — and took the listening socket with it. The
-                    // server was then up for exactly as long as the last
-                    // request, which is indistinguishable from it never working.
-                    if (progress.engine.loaded == null &&
-                        progress.count == 0 &&
-                        !progress.served.listening
-                    ) {
-                        stopSelf()
-                    }
+
+            combine(local, elsewhere) { l, o ->
+                RunSnapshot(
+                    engine = l.engine,
+                    count = l.count,
+                    clip = l.clip,
+                    still = l.still,
+                    chat = o.chat,
+                    voice = o.voice,
+                    served = o.served,
+                    remote = o.remote,
+                )
+            }
+                .collectLatest { snapshot ->
+                    notificationManager().notify(NOTIFICATION_ID, buildNotification(snapshot))
+                    announceFinished(snapshot)
+                    // The third term is load-bearing. An idle proxy has nothing
+                    // loaded and nothing running, so without it this service
+                    // stopped itself the moment the last generation finished —
+                    // and took the listening socket with it. The server was then
+                    // up for exactly as long as the last request, which is
+                    // indistinguishable from it never having worked.
+                    if (RunStatus.shouldStop(snapshot)) stopSelf()
                 }
         }
-
-        // Match the stored configuration on every start, so enabling the proxy
-        // and starting this service are one action rather than two that have to
-        // happen in the right order.
-        lifecycleScope.launch { runCatching { proxy.sync() } }
 
     }
 
@@ -135,128 +198,168 @@ class InferenceService : LifecycleService() {
         super.onDestroy()
     }
 
-    /** What the three things that can be running are each doing. */
-    private data class Progress(
-        val engine: EngineState,
-        val count: Int,
-        val clip: ai.ondevice.ui.vm.VideoState,
-        val still: ai.ondevice.ui.vm.ImageState,
-        val served: ai.ondevice.proxy.ProxyServer.Status,
-    )
+
 
     /**
-     * What is happening, said the way the screen says it.
+     * What is happening, in the shape a status bar can show.
      *
-     * This used to read "Model loaded" with a token rate under it and nothing
-     * else, whatever was actually going on — the service knew only whether the
-     * chat model was resident, so a clip four minutes into a five minute run
-     * was described as a loaded model. It now names the work, counts the steps
-     * and carries the same bar the screen draws, because the notification is
-     * the only view of a run once you have left the app.
+     * The deciding is in [RunStatus] rather than here: it is a pure function of
+     * a snapshot, so it can be tested without a device — and it used to be a
+     * `when` in this file that knew about two of the five kinds of run and said
+     * "Model in memory" through the other three.
      */
-    private fun buildNotification(progress: Progress? = null): Notification {
+    private fun buildNotification(snapshot: RunSnapshot? = null): Notification {
         val open = PendingIntent.getActivity(
             this,
             0,
-            // Reuse the running instance rather than stacking a new one.
-            // With the activity's default launch mode a tap built a second
+            // Reuse the running instance rather than stacking a new one. With
+            // the activity's default launch mode a tap built a second
             // MainActivity and destroyed the first, which cleared the
             // activity-scoped view models and cancelled the generation they
-            // were holding — so opening the app from the notification that
-            // said it was generating is what stopped it generating.
+            // were holding — so opening the app from the notification that said
+            // it was generating is what stopped it generating.
             Intent(this, MainActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val builder = Notification.Builder(this, CHANNEL_ID)
+
+        val line = snapshot?.let { RunStatus.describe(it) }
+            ?: RunLine("Model in memory", "")
+
+        return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notify_generate)
             .setContentIntent(open)
             .setOnlyAlertOnce(true)
             .setOngoing(true)
-
-        // Whichever run is actually going. Only one can sample at a time —
-        // the diffusion engine holds a load lock — so the first match is the
-        // whole story rather than an arbitrary pick.
-        val clip = progress?.clip?.takeIf { it.generating || it.loadingModel }
-        val still = progress?.still?.takeIf { it.generating || it.loadingModel }
-
-        when {
-            clip != null -> builder.describe(
-                what = "Making a clip",
-                model = clip.model?.label,
-                phase = if (clip.loadingModel) "loading weights" else clip.phase.label,
-                step = clip.step,
-                steps = clip.progressSteps,
-                rate = clip.secondsPerStep,
-            )
-            still != null -> builder.describe(
-                what = "Making a picture",
-                model = still.model?.label,
-                phase = if (still.loadingModel) "loading weights" else still.phase.label,
-                step = still.step,
-                steps = still.progressSteps,
-                rate = still.secondsPerStep,
-            )
-            progress != null && progress.engine.tokensPerSecond > 0 -> builder
-                .setContentTitle("Answering")
-                .setContentText(
-                    listOfNotNull(
-                        progress.engine.loaded?.modelId,
-                        Fmt.tokensPerSecond(progress.engine.tokensPerSecond),
-                    ).joinToString(" · "),
-                )
-                .setProgress(0, 0, true)
-            progress?.count.let { it != null && it > 0 } -> builder
-                .setContentTitle("Working")
-                .setContentText(progress?.engine?.loaded?.modelId.orEmpty())
-                .setProgress(0, 0, true)
-            // Nothing running, but the port is open. Worth its own line: this
-            // is the one resting state the person did not start by tapping
-            // something, and the address is what makes it recognisable rather
-            // than alarming.
-            progress?.served?.listening == true -> builder
-                .setContentTitle("Serving the API")
-                .setContentText(
-                    listOfNotNull(
-                        progress.served.url,
-                        progress.engine.loaded?.modelId,
-                    ).joinToString(" · "),
-                )
-            // Nothing running: the model is resident and that is all there is
-            // to say. Worth saying, because several gigabytes are being held.
-            else -> builder
-                .setContentTitle("Model in memory")
-                .setContentText(progress?.engine?.loaded?.modelId.orEmpty())
-        }
-        return builder.build()
+            .setContentTitle(line.title)
+            .setContentText(line.detail)
+            .apply {
+                // Determinate while there are steps to count, indeterminate
+                // while there are not. A load and a VAE decode take minutes and
+                // report no step, and a bar frozen at zero for that long reads
+                // as a run that has stalled rather than one that is working.
+                if (line.determinate) {
+                    setProgress(line.steps, line.step, false)
+                } else if (line.title != "Model in memory" && line.title != "Serving the API") {
+                    setProgress(0, 0, true)
+                }
+            }
+            .build()
     }
 
     /**
-     * One run, in the shape a status bar can show: what, on what, how far.
+     * Say what a run left behind, once it has finished.
      *
-     * The bar is determinate while there are steps to count and indeterminate
-     * while there are not — a load and a decode take minutes and report no
-     * step, and a bar frozen at zero for that long reads as a run that has
-     * stalled rather than one that is working.
+     * Edge-triggered against the previous snapshot rather than polled, because
+     * "is finished" is not a state anything here holds — only the transition
+     * out of running is observable, and it passes once.
      */
-    private fun Notification.Builder.describe(
-        what: String,
-        model: String?,
-        phase: String,
-        step: Int,
-        steps: Int,
-        rate: Float,
-    ): Notification.Builder {
-        setContentTitle(what)
-        setContentText(
-            listOfNotNull(
-                model,
-                if (steps > 0 && step > 0) "step $step/$steps" else phase,
-                rate.takeIf { it > 0f }?.let { String.format("%.0f s/it", it) },
-            ).joinToString(" · "),
-        )
-        if (steps > 0 && step > 0) setProgress(steps, step, false) else setProgress(0, 0, true)
-        return this
+    private fun announceFinished(now: RunSnapshot) {
+        val was = previous
+        previous = now
+        was ?: return
+
+        // A picture.
+        if (was.still.generating && !now.still.generating) {
+            now.still.lastImage
+                ?.takeIf { it.path != was.still.lastImage?.path }
+                ?.let { image ->
+                    results.notify(
+                        RunResultNotifier.Result.Picture(
+                            title = "Picture ready",
+                            path = image.path,
+                            caption = RunResultNotifier.summary(
+                                0f,
+                                now.still.elapsedMillis,
+                                "${image.width}x${image.height}",
+                            ),
+                        ),
+                    )
+                }
+        }
+
+        // A clip. Its first frame stands for it — there is no muxer here, and a
+        // directory of PNGs has nothing else to show.
+        if (was.clip.generating && !now.clip.generating) {
+            now.clip.clip
+                ?.takeIf { it.directory != was.clip.clip?.directory }
+                ?.let { clip ->
+                    results.notify(
+                        RunResultNotifier.Result.Clip(
+                            title = "Clip ready",
+                            firstFrame = clip.frames.firstOrNull(),
+                            caption = RunResultNotifier.summary(
+                                0f,
+                                now.clip.elapsedMillis,
+                                "${clip.frames.size} frames",
+                            ),
+                        ),
+                    )
+                }
+        }
+
+        // An answer, local or remote. The text is worth showing: it is the
+        // whole result, and a notification that says only "done" makes you open
+        // the app to find out what it said.
+        if (was.chat.generating && !now.chat.generating) {
+            now.chat.messages.lastOrNull()
+                ?.takeIf { it.role == ai.ondevice.core.MessageRole.ASSISTANT }
+                ?.content
+                ?.takeIf { it.isNotBlank() }
+                ?.let { text ->
+                    results.notify(
+                        RunResultNotifier.Result.Words(
+                            title = "Answer ready",
+                            body = text,
+                            caption = RunResultNotifier.summary(
+                                was.chat.tokensPerSecond,
+                                0L,
+                                now.chat.model?.label,
+                            ),
+                        ),
+                    )
+                }
+        }
+
+        // A spoken line.
+        if (was.voice.speaking && !now.voice.speaking) {
+            now.voice.lastAudioPath
+                ?.takeIf { it != was.voice.lastAudioPath }
+                ?.let { path ->
+                    results.notify(
+                        RunResultNotifier.Result.Sound(
+                            title = "Speech ready",
+                            path = path,
+                            caption = RunResultNotifier.summary(
+                                0f,
+                                now.voice.elapsedMillis,
+                                now.voice.ttsModel?.label,
+                            ),
+                        ),
+                    )
+                }
+        }
+
+        // A transcript, which is words and should be read as words.
+        if (was.voice.fileProgress in 0.0001f..0.9999f && now.voice.fileProgress >= 1f) {
+            now.voice.segments
+                .joinToString(" ") { it.text }
+                .trim()
+                .takeIf { it.isNotBlank() }
+                ?.let { text ->
+                    results.notify(
+                        RunResultNotifier.Result.Words(
+                            title = "Transcript ready",
+                            body = text,
+                            caption = RunResultNotifier.summary(
+                                0f,
+                                now.voice.elapsedMillis,
+                                now.voice.sttModel?.label,
+                            ),
+                        ),
+                    )
+                }
+        }
     }
 
     private fun notificationManager() =

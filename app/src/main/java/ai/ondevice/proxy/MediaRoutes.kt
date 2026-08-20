@@ -33,6 +33,7 @@ import java.io.File
 suspend fun ProxyCall.images(mode: ImageMode) {
     val body = body()
     if (mode == ImageMode.UPSCALE) return upscale(body)
+    phase("Making a picture")
 
     val prompt = body.str("prompt").orEmpty()
     if (prompt.isBlank()) throw ProxyRefusal.badRequest("`prompt` is required.")
@@ -97,6 +98,7 @@ suspend fun ProxyCall.images(mode: ImageMode) {
             runner.image(
                 DiffusionRequest(params = params, initImageUri = source, maskPngPath = mask),
                 destination,
+                onProgress = { noteSteps(it) },
             ),
         )
         (outcome as? DiffusionOutcome.Image)?.path
@@ -117,6 +119,7 @@ suspend fun ProxyCall.images(mode: ImageMode) {
  * no exception and nothing in the crash buffer to explain it.
  */
 private suspend fun ProxyCall.upscale(body: JsonObject) {
+    phase("Enlarging a picture")
     val sourcePath = body.str("image")?.let { value ->
         if (value.startsWith("data:") || value.length > PATH_CEILING) {
             media.writeBase64(value.substringAfter(',', value), "image/png")
@@ -199,9 +202,10 @@ private suspend fun ProxyCall.streamImage(
                     destination,
                 ).collect { outcome ->
                     when (outcome) {
-                        is DiffusionOutcome.Progress -> emit(
-                            Sse.data(progressJson(outcome.event)),
-                        )
+                        is DiffusionOutcome.Progress -> {
+                            noteSteps(outcome.event)
+                            emit(Sse.data(progressJson(outcome.event)))
+                        }
                         is DiffusionOutcome.Image -> emit(
                             Sse.data(
                                 imageBody(
@@ -279,6 +283,7 @@ private fun imageBody(
  * hatch for anything that would rather have the file where it lies.
  */
 suspend fun ProxyCall.speech() {
+    phase("Speaking")
     val body = body()
     val text = body.str("input")
         ?: throw ProxyRefusal.badRequest("`input` is required.")
@@ -337,6 +342,7 @@ suspend fun ProxyCall.speech() {
  * a program on the same device is work for nothing.
  */
 suspend fun ProxyCall.transcription(translate: Boolean) {
+    phase(if (translate) "Translating" else "Transcribing")
     val contentType = call.request.headers["Content-Type"].orEmpty()
     val route = if (translate) "translation" else "transcription"
 
@@ -490,48 +496,68 @@ suspend fun ProxyCall.createVideo() {
 
     // The app's scope, not the request's. The whole point is that the run
     // outlives the connection that asked for it.
+    //
+    // Which is also why the wake lock is taken here rather than inherited: the
+    // request that started this is answered and gone within the second, and the
+    // forty minutes of work that follow have nothing else holding the CPU or
+    // keeping the service alive. A clip is the longest thing this device does
+    // and the one most likely to be running with the screen off.
     scope.launch {
-        jobs.update(job.id) { it.copy(state = VideoJobs.State.RUNNING) }
-        runCatching {
-            runner.exclusive(runner.runtimeFor(model)) {
-                runner.loadDiffusion(model, params)
-                runner.activeCancel?.let { jobs.attachCancel(job.id, it) }
-                runner.clip(
-                    VideoRequest(
-                        params = params,
-                        initImageUri = body.str("first_frame"),
-                        endImageUri = body.str("last_frame"),
-                    ),
-                ) { progress ->
+        ai.ondevice.engine.InferenceService.holdingWakeLock(context) {
+            renderClip(job, model, params, body)
+        }
+    }
+
+    json(videoJson(jobs.get(job.id) ?: job))
+}
+
+private suspend fun ProxyCall.renderClip(
+    job: VideoJobs.Job,
+    model: ai.ondevice.data.db.ModelEntity,
+    params: SparseParams,
+    body: JsonObject,
+) {
+    jobs.update(job.id) { it.copy(state = VideoJobs.State.RUNNING) }
+    runCatching {
+        runner.exclusive(runner.runtimeFor(model)) {
+            runner.loadDiffusion(model, params)
+            runner.activeCancel?.let { jobs.attachCancel(job.id, it) }
+            runner.clip(
+                VideoRequest(
+                    params = params,
+                    initImageUri = body.str("first_frame"),
+                    endImageUri = body.str("last_frame"),
+                ),
+            ) { progress ->
+                jobs.update(job.id) {
+                    it.copy(
+                        step = progress.step,
+                        steps = progress.steps,
+                        phase = progress.phase.label,
+                        secondsPerStep = progress.secondsPerStep,
+                    )
+                }
+            }.collect { outcome ->
+                if (outcome is DiffusionOutcome.Clip) {
                     jobs.update(job.id) {
                         it.copy(
-                            step = progress.step,
-                            steps = progress.steps,
-                            phase = progress.phase.label,
-                            secondsPerStep = progress.secondsPerStep,
+                            state = VideoJobs.State.COMPLETED,
+                            completedAt = System.currentTimeMillis(),
+                            directory = outcome.clip.directory,
+                            frames = outcome.clip.frames,
+                            fps = outcome.clip.fps,
+                            audioPath = outcome.clip.audioPath,
                         )
-                    }
-                }.collect { outcome ->
-                    if (outcome is DiffusionOutcome.Clip) {
-                        jobs.update(job.id) {
-                            it.copy(
-                                state = VideoJobs.State.COMPLETED,
-                                completedAt = System.currentTimeMillis(),
-                                directory = outcome.clip.directory,
-                                frames = outcome.clip.frames,
-                                fps = outcome.clip.fps,
-                                audioPath = outcome.clip.audioPath,
-                            )
-                        }
                     }
                 }
             }
-            runner.touch(model.id)
-        }.onFailure { failure ->
-            // A cancel arrives here as a failure too, and the two must not read
-            // the same on the wire: one is something that went wrong and the
-            // other is something that was asked for.
-            if (jobs.get(job.id)?.state == VideoJobs.State.CANCELLED) return@onFailure
+        }
+        runner.touch(model.id)
+    }.onFailure { failure ->
+        // A cancel arrives here as a failure too, and the two must not read the
+        // same on the wire: one is something that went wrong and the other is
+        // something that was asked for.
+        if (jobs.get(job.id)?.state != VideoJobs.State.CANCELLED) {
             val refusal = ChatPipeline.refusalFor(failure)
             jobs.update(job.id) {
                 it.copy(
@@ -542,10 +568,14 @@ suspend fun ProxyCall.createVideo() {
                 )
             }
         }
-        jobs.finished(job.id)
     }
+    jobs.finished(job.id)
+}
 
-    json(videoJson(jobs.get(job.id) ?: job))
+/** Diffusion counts steps; the notification is the only place they show once
+ *  the app is off screen. */
+private fun ProxyCall.noteSteps(event: DiffusionEvent.Progress) {
+    log.update(requestId) { it.copy(step = event.step, steps = event.steps) }
 }
 
 // — small shared helpers —

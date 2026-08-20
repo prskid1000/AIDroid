@@ -224,6 +224,26 @@ class ProxyViewModel @Inject constructor(
             val current = ProxyDocument.parse(prefs.proxyDocument.first())
             val next = transform(current)
             prefs.setProxyDocument(next.encode())
+
+            // The service first, then the server.
+            //
+            // `sync()` opens the socket in whatever process calls it, and this
+            // one is the app's. That worked and was wrong: nothing was keeping
+            // that process alive, so the port stayed open exactly as long as
+            // the app happened to survive in the background — and the screen
+            // said "Listening" throughout. The service is what the platform
+            // will not reclaim, and starting it from here is allowed because a
+            // screen is on and this is a tap.
+            if (ProxyConfig(next).enabled) {
+                runCatching {
+                    context.startForegroundService(
+                        android.content.Intent(context, InferenceService::class.java),
+                    )
+                }.onFailure {
+                    android.util.Log.w("ProxyViewModel", "service would not start", it)
+                }
+            }
+
             // Applied as it is edited rather than behind a Save.
             //
             // Two of these keys carry `requiresReload` and the rest take effect

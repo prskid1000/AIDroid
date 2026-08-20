@@ -278,6 +278,18 @@ class ChatPipeline(
                         is GenerationEvent.Stats -> {
                             generatedTokens = event.generatedTokens
                             rate = event.tokensPerSecond
+                            // Pushed out as it arrives rather than kept for the
+                            // summary. The notification is the only view of this
+                            // run once the app is off screen, and a rate that
+                            // only appears after the answer does is a rate
+                            // nobody needed.
+                            log.update(requestId) {
+                                it.copy(
+                                    rounds = rounds,
+                                    generatedTokens = event.generatedTokens,
+                                    tokensPerSecond = event.tokensPerSecond,
+                                )
+                            }
                         }
                         // Held back rather than forwarded: the loop has to see
                         // the name before the client does, or an intercepted

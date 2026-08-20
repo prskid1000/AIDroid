@@ -46,6 +46,15 @@ class ProxyCall(
     private val allowedOrigins: List<String>,
 ) {
 
+    /**
+     * Name what this request is doing, for the notification.
+     *
+     * The route's word rather than the path's: `/v1/audio/speech` is
+     * "Speaking", and the notification is read by somebody who did not send the
+     * request and should not have to know the protocol to understand it.
+     */
+    fun phase(name: String) = log.phase(requestId, name)
+
     /** The body, parsed once. */
     suspend fun body(): JsonObject {
         val raw = call.receiveText()

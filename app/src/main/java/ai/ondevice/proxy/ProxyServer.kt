@@ -87,6 +87,14 @@ class ProxyServer @Inject constructor(
     private val _status = MutableStateFlow(Status())
     val status: StateFlow<Status> = _status.asStateFlow()
 
+    /**
+     * What the proxy is working on, for the notification.
+     *
+     * Forwarded from the request log rather than tracked again here: the log
+     * already knows, and a second copy is a second thing that can be stale.
+     */
+    val activity: StateFlow<ProxyActivity?> get() = log.activity
+
     private var server: EmbeddedServer<*, *>? = null
 
     /**
@@ -100,6 +108,9 @@ class ProxyServer @Inject constructor(
     private var admissionDepth = DEFAULT_QUEUE_DEPTH
 
     private val media = FileMediaSink { runner.scratchDir("inbound") }
+
+    /** Registered once, so a tailnet that comes back brings the server with it. */
+    private var networkWatch: android.net.ConnectivityManager.NetworkCallback? = null
 
     private suspend fun document(): ProxyDocument =
         ProxyDocument.parse(prefs.proxyDocument.first())
@@ -117,9 +128,11 @@ class ProxyServer @Inject constructor(
         val config = ProxyConfig(document())
         if (!config.enabled) {
             stop()
+            unwatchNetwork()
             _status.value = Status()
             return
         }
+        watchNetwork()
 
         when (val bind = Reachability.resolveBindAddress(config.bind)) {
             is Reachability.BindResult.NoTailnet -> {
@@ -185,6 +198,72 @@ class ProxyServer @Inject constructor(
         server = null
         _status.update { it.copy(listening = false, hostname = null) }
     }
+
+    /**
+     * Re-sync whenever the set of networks changes.
+     *
+     * Without this the tailnet address is read exactly once, at whatever moment
+     * the service happened to start, and a VPN that was reconnecting at that
+     * instant left the proxy refusing forever — switched on, saying "Tailscale
+     * is not connected", and never asking again. Tailscale on Android is a VPN
+     * that drops on a network change, a doze, or its own reconnect, so "once"
+     * was never going to be enough.
+     *
+     * Every callback, not only the VPN one: losing Wi-Fi tears down the tunnel
+     * over it, and the tunnel coming back is a separate event from the network
+     * under it coming back. Both end in the same idempotent [sync].
+     */
+    private fun watchNetwork() {
+        if (networkWatch != null) return
+        val manager = context.getSystemService(android.net.ConnectivityManager::class.java)
+            ?: return
+        val callback = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) = resync()
+            override fun onLost(network: android.net.Network) = resync()
+            override fun onCapabilitiesChanged(
+                network: android.net.Network,
+                capabilities: android.net.NetworkCapabilities,
+            ) = resync()
+        }
+        networkWatch = callback
+        runCatching {
+            manager.registerNetworkCallback(
+                android.net.NetworkRequest.Builder()
+                    // VPN transports are not in the default request, and the
+                    // tailnet is a VPN — asking for the default network only
+                    // would miss the one interface this cares about.
+                    .removeCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+                    .build(),
+                callback,
+            )
+        }.onFailure { networkWatch = null }
+    }
+
+    private fun unwatchNetwork() {
+        val callback = networkWatch ?: return
+        networkWatch = null
+        runCatching {
+            context.getSystemService(android.net.ConnectivityManager::class.java)
+                ?.unregisterNetworkCallback(callback)
+        }
+    }
+
+    /**
+     * Debounced, because a single reconnect produces a burst of callbacks.
+     *
+     * Re-binding a socket per callback would mean tearing the server down and
+     * up several times in a second, and each teardown is a window where a
+     * client in the middle of a request is dropped.
+     */
+    private fun resync() {
+        resyncJob?.cancel()
+        resyncJob = scope.launch {
+            kotlinx.coroutines.delay(RESYNC_DEBOUNCE_MILLIS)
+            runCatching { sync() }
+        }
+    }
+
+    private var resyncJob: kotlinx.coroutines.Job? = null
 
     val listening: Boolean get() = server != null && _status.value.listening
 
@@ -290,23 +369,35 @@ class ProxyServer @Inject constructor(
                 // and a connection that never returns is the hardest kind of
                 // failure to diagnose from the far end.
                 withTimeoutOrNull(config.queueTimeoutSeconds.toLong() * 1000L) {
-                    block(
-                        ProxyCall(
-                            call = call,
-                            protocol = protocol,
-                            config = config,
-                            requestId = id,
-                            runner = runner,
-                            log = log,
-                            jobs = videoJobs,
-                            media = media,
-                            toolProviders = toolProviders,
-                            prefs = prefs,
-                            scope = scope,
-                            context = context,
-                            allowedOrigins = document.corsOrigins,
-                        ),
-                    )
+                    // Held for the whole request, exactly as every in-app
+                    // generation path holds it.
+                    //
+                    // The foreground service keeps the *process*; this keeps the
+                    // *CPU*. Without it a request arriving while the screen is
+                    // off runs against a core the kernel is free to idle, and
+                    // the symptom is a generation that takes six times as long
+                    // for no reason anyone can see from either end. It also
+                    // counts the run, which is what stops the service deciding
+                    // it has nothing to do halfway through one.
+                    ai.ondevice.engine.InferenceService.holdingWakeLock(context) {
+                        block(
+                            ProxyCall(
+                                call = call,
+                                protocol = protocol,
+                                config = config,
+                                requestId = id,
+                                runner = runner,
+                                log = log,
+                                jobs = videoJobs,
+                                media = media,
+                                toolProviders = toolProviders,
+                                prefs = prefs,
+                                scope = scope,
+                                context = context,
+                                allowedOrigins = document.corsOrigins,
+                            ),
+                        )
+                    }
                 } ?: throw ProxyRefusal.unavailable(
                     "Gave up after ${config.queueTimeoutSeconds}s waiting for this device's engine.",
                     "Raise `proxy.queue_timeout_sec`, or wait for whatever is running to finish.",
@@ -592,6 +683,9 @@ class ProxyServer @Inject constructor(
         const val GRACE_MILLIS = 500L
         const val TIMEOUT_MILLIS = 2_000L
         const val TOKEN_BYTES = 24
+
+        /** Long enough to let a reconnect settle, short enough to feel immediate. */
+        const val RESYNC_DEBOUNCE_MILLIS = 1_500L
     }
 }
 
