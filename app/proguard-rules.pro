@@ -36,3 +36,32 @@
 # only for release, so every build anyone had run was a debug one and the
 # release variant had never got as far as R8.
 -dontwarn com.google.errorprone.annotations.**
+
+# Ktor, which serves the proxy (SPEC 18).
+#
+# Three separate things, and only the first is obvious.
+#
+# The CIO engine is named directly at the `embeddedServer(CIO, ...)` call, so
+# it needs no ServiceLoader rule — but Ktor's own class graph reaches optional
+# integrations it does not ship, and R8 reports every one as a missing class
+# rather than as the dead branch it is. slf4j is the loud one: Ktor logs
+# through it, Android has no binding, and the no-op fallback is reached by a
+# reflective lookup R8 cannot see through.
+-dontwarn io.ktor.**
+-dontwarn org.slf4j.**
+-dontwarn kotlinx.coroutines.debug.**
+
+# Ktor reads its own version out of the jar at startup and identifies internal
+# classes by name in a couple of places. Keeping the names is cheaper than
+# finding out which ones at runtime, and this package is small.
+-keep class io.ktor.util.debug.** { *; }
+-keepclassmembers class io.ktor.** {
+    volatile <fields>;
+}
+
+# The wire types the codecs serialise. They are ai.ondevice classes and so are
+# already covered by the serializer rule above; named here because the proxy's
+# config document is the one thing that is read back from storage written by an
+# older build, and a renamed field there is a configuration silently reset to
+# defaults rather than an error anybody would see.
+-keep,allowobfuscation @kotlinx.serialization.Serializable class ai.ondevice.proxy.** { *; }

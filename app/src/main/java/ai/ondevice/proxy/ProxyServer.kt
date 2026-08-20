@@ -437,7 +437,7 @@ class ProxyServer @Inject constructor(
                 put("id", name)
                 if (anthropic) {
                     put("type", "model")
-                    put("display_name", model?.displayName ?: name)
+                    put("display_name", model?.label ?: name)
                     put(
                         "created_at",
                         java.time.Instant.ofEpochMilli(model?.installedAt ?: 0L).toString(),
@@ -446,6 +446,10 @@ class ProxyServer @Inject constructor(
                     put("object", "model")
                     put("created", (model?.installedAt ?: 0L) / 1000)
                     put("owned_by", "on-device")
+                    // Present on both shapes, because it is the second name
+                    // this row answers to and a client cannot discover it
+                    // otherwise. Anthropic's schema has the field already.
+                    put("display_name", model?.label ?: name)
                 }
                 put("modality", (model?.modality ?: Modality.UNKNOWN).name.lowercase())
                 model?.contextLength?.let { put("context_length", it) }
@@ -483,7 +487,7 @@ class ProxyServer @Inject constructor(
                 buildJsonObject {
                     put("id", id)
                     put("object", "model")
-                    put("display_name", model.displayName)
+                    put("display_name", model.label)
                     put("modality", model.modality.name.lowercase())
                     put("owned_by", "on-device")
                     model.contextLength?.let { put("context_length", it) }

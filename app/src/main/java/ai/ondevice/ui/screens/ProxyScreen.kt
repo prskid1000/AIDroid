@@ -161,10 +161,12 @@ fun ProxyScreen(
             SectionKicker("Model mapping", Modifier.padding(top = 20.dp, bottom = 8.dp))
             AliasList(state, viewModel)
             NHelp(
-                "Rewrites the model a request names before anything else looks at it. This is " +
-                    "what lets an unmodified Claude Code or OpenAI client point at this phone: " +
-                    "it sends the name it was configured with, and this turns it into whatever " +
-                    "is actually installed.",
+                "Rewrites the model a request names before anything else looks at it — what " +
+                    "lets an unmodified Claude Code or OpenAI client point here: it sends the " +
+                    "name it was configured with, and this turns it into whatever is installed. " +
+                    "You only need a row when the client's name is fixed. A request may also " +
+                    "ask for a model by its full id, or by the name you gave it on its own " +
+                    "screen.",
                 Modifier.padding(top = 6.dp),
             )
 
@@ -392,6 +394,7 @@ private fun AliasList(state: ai.ondevice.ui.vm.ProxyState, viewModel: ProxyViewM
                 NInput(
                     value = target,
                     onValueChange = { viewModel.setAlias(alias, it) },
+                    placeholder = "owner/repo:quant",
                     modifier = Modifier.weight(1f),
                     textStyle = NocturneType.MonoSm,
                     code = true,

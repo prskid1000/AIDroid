@@ -65,15 +65,44 @@ class ProxyCall(
      */
     suspend fun resolveModel(requested: String, expect: Set<Modality>, route: String): ModelEntity {
         val target = config.resolveAlias(requested)
+        val installed = runner.installed()
+
         val model = runner.model(target)
-            ?: runner.installed().firstOrNull { it.id.equals(target, ignoreCase = true) }
+            ?: installed.firstOrNull { it.id.equals(target, ignoreCase = true) }
+            ?: byLabel(target, installed)
             ?: throw ProxyRefusal.notFound(
                 "No model called `$requested` is installed on this device.",
-                "GET /v1/models lists what is, including the aliases configured here.",
+                "GET /v1/models lists what is — by id, by the name you gave it on the model's " +
+                    "own screen, and by any alias configured here.",
             )
         ChatPipeline.requireModality(model, expect, route)
         log.update(requestId) { it.copy(requestedModel = requested, resolvedModel = model.id) }
         return model
+    }
+
+    /**
+     * The name a person gave this model, or failing that its repo name.
+     *
+     * A model id here is `owner/repo:quant` — `unsloth/Qwen3.5-9B-GGUF:Q4_K_M` —
+     * which is precise, unambiguous and no fun at all to type into a client's
+     * config file. The app already has the answer: the model's own screen has a
+     * rename field, and [ModelEntity.label] is that name or the repo name when
+     * there is none. Matching it means renaming a model to `local` makes
+     * `"model": "local"` work, with no alias to keep in step.
+     *
+     * Two rows can share a label — two quants of one repo, most obviously — and
+     * picking one would be picking silently. Both are named instead, which is
+     * something the caller can act on; an alias or the full id settles it.
+     */
+    private fun byLabel(target: String, installed: List<ModelEntity>): ModelEntity? {
+        val matches = installed.filter { it.label.equals(target, ignoreCase = true) }
+        if (matches.size <= 1) return matches.firstOrNull()
+        throw ProxyRefusal.conflict(
+            "`$target` names ${matches.size} installed models: " +
+                matches.joinToString(", ") { "`${it.id}`" } + ".",
+            "Ask for one by its full id, rename one of them on its own screen, or add an " +
+                "alias under Settings → Proxy.",
+        )
     }
 
     /** The model for a modality when a request named none. */
