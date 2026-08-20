@@ -148,6 +148,7 @@ fun ProxyScreen(
             StringList(
                 values = state.document.coreTools,
                 placeholder = "Read",
+                addLabel = "Add a core tool",
                 onChange = viewModel::setCoreTools,
             )
             NHelp(
@@ -191,7 +192,7 @@ fun ProxyScreen(
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
             }
-            NButton("Add a client", onClick = viewModel::addProfile, leadingIcon = NIcons.PlusThin)
+            AddButton("Add a client", onClick = viewModel::addProfile)
             NHelp(
                 "Per-client answers, matched on a request header — a User-Agent containing " +
                     "\"claude-cli\", a Referer containing your own page. A token matches first " +
@@ -204,7 +205,7 @@ fun ProxyScreen(
             NButton(
                 "Recent requests",
                 onClick = onOpenLog,
-                modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
+                modifier = Modifier.padding(top = 8.dp),
                 block = true,
             )
 
@@ -427,7 +428,9 @@ private fun AliasList(state: ai.ondevice.ui.vm.ProxyState, viewModel: ProxyViewM
                         pending = ""
                     }
                 },
+                style = NButtonStyle.Primary,
                 enabled = pending.isNotBlank(),
+                minHeight = 36.dp,
             )
         }
     }
@@ -460,7 +463,7 @@ private fun OriginList(state: ai.ondevice.ui.vm.ProxyState, viewModel: ProxyView
                 )
             }
         }
-        NButton("Add an origin", onClick = viewModel::addCorsOrigin, leadingIcon = NIcons.PlusThin)
+        AddButton("Add an origin", onClick = viewModel::addCorsOrigin)
     }
 }
 
@@ -469,6 +472,7 @@ private fun OriginList(state: ai.ondevice.ui.vm.ProxyState, viewModel: ProxyView
 private fun StringList(
     values: List<String>,
     placeholder: String,
+    addLabel: String,
     onChange: (List<String>) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -498,11 +502,7 @@ private fun StringList(
                 )
             }
         }
-        NButton(
-            "Add",
-            onClick = { onChange(values + "") },
-            leadingIcon = NIcons.PlusThin,
-        )
+        AddButton(addLabel) { onChange(values + "") }
     }
 }
 
@@ -588,9 +588,31 @@ private fun ProfileCard(
             "Remove this client",
             onClick = onRemove,
             style = NButtonStyle.Ghost,
-            modifier = Modifier.fillMaxWidth(),
+            block = true,
         )
     }
+}
+
+/**
+ * The one shape every "add another of these" button on this screen takes.
+ *
+ * Full width and accent-outlined, which is what the token button beside it
+ * already looked like. They were content-width with a small plus glyph, and at
+ * that size the three of them read as incidental links wedged under their lists
+ * rather than as the action each section exists for — the odd one out being the
+ * only button on the screen that mattered less than the rest.
+ *
+ * One composable rather than the same three arguments repeated, so the next
+ * list to gain an Add cannot be spelled differently.
+ */
+@Composable
+private fun AddButton(text: String, onClick: () -> Unit) {
+    NButton(
+        text,
+        onClick = onClick,
+        style = NButtonStyle.Primary,
+        block = true,
+    )
 }
 
 @Composable
