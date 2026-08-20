@@ -105,6 +105,9 @@ class ProxyServer @Inject constructor(
      */
     val activity: StateFlow<ProxyActivity?> get() = log.activity
 
+    /** The clip being made, if one is. Forwarded for the same reason as above. */
+    val videoJob: StateFlow<VideoJobs.Job?> get() = videoJobs.current
+
     private var server: EmbeddedServer<*, *>? = null
 
     /**

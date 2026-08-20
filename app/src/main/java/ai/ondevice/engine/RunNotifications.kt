@@ -30,6 +30,15 @@ data class RunSnapshot(
     val voice: VoiceState,
     val served: ProxyServer.Status = ProxyServer.Status(),
     val remote: ProxyActivity? = null,
+    /** A clip being made for somebody who is not holding a connection. */
+    val videoJob: ai.ondevice.proxy.VideoJobs.Job? = null,
+    /**
+     * Which runtime holds weights, across all five.
+     *
+     * [engine] is llama's alone, so a resting line built from it announced
+     * "no model loaded" while sd.cpp was holding five gigabytes.
+     */
+    val resident: String? = null,
 )
 
 /**
@@ -88,6 +97,20 @@ object RunStatus {
                 steps = still.progressSteps,
             )
 
+            // Before the remote branch, because a job outlives the request
+            // that made it — by the time it is sampling there is no request.
+            s.videoJob != null -> RunLine(
+                title = "Making a clip",
+                detail = parts(
+                    s.videoJob.model.substringAfterLast('/'),
+                    s.videoJob.phase.takeIf { it.isNotBlank() },
+                    rate(s.videoJob.secondsPerStep),
+                    s.videoJob.queuedBehind.takeIf { it > 0 }?.let { "$it queued" },
+                ),
+                step = s.videoJob.step,
+                steps = s.videoJob.steps,
+            )
+
             s.voice.speaking -> RunLine(
                 title = "Speaking",
                 detail = parts(s.voice.ttsModel?.label, elapsed(s.voice.elapsedMillis)),
@@ -144,7 +167,12 @@ object RunStatus {
                 title = "Serving the API",
                 detail = parts(
                     s.served.url,
-                    s.engine.loaded?.modelId?.let { "$it loaded" } ?: "no model loaded",
+                    // Asked of the residency rather than of llama's own state,
+                    // which said "no model loaded" while the diffusion engine
+                    // held five gigabytes.
+                    s.engine.loaded?.modelId?.let { "$it loaded" }
+                        ?: s.resident?.let { "$it resident" }
+                        ?: "no model loaded",
                 ),
             )
 

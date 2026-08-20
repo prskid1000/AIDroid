@@ -45,6 +45,8 @@ class VideoJobs @Inject constructor() {
         val audioPath: String? = null,
         val error: String? = null,
         val suggestion: String? = null,
+        /** Jobs waiting behind this one, for the notification's last clause. */
+        val queuedBehind: Int = 0,
     ) {
         val terminal: Boolean get() = state == State.COMPLETED || state == State.FAILED || state == State.CANCELLED
 
@@ -70,11 +72,26 @@ class VideoJobs @Inject constructor() {
     private val _jobs = MutableStateFlow<List<Job>>(emptyList())
     val jobs: StateFlow<List<Job>> = _jobs.asStateFlow()
 
+    /**
+     * The one job worth naming, or null when none is running.
+     *
+     * Its own flow because a clip is the only run with no request behind it:
+     * the caller was answered within the second and hung up, so nothing in the
+     * request log knows this is happening and the notification had nothing to
+     * say. Measured — three minutes of "Working" with an empty second line.
+     *
+     * The oldest still running, because the engine gate admits one; anything
+     * else is queued behind it, and [Job.queuedBehind] is what says so.
+     */
+    private val _current = MutableStateFlow<Job?>(null)
+    val current: StateFlow<Job?> = _current.asStateFlow()
+
     private val cancels = mutableMapOf<String, () -> Unit>()
 
     fun create(model: String, prompt: String): Job {
         val job = Job(model = model, prompt = prompt)
         _jobs.update { (listOf(job) + it).take(CAPACITY) }
+        recompute()
         return job
     }
 
@@ -82,6 +99,14 @@ class VideoJobs @Inject constructor() {
 
     fun update(id: String, transform: (Job) -> Job) {
         _jobs.update { existing -> existing.map { if (it.id == id) transform(it) else it } }
+        recompute()
+    }
+
+    private fun recompute() {
+        val live = _jobs.value.filter { !it.terminal }
+        val next = live.minByOrNull { it.createdAt }
+            ?.copy(queuedBehind = (live.size - 1).coerceAtLeast(0))
+        if (next != _current.value) _current.value = next
     }
 
     fun attachCancel(id: String, cancel: () -> Unit) {

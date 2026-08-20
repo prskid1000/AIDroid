@@ -60,6 +60,8 @@ class InferenceService : LifecycleService() {
      */
     @Inject lateinit var proxy: ai.ondevice.proxy.ProxyServer
 
+    @Inject lateinit var runner: ModelRunner
+
     private var wakeLock: PowerManager.WakeLock? = null
 
     @Inject lateinit var foreground: ai.ondevice.engine.workflow.ForegroundWatcher
@@ -83,6 +85,7 @@ class InferenceService : LifecycleService() {
         val voice: ai.ondevice.ui.vm.VoiceState,
         val served: ai.ondevice.proxy.ProxyServer.Status,
         val remote: ai.ondevice.proxy.ProxyActivity?,
+        val clip: ai.ondevice.proxy.VideoJobs.Job?,
     )
 
     override fun onCreate() {
@@ -134,8 +137,9 @@ class InferenceService : LifecycleService() {
                 voice.state,
                 proxy.status,
                 proxy.activity,
-            ) { conversation, spoken, served, remote ->
-                OtherRuns(conversation, spoken, served, remote)
+                proxy.videoJob,
+            ) { conversation, spoken, served, remote, clip ->
+                OtherRuns(conversation, spoken, served, remote, clip)
             }
 
             combine(local, elsewhere) { l, o ->
@@ -148,6 +152,8 @@ class InferenceService : LifecycleService() {
                     voice = o.voice,
                     served = o.served,
                     remote = o.remote,
+                    videoJob = o.clip,
+                    resident = runner.residentRuntime,
                 )
             }
                 .collectLatest { snapshot ->
