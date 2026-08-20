@@ -34,7 +34,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -394,50 +393,49 @@ class ProxyServer @Inject constructor(
                 )
             }
             try {
-                // The engine gate is inside ModelRunner and admits one at a
-                // time, so waiting is the normal case. Waiting forever is not,
-                // and a connection that never returns is the hardest kind of
-                // failure to diagnose from the far end.
-                withTimeoutOrNull(config.queueTimeoutSeconds.toLong() * 1000L) {
-                    // Held for the whole request, exactly as every in-app
-                    // generation path holds it.
-                    //
-                    // The foreground service keeps the *process*; this keeps the
-                    // *CPU*. Without it a request arriving while the screen is
-                    // off runs against a core the kernel is free to idle, and
-                    // the symptom is a generation that takes six times as long
-                    // for no reason anyone can see from either end. It also
-                    // counts the run, which is what stops the service deciding
-                    // it has nothing to do halfway through one.
-                    ai.ondevice.engine.InferenceService.holdingWakeLock(context) {
-                        block(
-                            ProxyCall(
-                                call = call,
-                                protocol = protocol,
-                                config = config,
-                                requestId = id,
-                                runner = runner,
-                                log = log,
-                                jobs = videoJobs,
-                                media = media,
-                                toolProviders = toolProviders,
-                                prefs = prefs,
-                                scope = scope,
-                                context = context,
-                                allowedOrigins = document.corsOrigins,
-                            ),
-                        )
-                    }
-                } ?: throw ProxyRefusal.unavailable(
-                    "Gave up after ${config.queueTimeoutSeconds}s waiting for this device's engine.",
-                    "Raise `proxy.queue_timeout_sec`, or wait for whatever is running to finish.",
-                    retryAfter = RETRY_AFTER_SECONDS,
-                )
+                // No timeout around the request itself.
+                //
+                // `proxy.queue_timeout_sec` bounds how long a caller waits for
+                // the engine, and this used to wrap the whole request in it —
+                // which bounded the *work*. A 120-second budget meant to stop a
+                // queue growing without end also refused every request that
+                // legitimately ran longer, and an image generation refused at
+                // exactly 120s having waited for nothing: the engine was free
+                // the whole time and the checkpoint was still loading. The wait
+                // now lives on the gate, in ModelRunner, where the waiting
+                // actually happens.
+                ai.ondevice.engine.InferenceService.holdingWakeLock(context) {
+                    block(
+                        ProxyCall(
+                            call = call,
+                            protocol = protocol,
+                            config = config,
+                            requestId = id,
+                            runner = runner,
+                            log = log,
+                            jobs = videoJobs,
+                            media = media,
+                            toolProviders = toolProviders,
+                            prefs = prefs,
+                            scope = scope,
+                            context = context,
+                            allowedOrigins = document.corsOrigins,
+                        ),
+                    )
+                }
                 log.finish(id, call.response.status()?.value ?: HttpStatusCode.OK.value)
             } finally {
                 admission.release()
             }
         } catch (refusal: ProxyRefusal) {
+            log.finish(id, refusal.status, refusal.message)
+            call.refuse(protocol, refusal)
+        } catch (busy: ai.ondevice.engine.EngineBusy) {
+            val refusal = ProxyRefusal.unavailable(
+                busy.message ?: "This device is busy.",
+                "Raise `proxy.queue_timeout_sec`, or wait for the current run to finish.",
+                retryAfter = RETRY_AFTER_SECONDS,
+            )
             log.finish(id, refusal.status, refusal.message)
             call.refuse(protocol, refusal)
         } catch (failure: Throwable) {

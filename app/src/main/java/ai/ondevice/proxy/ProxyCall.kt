@@ -55,6 +55,16 @@ class ProxyCall(
      */
     fun phase(name: String) = log.phase(requestId, name)
 
+    /**
+     * How long this request will wait for the engine before giving up.
+     *
+     * The wait, not the run. `proxy.queue_timeout_sec` exists so a caller
+     * queued behind something long is told so rather than left holding a
+     * connection; it has nothing to say about how long the work itself takes,
+     * and a clip on this hardware is minutes even on the Turbo checkpoint.
+     */
+    fun gateWait(): Long = config.queueTimeoutSeconds * 1000L
+
     /** The body, parsed once, and kept for the log on the way past. */
     suspend fun body(): JsonObject {
         val raw = call.receiveText()

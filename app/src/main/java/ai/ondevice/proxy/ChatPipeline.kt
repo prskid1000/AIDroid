@@ -227,7 +227,7 @@ class ChatPipeline(
         sink.opening()
 
         val runtime = runner.runtimeFor(prepared.model)
-        runner.exclusive(runtime) {
+        runner.exclusive(runtime, waitMillis = config.queueTimeoutSeconds * 1000L) {
             runner.touch(prepared.model.id)
 
             while (rounds < config.maxRoundTrips) {

@@ -56,6 +56,9 @@ class ModelRunner @Inject constructor(
      */
     private val gate = Mutex()
 
+    /** How often to re-ask for the gate while waiting. */
+    private val GATE_POLL_MILLIS = 100L
+
     /** Which runtime currently holds weights, so we know what to let go of. */
     @Volatile
     var residentRuntime: String? = null
@@ -102,6 +105,18 @@ class ModelRunner @Inject constructor(
     suspend fun <T> exclusive(
         runtimeId: String,
         onUnload: (String) -> Unit = {},
+        /**
+         * How long to wait for the gate before giving up, or null to wait.
+         *
+         * Bounds the **wait**, never the run. Those are different quantities
+         * and conflating them is a bug this had: the proxy wrapped its whole
+         * request in the same timeout, so a 120-second budget meant to stop a
+         * caller queueing forever also killed every request that legitimately
+         * took longer than two minutes. Measured: an image generation refused
+         * at 120s while the checkpoint was still loading, having waited for
+         * nothing at all — the engine was free the entire time.
+         */
+        waitMillis: Long? = null,
         block: suspend () -> T,
     ): T {
         val held = kotlinx.coroutines.currentCoroutineContext()[Held]
@@ -113,14 +128,37 @@ class ModelRunner @Inject constructor(
                 residentRuntime = runtimeId
             }
         }
-        return gate.withLock {
+
+        acquire(waitMillis)
+        try {
             makeRoomFor(runtimeId, onUnload)
-            try {
-                kotlinx.coroutines.withContext(Held(runtimeId)) { block() }
-            } finally {
-                residentRuntime = runtimeId
-                activeCancel = null
+            return kotlinx.coroutines.withContext(Held(runtimeId)) { block() }
+        } finally {
+            residentRuntime = runtimeId
+            activeCancel = null
+            gate.unlock()
+        }
+    }
+
+    /**
+     * Take the gate, waiting at most [waitMillis].
+     *
+     * Polled rather than `withTimeoutOrNull { gate.lock() }`, because that
+     * races: the timeout can fire after `lock()` has succeeded and before the
+     * result is returned, and the lock is then held by nobody and released by
+     * nothing. `tryLock` cannot be interrupted between deciding and taking.
+     */
+    private suspend fun acquire(waitMillis: Long?) {
+        if (waitMillis == null) {
+            gate.lock()
+            return
+        }
+        val deadline = System.currentTimeMillis() + waitMillis
+        while (!gate.tryLock()) {
+            if (System.currentTimeMillis() >= deadline) {
+                throw EngineBusy(waitMillis / 1000)
             }
+            kotlinx.coroutines.delay(GATE_POLL_MILLIS)
         }
     }
 
@@ -426,6 +464,11 @@ class ModelRunner @Inject constructor(
         runCatching { db.models().touch(modelId, System.currentTimeMillis()) }
     }
 }
+
+/** The gate was held by something else for longer than the caller would wait. */
+class EngineBusy(val waitedSeconds: Long) : Exception(
+    "Gave up after ${waitedSeconds}s waiting for this device's engine.",
+)
 
 /** What a run produced, as it produced it. */
 sealed interface DiffusionOutcome {

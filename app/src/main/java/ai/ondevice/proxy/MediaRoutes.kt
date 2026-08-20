@@ -92,7 +92,7 @@ suspend fun ProxyCall.images(mode: ImageMode) {
         return
     }
 
-    val path = runner.exclusive(runner.runtimeFor(model)) {
+    val path = runner.exclusive(runner.runtimeFor(model), waitMillis = gateWait()) {
         runner.loadDiffusion(model, params)
         val outcome = collectLast(
             runner.image(
@@ -161,7 +161,7 @@ private suspend fun ProxyCall.upscale(body: JsonObject) {
     val stamp = System.currentTimeMillis()
     val destination = File(runner.scratchDir("images"), "upscaled-$stamp.png")
 
-    val bigger = runner.exclusive(runner.runtimeFor(model)) {
+    val bigger = runner.exclusive(runner.runtimeFor(model), waitMillis = gateWait()) {
         runner.upscale(
             ai.ondevice.engine.DiffusionImage(decoded.width, decoded.height, pixels),
             esrgan,
@@ -195,7 +195,7 @@ private suspend fun ProxyCall.streamImage(
 ) {
     stream { emit ->
         runCatching {
-            runner.exclusive(runner.runtimeFor(model)) {
+            runner.exclusive(runner.runtimeFor(model), waitMillis = gateWait()) {
                 runner.loadDiffusion(model, params)
                 runner.image(
                     DiffusionRequest(params = params, initImageUri = source, maskPngPath = mask),
@@ -306,7 +306,7 @@ suspend fun ProxyCall.speech() {
         runner.scratchDir("speech"),
         "http-${System.currentTimeMillis()}.wav",
     )
-    val file = runner.exclusive(runner.runtimeFor(model)) {
+    val file = runner.exclusive(runner.runtimeFor(model), waitMillis = gateWait()) {
         runner.speak(model, params, text, destination)
     }
     runner.touch(model.id)
@@ -376,7 +376,7 @@ suspend fun ProxyCall.transcription(translate: Boolean) {
     options.str("prompt")?.let { params = params.with("prompt", it) }
     options.f("temperature")?.let { params = params.with("temperature", it) }
 
-    val segments = runner.exclusive(runner.runtimeFor(model)) {
+    val segments = runner.exclusive(runner.runtimeFor(model), waitMillis = gateWait()) {
         runner.transcribe(model, params, audio)
     }
     runner.touch(model.id)
@@ -523,6 +523,9 @@ private suspend fun ProxyCall.renderClip(
 ) {
     jobs.update(job.id) { it.copy(state = VideoJobs.State.RUNNING) }
     runCatching {
+        // No wait limit. The request that started this was answered and hung up
+        // within the second, so there is nobody to refuse to — a clip queued
+        // behind a conversation should wait for it, not fail.
         runner.exclusive(runner.runtimeFor(model)) {
             runner.loadDiffusion(model, params)
             runner.activeCancel?.let { jobs.attachCancel(job.id, it) }

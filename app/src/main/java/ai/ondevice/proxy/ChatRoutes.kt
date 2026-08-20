@@ -311,7 +311,7 @@ suspend fun ProxyCall.countTokens() {
         "token counting",
     )
 
-    val rendered = runner.exclusive(runner.runtimeFor(model)) {
+    val rendered = runner.exclusive(runner.runtimeFor(model), waitMillis = gateWait()) {
         val engine = runner.loadText(model, runner.paramsFor(model, request.params))
         engine.renderPrompt(
             GenerateRequest(
