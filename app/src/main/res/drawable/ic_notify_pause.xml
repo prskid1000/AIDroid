@@ -1,0 +1,18 @@
+<!--
+  Pause. Two bars where `NIcons.Pause` draws two strokes, for the reason given
+  on `ic_notify_play`: a stroked glyph does not survive being flattened to a
+  silhouette.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFFFF">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M7.5,5h3.2v14h-3.2z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M13.3,5h3.2v14h-3.2z" />
+</vector>

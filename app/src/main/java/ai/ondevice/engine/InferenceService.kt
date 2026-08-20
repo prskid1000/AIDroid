@@ -101,15 +101,6 @@ class InferenceService : LifecycleService() {
         createChannel()
         startForeground(NOTIFICATION_ID, buildNotification(null))
 
-        // Alive while anything is loaded *or* anything is running.
-        //
-        // It used to stop the moment llama held nothing, which is every moment
-        // of an image, a clip, a transcription or a spoken line: those run on
-        // the other four engines, and this service's only notion of "busy" was
-        // the chat model's. So the one service that keeps the process alive
-        // when you leave the app switched itself off at the start of every run
-        // that was not a conversation — and a forty-five minute clip, in a
-        // process holding ten gigabytes, is the first thing Android reclaims.
         // What the proxy made, once it has made it.
         //
         // Separate from the status notification above, and that separation is
@@ -123,6 +114,24 @@ class InferenceService : LifecycleService() {
             results.produced.collect { produced -> notifier.notify(produced) }
         }
 
+        // Play, pause and stop change what the buttons should say, and the
+        // notification is the only place they are said. Redrawn from the
+        // player's own state rather than from whichever button was tapped,
+        // because the lock screen and Quick Settings can drive it too.
+        lifecycleScope.launch {
+            ResultAudio.state.collect { notifier.refresh() }
+        }
+
+        // Alive while anything is loaded, anything is running, or the proxy is
+        // listening.
+        //
+        // It used to stop the moment llama held nothing, which is every moment
+        // of an image, a clip, a transcription or a spoken line: those run on
+        // the other four engines, and this service's only notion of "busy" was
+        // the chat model's. So the one service that keeps the process alive
+        // when you leave the app switched itself off at the start of every run
+        // that was not a conversation — and a forty-five minute clip, in a
+        // process holding ten gigabytes, is the first thing Android reclaims.
         lifecycleScope.launch {
             // The socket first, then the watcher that decides whether to stop.
             //

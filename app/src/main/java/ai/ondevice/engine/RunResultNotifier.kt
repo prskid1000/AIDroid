@@ -70,12 +70,31 @@ class RunResultNotifier(
         ) : Result
     }
 
+    /** The last result shown, so a playback change can redraw it. */
+    private var last: Result? = null
+
+    /** Redraw whatever is on screen — used when playback starts, pauses or ends. */
+    fun refresh() {
+        last?.let { render(it) }
+    }
+
     fun notify(result: Result) {
+        last = result
+        render(result)
+    }
+
+    private fun render(result: Result) {
         // Nothing to say to somebody who is looking at the screen it happened
         // on. The ongoing notification is different — it exists for the case
         // where you have already left — but a result banner over the very tab
         // that just drew the result is noise.
-        if (foreground.isForeground) return
+        //
+        // A player already on screen is the exception: once it is there,
+        // opening the app must not freeze its buttons half way through a
+        // sentence.
+        if (foreground.isForeground && !(result is Result.Sound && ResultAudio.state.value.active)) {
+            return
+        }
 
         ensureChannel()
         val builder = Notification.Builder(context, CHANNEL_ID)
@@ -122,7 +141,7 @@ class RunResultNotifier(
                 // would make it a data one.
                 builder.addAction(
                     action(
-                        R.drawable.ic_notify_generate,
+                        R.drawable.ic_notify_copy,
                         "Copy",
                         ResultActionActivity.ACTION_COPY,
                         ResultActionActivity.EXTRA_TEXT to result.body,
@@ -131,22 +150,48 @@ class RunResultNotifier(
             }
             is Result.Sound -> {
                 builder.setContentText(result.caption)
-                // Play and stop, because a spoken line is the one result you can
-                // consume from the shade without opening anything. MediaStyle
-                // for the compact layout; there is no session behind it and so
-                // no seek bar, which is honest about what this can do.
+
+                // A real player, which means a real session.
+                //
+                // `MediaStyle` with no token attached is a notification with
+                // buttons on it and nothing else — no scrubber, no elapsed
+                // time, and none of the lock-screen or Quick Settings
+                // treatment. All of that is drawn by the platform from the
+                // session, so the token is the whole difference between two
+                // buttons and a player. See [ResultAudio].
+                // Before the token is read, or there is no token to read.
+                //
+                // The title and caption go to the session as well as to the
+                // notification, because the carousel card is drawn from the
+                // session and would otherwise be labelled with the file name.
+                ResultAudio.prepare(context, result.path, result.title, result.caption)
+                val playing = ResultAudio.state.value.let {
+                    it.playing && it.path == result.path
+                }
                 builder.addAction(
-                    action(
-                        R.drawable.ic_notify_generate,
-                        "Play",
-                        ResultActionActivity.ACTION_PLAY,
-                        ResultActionActivity.EXTRA_PATH to result.path,
-                    ),
+                    if (playing) {
+                        action(
+                            R.drawable.ic_notify_pause,
+                            "Pause",
+                            ResultActionActivity.ACTION_PAUSE,
+                        )
+                    } else {
+                        action(
+                            R.drawable.ic_notify_play,
+                            "Play",
+                            ResultActionActivity.ACTION_PLAY,
+                            ResultActionActivity.EXTRA_PATH to result.path,
+                        )
+                    },
                 )
                 builder.addAction(
-                    action(R.drawable.ic_notify_generate, "Stop", ResultActionActivity.ACTION_STOP),
+                    action(R.drawable.ic_notify_stop, "Stop", ResultActionActivity.ACTION_STOP),
                 )
-                builder.style = Notification.MediaStyle().setShowActionsInCompactView(0)
+                builder.style = Notification.MediaStyle()
+                    .setShowActionsInCompactView(0, 1)
+                    .also { style ->
+                        ResultAudio.token?.let(style::setMediaSession)
+                    }
             }
         }
 

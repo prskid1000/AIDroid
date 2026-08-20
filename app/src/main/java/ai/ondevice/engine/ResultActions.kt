@@ -30,7 +30,8 @@ class ResultActionActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         when (intent?.action) {
-            ACTION_PLAY -> intent.getStringExtra(EXTRA_PATH)?.let(ResultAudio::play)
+            ACTION_PLAY -> intent.getStringExtra(EXTRA_PATH)?.let { ResultAudio.play(this, it) }
+            ACTION_PAUSE -> ResultAudio.pause()
             ACTION_STOP -> ResultAudio.stop()
             ACTION_COPY -> intent.getStringExtra(EXTRA_TEXT)?.let { text ->
                 val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -47,45 +48,10 @@ class ResultActionActivity : Activity() {
 
     companion object {
         const val ACTION_PLAY = "ai.ondevice.result.PLAY"
+        const val ACTION_PAUSE = "ai.ondevice.result.PAUSE"
         const val ACTION_STOP = "ai.ondevice.result.STOP"
         const val ACTION_COPY = "ai.ondevice.result.COPY"
         const val EXTRA_PATH = "path"
         const val EXTRA_TEXT = "text"
-    }
-}
-
-/**
- * One player, for the shade.
- *
- * Deliberately not the Voice tab's player: that one belongs to a screen and
- * ends with it, which is exactly wrong for a notification that exists because
- * there is no screen. One at a time, because two spoken lines over each other
- * is not a feature anybody asked for.
- */
-object ResultAudio {
-
-    private var player: MediaPlayer? = null
-
-    @Synchronized
-    fun play(path: String) {
-        stop()
-        runCatching {
-            player = MediaPlayer().apply {
-                setDataSource(path)
-                setOnCompletionListener { stop() }
-                prepare()
-                start()
-            }
-        }.onFailure {
-            EngineLog.w("ResultAudio", "could not play $path: ${it.message}")
-            stop()
-        }
-    }
-
-    @Synchronized
-    fun stop() {
-        runCatching { player?.takeIf { it.isPlaying }?.stop() }
-        runCatching { player?.release() }
-        player = null
     }
 }

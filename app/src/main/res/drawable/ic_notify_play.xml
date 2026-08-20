@@ -1,0 +1,23 @@
+<!--
+  Play, for the transport row on a finished-speech notification.
+
+  Transcribed from `NIcons.Play` — the same triangle the Sounds tab draws — but
+  filled rather than stroked. A notification action icon is rendered as a
+  silhouette at 24dp and tinted by the system, so a 2dp outline arrives as a
+  grey smudge with a hole in it.
+
+  It exists because both transport actions were drawn with
+  `ic_notify_generate`, the four-point spark used for "something is being
+  made". Two identical sparks side by side is not a player; it reads as two
+  stars, which is exactly what it was called.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFFFF">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M8,5L19,12L8,19Z" />
+</vector>

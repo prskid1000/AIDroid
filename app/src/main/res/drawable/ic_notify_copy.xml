@@ -1,0 +1,16 @@
+<!--
+  Copy, for the transcript notification. Transcribed from `NIcons.Copy` — two
+  offset rectangles — and filled with the rear one knocked through, so the
+  overlap still reads once the system has flattened it to a silhouette.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFFFF">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M4,3h10v3h-8v11h-2zM8,7h12v14h-12zM10,9v10h8v-10z" />
+</vector>
