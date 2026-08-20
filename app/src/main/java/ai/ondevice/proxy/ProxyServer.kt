@@ -67,6 +67,7 @@ class ProxyServer @Inject constructor(
     private val toolProviders: ToolProviderFactory,
     private val log: RequestLog,
     private val videoJobs: VideoJobs,
+    private val results: ai.ondevice.engine.RunResults,
     @ai.ondevice.di.ApplicationScope private val scope: CoroutineScope,
 ) {
 
@@ -422,6 +423,7 @@ class ProxyServer @Inject constructor(
                             prefs = prefs,
                             scope = scope,
                             context = context,
+                            results = results,
                             allowedOrigins = document.corsOrigins,
                         ),
                     )

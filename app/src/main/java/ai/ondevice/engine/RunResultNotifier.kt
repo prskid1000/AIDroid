@@ -11,6 +11,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.drawable.Icon
 import java.io.File
 
 /**
@@ -115,8 +116,38 @@ class RunResultNotifier(
                 builder.style = Notification.BigTextStyle()
                     .bigText(preview.take(BIG_TEXT_CHARS))
                     .setSummaryText(result.caption)
+                // A transcript read in the shade is a transcript you then want
+                // somewhere else. The whole thing is copied, not the truncated
+                // preview — the ellipsis is a display decision and copying it
+                // would make it a data one.
+                builder.addAction(
+                    action(
+                        R.drawable.ic_notify_generate,
+                        "Copy",
+                        ResultActionActivity.ACTION_COPY,
+                        ResultActionActivity.EXTRA_TEXT to result.body,
+                    ),
+                )
             }
-            is Result.Sound -> builder.setContentText(result.caption)
+            is Result.Sound -> {
+                builder.setContentText(result.caption)
+                // Play and stop, because a spoken line is the one result you can
+                // consume from the shade without opening anything. MediaStyle
+                // for the compact layout; there is no session behind it and so
+                // no seek bar, which is honest about what this can do.
+                builder.addAction(
+                    action(
+                        R.drawable.ic_notify_generate,
+                        "Play",
+                        ResultActionActivity.ACTION_PLAY,
+                        ResultActionActivity.EXTRA_PATH to result.path,
+                    ),
+                )
+                builder.addAction(
+                    action(R.drawable.ic_notify_generate, "Stop", ResultActionActivity.ACTION_STOP),
+                )
+                builder.style = Notification.MediaStyle().setShowActionsInCompactView(0)
+            }
         }
 
         manager().notify(NOTIFICATION_ID, builder.build())
@@ -145,6 +176,38 @@ class RunResultNotifier(
             BitmapFactory.Options().apply { inSampleSize = sample },
         )
     }.getOrNull()
+
+    /**
+     * One notification button.
+     *
+     * `getActivity` rather than `getBroadcast`, and since Android 12 a
+     * notification may not trampoline an activity start through a receiver
+     * anyway — but the deciding reason is the clipboard, which a background
+     * context may not reliably write. See [ResultActionActivity].
+     *
+     * A distinct request code per action, or the second `PendingIntent` would
+     * be handed the first one's extras: they are considered equal when only
+     * the extras differ.
+     */
+    private fun action(
+        icon: Int,
+        title: String,
+        actionName: String,
+        extra: Pair<String, String>? = null,
+    ): Notification.Action {
+        val intent = Intent(context, ResultActionActivity::class.java).setAction(actionName)
+        extra?.let { (key, value) -> intent.putExtra(key, value) }
+        return Notification.Action.Builder(
+            Icon.createWithResource(context, icon),
+            title,
+            PendingIntent.getActivity(
+                context,
+                actionName.hashCode(),
+                intent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            ),
+        ).build()
+    }
 
     private fun open(): PendingIntent = PendingIntent.getActivity(
         context,

@@ -105,6 +105,7 @@ suspend fun ProxyCall.images(mode: ImageMode) {
     } ?: throw ProxyRefusal(500, "api_error", "The run produced no picture.", null)
 
     runner.touch(model.id)
+    results.picture(path, "${size.first}x${size.second} · ${model.label}")
     json(imageBody(stamp, path, wantsBase64))
 }
 
@@ -172,7 +173,10 @@ private suspend fun ProxyCall.upscale(body: JsonObject) {
         destination.writeBytes(bigger.toPng(SparseParams.of("upscale_model" to esrgan).toJsonString()))
     }
     runner.touch(model.id)
-
+    results.picture(
+        destination.absolutePath,
+        "${bigger.width}x${bigger.height} · enlarged",
+    )
     json(imageBody(stamp, destination.absolutePath, wantsBase64))
 }
 
@@ -310,6 +314,10 @@ suspend fun ProxyCall.speech() {
         runner.speak(model, params, text, destination)
     }
     runner.touch(model.id)
+    results.sound(
+        file.absolutePath,
+        "${text.length} characters · ${model.label}",
+    )
 
     // Named rather than silently ignored. This app synthesises WAV and has no
     // encoder for anything else; a client asking for mp3 and receiving a WAV
@@ -382,6 +390,13 @@ suspend fun ProxyCall.transcription(translate: Boolean) {
     runner.touch(model.id)
 
     val text = segments.joinToString(" ") { it.text }.trim()
+    if (text.isNotBlank()) {
+        results.words(
+            if (translate) "Translation ready" else "Transcript ready",
+            text,
+            "${segments.size} segments · ${model.label}",
+        )
+    }
 
     when (options.str("response_format")) {
         "text" -> json(encode(buildJsonObject { put("text", text) }))
@@ -471,6 +486,7 @@ private suspend fun ProxyCall.readMultipart(): Triple<File, String?, JsonObject>
  * completing and the answer having nowhere to go.
  */
 suspend fun ProxyCall.createVideo() {
+    phase("Making a clip")
     val body = body()
     val prompt = body.str("prompt")
         ?: throw ProxyRefusal.badRequest("`prompt` is required.")
@@ -556,6 +572,11 @@ private suspend fun ProxyCall.renderClip(
                             audioPath = outcome.clip.audioPath,
                         )
                     }
+                    results.clip(
+                        outcome.clip.frames.firstOrNull(),
+                        "${outcome.clip.frames.size} frames · " +
+                            "${"%.1f".format(outcome.clip.durationSeconds)}s · ${model.label}",
+                    )
                 }
             }
         }

@@ -43,6 +43,7 @@ class ProxyCall(
     val prefs: AppPrefs,
     val scope: CoroutineScope,
     val context: Context,
+    val results: ai.ondevice.engine.RunResults,
     private val allowedOrigins: List<String>,
 ) {
 

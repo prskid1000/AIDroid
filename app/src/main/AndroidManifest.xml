@@ -216,6 +216,23 @@
             through a receiver or a service, so the pending intent has to be a
             getActivity and this is what it gets. It draws nothing.
         -->
+        <!--
+            Where a Play, Stop or Copy button on a finished-run notification
+            lands.
+
+            An activity rather than a receiver because of the clipboard: since
+            Android 10 a background context may not reliably write it, and the
+            write is dropped rather than refused. Draws nothing, finishes in
+            onCreate, and has no affinity so it leaves no card in recents.
+        -->
+        <activity
+            android:name=".engine.ResultActionActivity"
+            android:exported="false"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay" />
+
         <activity
             android:name=".workflow.HandoffActivity"
             android:exported="false"

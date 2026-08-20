@@ -62,12 +62,20 @@ class InferenceService : LifecycleService() {
 
     @Inject lateinit var runner: ModelRunner
 
+    /**
+     * What the proxy made, said by the proxy.
+     *
+     * The three in-app sessions are watched for an edge; anything without a
+     * screen behind it has no edge to watch and reports here instead.
+     */
+    @Inject lateinit var results: RunResults
+
     private var wakeLock: PowerManager.WakeLock? = null
 
     @Inject lateinit var foreground: ai.ondevice.engine.workflow.ForegroundWatcher
 
     /** Fires the finished-run banners; see [RunResultNotifier]. */
-    private val results by lazy { RunResultNotifier(this, foreground) }
+    private val notifier by lazy { RunResultNotifier(this, foreground) }
 
     /** The last snapshot, so a finish can be seen as the edge it is. */
     private var previous: RunSnapshot? = null
@@ -102,6 +110,19 @@ class InferenceService : LifecycleService() {
         // when you leave the app switched itself off at the start of every run
         // that was not a conversation — and a forty-five minute clip, in a
         // process holding ten gigabytes, is the first thing Android reclaims.
+        // What the proxy made, once it has made it.
+        //
+        // Separate from the status notification above, and that separation is
+        // the point: the ongoing one says what is happening and goes away with
+        // it, so a picture that finished left "Serving the API" on screen and
+        // nothing to say a picture had been made at all.
+        //
+        // Its own coroutine because a result is an event rather than a state —
+        // there is no snapshot to fold it into.
+        lifecycleScope.launch {
+            results.produced.collect { produced -> notifier.notify(produced) }
+        }
+
         lifecycleScope.launch {
             // The socket first, then the watcher that decides whether to stop.
             //
@@ -270,7 +291,7 @@ class InferenceService : LifecycleService() {
             now.still.lastImage
                 ?.takeIf { it.path != was.still.lastImage?.path }
                 ?.let { image ->
-                    results.notify(
+                    notifier.notify(
                         RunResultNotifier.Result.Picture(
                             title = "Picture ready",
                             path = image.path,
@@ -290,7 +311,7 @@ class InferenceService : LifecycleService() {
             now.clip.clip
                 ?.takeIf { it.directory != was.clip.clip?.directory }
                 ?.let { clip ->
-                    results.notify(
+                    notifier.notify(
                         RunResultNotifier.Result.Clip(
                             title = "Clip ready",
                             firstFrame = clip.frames.firstOrNull(),
@@ -313,7 +334,7 @@ class InferenceService : LifecycleService() {
                 ?.content
                 ?.takeIf { it.isNotBlank() }
                 ?.let { text ->
-                    results.notify(
+                    notifier.notify(
                         RunResultNotifier.Result.Words(
                             title = "Answer ready",
                             body = text,
@@ -332,7 +353,7 @@ class InferenceService : LifecycleService() {
             now.voice.lastAudioPath
                 ?.takeIf { it != was.voice.lastAudioPath }
                 ?.let { path ->
-                    results.notify(
+                    notifier.notify(
                         RunResultNotifier.Result.Sound(
                             title = "Speech ready",
                             path = path,
@@ -353,7 +374,7 @@ class InferenceService : LifecycleService() {
                 .trim()
                 .takeIf { it.isNotBlank() }
                 ?.let { text ->
-                    results.notify(
+                    notifier.notify(
                         RunResultNotifier.Result.Words(
                             title = "Transcript ready",
                             body = text,

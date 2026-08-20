@@ -280,6 +280,19 @@ private suspend fun ProxyCall.wholeChat(
 }
 
 private fun ProxyCall.record(result: ChatPipeline.Result) {
+    // Announced here rather than in the pipeline, because this is the point at
+    // which the answer is whole — the pipeline is still mid-loop until it isn't.
+    result.text.trim().takeIf { it.isNotBlank() }?.let { answer ->
+        results.words(
+            "Answer ready",
+            answer,
+            ai.ondevice.engine.RunResultNotifier.summary(
+                result.tokensPerSecond,
+                0L,
+                "${result.generatedTokens} tokens",
+            ),
+        )
+    }
     log.update(requestId) {
         it.copy(
             rounds = result.rounds,
