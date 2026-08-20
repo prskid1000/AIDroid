@@ -44,6 +44,7 @@ fun SettingsScreen(
     onNavigate: (String) -> Unit,
     onOpenModels: () -> Unit,
     onOpenTools: () -> Unit,
+    onOpenProxy: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.settings.collectAsStateWithLifecycle()
@@ -51,6 +52,16 @@ fun SettingsScreen(
     PhoneScaffold(
         toolbar = {
             RootToolbar("Settings") {
+                // Leftmost of the three, so the group reads outward-facing to
+                // inward-facing: what other machines reach, what the model
+                // reaches, what this device holds.
+                NIconButton(
+                    NIcons.Endpoint,
+                    "Proxy — serve the API to other machines",
+                    onClick = onOpenProxy,
+                    size = 34.dp,
+                    iconSize = 15.dp,
+                )
                 NIconButton(
                     NIcons.Tools,
                     "Tools and MCP servers",

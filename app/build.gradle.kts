@@ -249,6 +249,8 @@ dependencies {
     ksp(libs.hilt.compiler)
 
     implementation(libs.okhttp)
+    implementation(libs.ktor.server.core)
+    implementation(libs.ktor.server.cio)
     implementation(libs.kotlinx.serialization.json)
 
     // Kokoro's weights are an ONNX graph. ggml cannot load it, so this is the

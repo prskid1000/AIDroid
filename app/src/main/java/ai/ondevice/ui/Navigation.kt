@@ -28,6 +28,8 @@ import ai.ondevice.ui.screens.MaskEditorScreen
 import ai.ondevice.ui.screens.ModelDetailScreen
 import ai.ondevice.ui.screens.ModelsScreen
 import ai.ondevice.ui.screens.PromptInspectorScreen
+import ai.ondevice.ui.screens.ProxyLogScreen
+import ai.ondevice.ui.screens.ProxyScreen
 import ai.ondevice.ui.screens.ResolveResultsScreen
 import ai.ondevice.ui.screens.SamplerChainScreen
 import ai.ondevice.ui.screens.SettingsScreen
@@ -109,6 +111,16 @@ object Routes {
         "library/item/${kind.name}/${android.net.Uri.encode(id)}"
 
     const val TOOLS = "settings/tools"
+
+    /**
+     * The HTTP surface's settings, pushed from the Settings tab.
+     *
+     * Not a bottom-bar destination. The bar is at six, and Settings is where
+     * the things that describe this device live rather than the things it
+     * makes — which is what a server other machines talk to is.
+     */
+    const val PROXY = "settings/proxy"
+    const val PROXY_LOG = "settings/proxy/log"
 
     const val WORKFLOW_EDIT = "workflow/edit"
 
@@ -383,6 +395,7 @@ fun OnDeviceApp(
                 onNavigate = { navController.navigateToRoot(it) },
                 onOpenModels = { navController.navigate(Routes.MODELS) },
                 onOpenTools = { navController.navigate(Routes.TOOLS) },
+                onOpenProxy = { navController.navigate(Routes.PROXY) },
             )
         }
 
@@ -476,6 +489,15 @@ fun OnDeviceApp(
         }
         composable(Routes.TOOLS) {
             ToolsScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Routes.PROXY) {
+            ProxyScreen(
+                onBack = { navController.popBackStack() },
+                onOpenLog = { navController.navigate(Routes.PROXY_LOG) },
+            )
+        }
+        composable(Routes.PROXY_LOG) {
+            ProxyLogScreen(onBack = { navController.popBackStack() })
         }
     }
 }

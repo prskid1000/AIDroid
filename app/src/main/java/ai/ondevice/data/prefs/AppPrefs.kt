@@ -38,6 +38,17 @@ class AppPrefs(private val context: Context) {
         val enabledToolProviders = androidx.datastore.preferences.core.stringSetPreferencesKey("enabled_tool_providers")
         val fileScopeDevice = booleanPreferencesKey("file_scope_device")
         val toolParams = stringPreferencesKey("tool_params")
+
+        /**
+         * The whole proxy configuration, as one JSON document.
+         *
+         * One key rather than a key per setting, and no Room table, for the
+         * reason `docs/workflow-plan.md` gives about the graph: three of the
+         * five things in here are lists — aliases, origins, client profiles —
+         * and normalising them would mean a migration every time one gains a
+         * field, on a schema that is already at fourteen.
+         */
+        val proxyDocument = stringPreferencesKey("proxy_document")
     }
 
     /** Default to performance-core count, not total cores (SPEC §8.1). */
@@ -96,6 +107,11 @@ class AppPrefs(private val context: Context) {
     val toolParams: Flow<String> = context.dataStore.data.map { it[Keys.toolParams] ?: "{}" }
 
     suspend fun setToolParams(v: String) = edit { it[Keys.toolParams] = v }
+
+    /** See [Keys.proxyDocument]. Empty means never configured, not "off". */
+    val proxyDocument: Flow<String> = context.dataStore.data.map { it[Keys.proxyDocument] ?: "" }
+
+    suspend fun setProxyDocument(v: String) = edit { it[Keys.proxyDocument] = v }
 
     suspend fun setThreadCount(v: Int) = edit { it[Keys.threadCount] = v }
     suspend fun setBatteryGuardPercent(v: Int) = edit { it[Keys.batteryGuardPercent] = v }

@@ -67,6 +67,33 @@ class TokenStore(context: Context) {
         }.apply()
     }
 
+    // — the proxy's own bearer token —
+    //
+    // Here for the same reason the other two credentials are: this one lets
+    // anything holding it generate on this device, read whatever the file tools
+    // can read and spend the battery, so it is worth at least as much as a
+    // Hugging Face token and the database is a plain file inside the app's
+    // directory.
+
+    var proxyToken: String?
+        get() = prefs.getString(KEY_PROXY_TOKEN, null)?.takeIf { it.isNotBlank() }
+        set(value) {
+            prefs.edit().apply {
+                if (value.isNullOrBlank()) remove(KEY_PROXY_TOKEN) else putString(KEY_PROXY_TOKEN, value)
+            }.apply()
+        }
+
+    /**
+     * The token as the screen shows it after the first time.
+     *
+     * Shown in full once, on generation, and masked from then on — the shape
+     * the Hugging Face block already uses, and the reason is the same: a
+     * credential on screen is a credential in a screenshot.
+     */
+    fun maskedProxyToken(): String? = proxyToken?.let {
+        if (it.length <= 11) "•".repeat(it.length) else "${it.take(6)}…${it.takeLast(4)}"
+    }
+
     /** Called when a server is forgotten, and when its authorisation is revoked. */
     fun clearOauthTokens(serverId: String) {
         prefs.edit()
@@ -82,5 +109,6 @@ class TokenStore(context: Context) {
         const val KEY_MCP_ACCESS = "mcp_access:"
         const val KEY_MCP_REFRESH = "mcp_refresh:"
         const val KEY_MCP_EXPIRY = "mcp_expiry:"
+        const val KEY_PROXY_TOKEN = "proxy_token"
     }
 }

@@ -366,6 +366,7 @@ data class ToolsState(
     val testing: Boolean = false,
     val fileTools: List<String> = ai.ondevice.tools.FileToolProvider.toolNames(),
     val shellTools: List<String> = ai.ondevice.tools.ShellToolProvider.toolNames(),
+    val mediaTools: List<String> = ai.ondevice.tools.MediaToolProvider.toolNames(),
     /** Whether the whole device was asked for; the grant itself is checked live. */
     val fileScopeDevice: Boolean = false,
     val shellRuns: List<ai.ondevice.tools.ShellRun> = emptyList(),
@@ -392,11 +393,15 @@ data class ToolsState(
     val shellEnabled: Boolean
         get() = ai.ondevice.tools.ShellToolProvider.ID in enabledProviders
 
+    val mediaEnabled: Boolean
+        get() = ai.ondevice.tools.MediaToolProvider.ID in enabledProviders
+
     /** How many tools are actually reaching the model. */
     val liveToolCount: Int
         get() = (if (builtInEnabled) builtInTools.size else 0) +
             (if (filesEnabled) fileTools.size else 0) +
             (if (shellEnabled) shellTools.size else 0) +
+            (if (mediaEnabled) mediaTools.size else 0) +
             servers.filter { it.enabled }.sumOf { server ->
                 val disabled = ai.ondevice.tools.McpTools.disabled(server)
                 ai.ondevice.tools.McpTools.parse(server.lastToolsJson).count { it.name !in disabled }

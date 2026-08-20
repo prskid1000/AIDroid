@@ -42,6 +42,16 @@ class InferenceService : LifecycleService() {
 
     @Inject lateinit var image: ai.ondevice.ui.vm.ImageSession
 
+    /**
+     * The HTTP surface.
+     *
+     * Here rather than in a service of its own, because this one already
+     * declares the `specialUse` foreground type and already exists to stop the
+     * system reclaiming a process holding gigabytes. A socket is exactly that
+     * kind of thing to hold.
+     */
+    @Inject lateinit var proxy: ai.ondevice.proxy.ProxyServer
+
     private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
@@ -64,12 +74,31 @@ class InferenceService : LifecycleService() {
                 running,
                 video.state,
                 image.state,
-            ) { engine, count, clip, still -> Progress(engine, count, clip, still) }
+                proxy.status,
+            ) { engine, count, clip, still, served ->
+                Progress(engine, count, clip, still, served)
+            }
                 .collectLatest { progress ->
                     notificationManager().notify(NOTIFICATION_ID, buildNotification(progress))
-                    if (progress.engine.loaded == null && progress.count == 0) stopSelf()
+                    // The third term is new and load-bearing. An idle proxy has
+                    // nothing loaded and nothing running, so without it this
+                    // service stopped itself the moment the last generation
+                    // finished — and took the listening socket with it. The
+                    // server was then up for exactly as long as the last
+                    // request, which is indistinguishable from it never working.
+                    if (progress.engine.loaded == null &&
+                        progress.count == 0 &&
+                        !progress.served.listening
+                    ) {
+                        stopSelf()
+                    }
                 }
         }
+
+        // Match the stored configuration on every start, so enabling the proxy
+        // and starting this service are one action rather than two that have to
+        // happen in the right order.
+        lifecycleScope.launch { runCatching { proxy.sync() } }
 
     }
 
@@ -112,6 +141,7 @@ class InferenceService : LifecycleService() {
         val count: Int,
         val clip: ai.ondevice.ui.vm.VideoState,
         val still: ai.ondevice.ui.vm.ImageState,
+        val served: ai.ondevice.proxy.ProxyServer.Status,
     )
 
     /**
@@ -180,6 +210,18 @@ class InferenceService : LifecycleService() {
                 .setContentTitle("Working")
                 .setContentText(progress?.engine?.loaded?.modelId.orEmpty())
                 .setProgress(0, 0, true)
+            // Nothing running, but the port is open. Worth its own line: this
+            // is the one resting state the person did not start by tapping
+            // something, and the address is what makes it recognisable rather
+            // than alarming.
+            progress?.served?.listening == true -> builder
+                .setContentTitle("Serving the API")
+                .setContentText(
+                    listOfNotNull(
+                        progress.served.url,
+                        progress.engine.loaded?.modelId,
+                    ).joinToString(" · "),
+                )
             // Nothing running: the model is resident and that is all there is
             // to say. Worth saying, because several gigabytes are being held.
             else -> builder

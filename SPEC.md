@@ -993,6 +993,100 @@ Keep the previous bundle for each engine. If a runtime fails to initialize twice
 
 ---
 
+## 18. Proxy — serving the device's models over HTTP
+
+A laptop, a browser or a coding client talks to this device using the API it
+already speaks, over the tailnet, with no cloud in the path. Off by default.
+
+Implemented in `proxy/`, hosted by `InferenceService`, and designed in
+[`docs/proxy-plan.md`](docs/proxy-plan.md).
+
+### 18.1 Surface
+
+Two protocols, five modalities. The gaps are part of the contract.
+
+| Capability | OpenAI | Anthropic | Engine |
+|---|---|---|---|
+| Chat, vision, tools | `POST /v1/chat/completions` | `POST /v1/messages` | llama.cpp |
+| Token count | — | `POST /v1/messages/count_tokens` | llama.cpp |
+| Image generate / edit | `POST /v1/images/generations`, `/edits` | server tool | sd.cpp |
+| Upscale | `POST /v1/images/upscales` *(extension)* | server tool | sd.cpp |
+| Video | `POST /v1/videos` → job, poll, content, cancel | server tool | sd.cpp |
+| Speech | `POST /v1/audio/speech` | server tool | Kokoro / OmniVoice |
+| Transcribe / translate | `POST /v1/audio/transcriptions`, `/translations` | server tool | whisper.cpp |
+| Models, health | `GET /v1/models`, `/v1/models/{id}`, `/health` | same, by header sniff | — |
+| Embeddings | `501`, naming the reason | — | — |
+
+**The Anthropic Messages API is chat-only.** There is no `/v1/images` in that
+protocol and inventing one would produce something no client speaks, so media
+reaches it as server-side tools the proxy intercepts and runs itself.
+
+**Embeddings return 501, not 404.** There is no `llama_get_embeddings` path
+through the JNI boundary; adding one is a native change and a runtime contract
+bump. §1.2 requires saying which.
+
+**Video is a job, never a held connection.** A clip is tens of minutes on this
+hardware — longer than any client's idle timeout and longer than a phone stays
+on one access point.
+
+### 18.2 Reachability
+
+- Binds to this device's `100.64.0.0/10` Tailscale address by default, and to
+  nothing at all when the tailnet is down. Falling back to `0.0.0.0` because a
+  VPN was off would put a generation server on whatever Wi-Fi the phone is on.
+- **Tailscale Funnel is not available on Android.** Funnel is a CLI feature and
+  the Android app ships no CLI, so there is no public HTTPS address and no
+  setting that would produce one. The screen says so rather than implying a
+  missing toggle.
+- No TLS. Tailnet traffic is already encrypted end to end; a client demanding
+  `https://` will not work, and the address shown is `http://`.
+- The MagicDNS name is found by reverse lookup where MagicDNS is on, and is
+  never guessed. The raw address always works.
+
+### 18.3 Access
+
+- A bearer token, generated on first enable and **required by default**,
+  accepted as `Authorization: Bearer` or `x-api-key` — the two protocols send
+  different headers and a server speaking both must accept both. Compared in
+  constant time. Stored in the Keystore beside the Hugging Face token.
+- CORS origins default to empty: no browser page may call the server until one
+  is typed in.
+- Refuses generation below a battery floor, and optionally unless charging. A
+  server that quietly gets slower as the phone throttles is the failure §1.2
+  exists to forbid.
+
+### 18.4 Residency
+
+One run at a time, across every engine, arbitrated by `engine/ModelRunner.kt` —
+which also owns the only cross-runtime unload in the app. Concurrency is **not**
+a setting: the diffusion engine holds a load lock, so a number the engines
+ignore would be a knob that does nothing.
+
+The gate is **re-entrant**. A media tool is a `ToolProvider` like any other, so
+a chat turn calling `generate_image` re-enters it; a plain mutex there is a
+deadlock. Re-entering makes room for the incoming runtime, which is why
+`ChatPipeline` re-loads the text model before every round rather than once.
+
+`proxy.model_policy` decides what a request for another model does while one is
+running: `queue` (default), `refuse` with the resident model named, or `swap`.
+
+### 18.5 Configuration
+
+Every setting is a `ParamSpec` in `proxy/ProxySpecs.kt`, rendered by `ParamRow`.
+§1.5 and §9 apply unchanged: **no proxy setting may have a hand-written
+widget.** The three list-shaped things — model aliases, CORS origins, client
+profiles — are stored as JSON in the same DataStore key. No Room migration.
+
+Stored sparsely, so a default that moves in a later release moves for everyone
+who never touched that row.
+
+**A setting that nothing reads must not exist.** `tool_choice` is refused rather
+than accepted and ignored, because the runtime cannot constrain the model to a
+tool and pretending otherwise returns a well-formed reply that quietly did not
+do what was asked.
+
+---
+
 ## Appendix A — implementation notes for the coding agent
 
 1. **Do not vendor ggml more than once.** Three copies is the single most likely structural mistake.
@@ -1009,3 +1103,5 @@ Keep the previous bundle for each engine. If a runtime fails to initialize twice
 12. **Never drop unknown keys** when reading presets, per-model overrides, or stored generation params. Preserve inert.
 13. **Manifest codegen runs in CI, not on device.** The app only ever consumes a signed manifest; it never parses upstream C++.
 14. **Verify signatures before installing anything executable.** APK signature against the pinned cert; Ed25519 on manifests and bundles. This is the one place where a shortcut becomes a remote code execution vector.
+15. **Nothing generates outside `ModelRunner`.** Orchestration in a view model is unreachable from a socket, an alarm or a share sheet, and copying it per surface is how a parameter comes to be applied in three places and forgotten in the fourth (§18.4).
+16. **The proxy is a server, so it must refuse well.** Every route answers with the engine's own suggestion beside its message, and every switched-off surface says it is switched off rather than 404ing like a typo.

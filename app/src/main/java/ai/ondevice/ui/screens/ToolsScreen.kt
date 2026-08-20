@@ -195,6 +195,31 @@ fun ToolsScreen(
                 }
             }
 
+            // — the other four modalities, as tools —
+            SectionKicker("Making things", Modifier.padding(top = 20.dp, bottom = 8.dp))
+            ProviderRow(
+                title = "Pictures, voice and speech",
+                tools = state.mediaTools,
+                on = state.mediaEnabled,
+                onToggle = { viewModel.toggleProvider(ai.ondevice.tools.MediaToolProvider.ID) },
+                settings = state.settingsFor(ai.ondevice.tools.MediaToolProvider.ID, state.mediaTools),
+                values = state.tuning,
+                expanded = state.expandedProviderId == ai.ondevice.tools.MediaToolProvider.ID,
+                onExpand = {
+                    viewModel.expandProvider(
+                        if (state.expandedProviderId == ai.ondevice.tools.MediaToolProvider.ID) null else ai.ondevice.tools.MediaToolProvider.ID,
+                    )
+                },
+                onSetting = viewModel::setToolParam,
+            )
+            NHelp(
+                "The other four engines, reachable from a conversation. Nothing leaves the " +
+                    "device — these are the same models the Visuals and Sounds tabs run, so a " +
+                    "picture asked for mid-sentence costs the same minutes it costs there, and " +
+                    "the text model has to make room for the one that draws.",
+                Modifier.padding(top = 6.dp),
+            )
+
             // — shell —
             SectionKicker("Shell", Modifier.padding(top = 20.dp, bottom = 8.dp))
             ProviderRow(

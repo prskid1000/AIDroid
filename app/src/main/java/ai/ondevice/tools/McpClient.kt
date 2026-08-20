@@ -327,6 +327,15 @@ class ToolProviderFactory(
     private val capabilities: ai.ondevice.data.hf.DeviceCapabilities,
     private val context: android.content.Context,
     tokens: ai.ondevice.data.secure.TokenStore,
+    /**
+     * The headless runner, so the other four modalities can be offered as
+     * tools.
+     *
+     * A provider like any other, which is the point: what a remote client can
+     * make this phone draw or say is switched on in the same place as what it
+     * can read, and the Chat tab gets the same tools over the same code.
+     */
+    private val runner: ai.ondevice.engine.ModelRunner,
 ) {
     private val http = McpToolProvider.httpClient()
     private val web = WebSearch(http)
@@ -344,12 +353,23 @@ class ToolProviderFactory(
         enabled: Set<String>,
         fileScope: Workspace.Scope = Workspace.Scope.SANDBOX,
         tuning: ai.ondevice.core.SparseParams = ai.ondevice.core.SparseParams.EMPTY,
+        /**
+         * Whether the caller can wait tens of minutes for a clip.
+         *
+         * The proxy's video route can, because it answers with a job id and
+         * hangs up. A chat turn cannot, and offering the tool there would put a
+         * forty-minute pause in the middle of a sentence.
+         */
+        offerVideo: Boolean = false,
     ): ToolRegistry {
         val servers = db.mcpServers().getAll().filter { it.enabled }
         val workspace by lazy { Workspace(context, fileScope) }
         return ToolRegistry(
             buildList {
                 if (BuiltInToolProvider.ID in enabled) add(built(tuning))
+                if (MediaToolProvider.ID in enabled) {
+                    add(MediaToolProvider(runner, settingsFor(media(), tuning), offerVideo = offerVideo))
+                }
                 if (FileToolProvider.ID in enabled) add(FileToolProvider(workspace, settingsFor(files(workspace), tuning)))
                 if (ShellToolProvider.ID in enabled) add(ShellToolProvider(workspace, settingsFor(shell(workspace), tuning)))
                 addAll(servers.map { server -> provider(server) })
@@ -369,13 +389,16 @@ class ToolProviderFactory(
         val workspace = Workspace(context, Workspace.Scope.SANDBOX)
         return built(ai.ondevice.core.SparseParams.EMPTY).settings() +
             files(workspace).settings() +
-            shell(workspace).settings()
+            shell(workspace).settings() +
+            media().settings()
     }
 
     private fun built(tuning: ai.ondevice.core.SparseParams) =
         BuiltInToolProvider(db, capabilities, web).let { bare ->
             BuiltInToolProvider(db, capabilities, web, settingsFor(bare, tuning))
         }
+
+    private fun media() = MediaToolProvider(runner)
 
     private fun files(workspace: Workspace) = FileToolProvider(workspace)
     private fun shell(workspace: Workspace) = ShellToolProvider(workspace)

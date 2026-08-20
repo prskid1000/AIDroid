@@ -19,7 +19,6 @@ import ai.ondevice.engine.EngineManager
 import ai.ondevice.engine.EngineMessage
 import ai.ondevice.engine.GenerateRequest
 import ai.ondevice.engine.GenerationEvent
-import ai.ondevice.engine.RuntimeRegistry
 import ai.ondevice.engine.Transcriber
 import ai.ondevice.engine.VideoRequest
 import ai.ondevice.speech.SpeechRequest
@@ -146,10 +145,14 @@ class WorkflowRunner @Inject constructor(
     private val storage: ModelStorage,
     private val toolProviders: ai.ondevice.tools.ToolProviderFactory,
     private val prefs: ai.ondevice.data.prefs.AppPrefs,
+    private val runner: ai.ondevice.engine.ModelRunner,
 ) {
 
-    /** Which runtime is holding weights right now, so we know when to let go. */
-    private var resident: String? = null
+    // Residency used to be tracked here, in a `resident` field beside a private
+    // `makeRoomFor`. It moved to [ModelRunner] when the HTTP proxy arrived,
+    // because two things now cross runtimes and a second copy of "which engine
+    // is holding weights" is a second answer that can disagree with the first —
+    // and the disagreement costs a kill rather than an error.
 
     /** Set while a step is inside an engine, so Cancel can reach the native call. */
     @Volatile
@@ -703,7 +706,6 @@ class WorkflowRunner @Inject constructor(
             ?: throw IllegalStateException("No model chosen for this step.")
         val runtimeId = ResidencyPlanner.runtimeFor(model)
 
-        makeRoomFor(runtimeId, reporter)
         reporter.onNode(node.id, NodeProgress(NodeRunState.LOADING))
         reporter.onLoading(listOf(model.label), null)
 
@@ -723,44 +725,27 @@ class WorkflowRunner @Inject constructor(
             ?.let { base.with("seed", it.toString()) }
             ?: base
 
-        when (model.modality) {
-            Modality.TEXT, Modality.VISION ->
-                runText(node, graph, outputs, model, params, reporter)
-            Modality.DIFFUSION ->
-                runDiffusion(node, graph, outputs, outDir, model, params, reporter, passLabel)
-            Modality.SPEECH_TO_TEXT ->
-                runTranscribe(node, graph, outputs, outDir, model, params, reporter, passLabel)
-            Modality.TEXT_TO_SPEECH ->
-                runSpeak(node, graph, outputs, outDir, model, params, passLabel)
-            else -> throw IllegalStateException("This model cannot be run as a step.")
-        }
-        resident = runtimeId
-    }
-
-    /**
-     * Let the other engine go before this one loads.
-     *
-     * The line that does not exist anywhere else in this app, and the reason a
-     * workflow can cross runtimes at all. Each engine unloads *itself* before
-     * loading — none of them knows about the others, because until now none of
-     * them had to.
-     */
-    private suspend fun makeRoomFor(runtimeId: String, reporter: RunReporter) {
-        val holding = resident
-        if (holding == null || holding == runtimeId) return
-
-        val because = "a workflow step needs $runtimeId"
-        reporter.onUnload(because)
-        when (holding) {
-            RuntimeRegistry.STABLE_DIFFUSION -> diffusion.unload(because)
-            RuntimeRegistry.LLAMA -> engines.unload()
-            RuntimeRegistry.WHISPER -> transcriber.unload()
-            RuntimeRegistry.KOKORO, RuntimeRegistry.OMNIVOICE -> {
-                synthesizer.unload(SynthProvider.KOKORO)
-                synthesizer.unload(SynthProvider.OMNIVOICE)
+        // Held for the whole step, not just the load.
+        //
+        // The gate used to be a `makeRoomFor` call and nothing else, which was
+        // enough while a workflow was the only thing that ran models. It is not
+        // enough now the proxy can be serving at the same time: making room and
+        // then releasing would let an HTTP request evict this step's model
+        // halfway through its own generation, and the failure would surface as
+        // a native error inside a run nobody had touched.
+        runner.exclusive(runtimeId, onUnload = { reporter.onUnload(it) }) {
+            when (model.modality) {
+                Modality.TEXT, Modality.VISION ->
+                    runText(node, graph, outputs, model, params, reporter)
+                Modality.DIFFUSION ->
+                    runDiffusion(node, graph, outputs, outDir, model, params, reporter, passLabel)
+                Modality.SPEECH_TO_TEXT ->
+                    runTranscribe(node, graph, outputs, outDir, model, params, reporter, passLabel)
+                Modality.TEXT_TO_SPEECH ->
+                    runSpeak(node, graph, outputs, outDir, model, params, passLabel)
+                else -> throw IllegalStateException("This model cannot be run as a step.")
             }
         }
-        resident = null
     }
 
     private suspend fun runText(

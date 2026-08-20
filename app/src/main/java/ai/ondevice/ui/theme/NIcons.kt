@@ -120,6 +120,28 @@ object NIcons {
         icon(1.7f, stroked = listOf("M9 3v4M15 3v4", rrect(7f, 7f, 10f, 7f, 2f), "M12 14v6"))
     }
 
+    /**
+     * Endpoint: this device, with two arcs leaving it. What other machines reach.
+     *
+     * A new glyph rather than a reused one, because nothing here meant "a
+     * server other machines connect to". [Tools] is a plug and already means
+     * MCP; [Runtime] is a chip and means silicon; [Wifi] is status-bar chrome at
+     * a 14x10 viewport rather than an interface icon at 24.
+     *
+     * Two arcs, not three. At the 15 dp the Settings toolbar draws these at, a
+     * third collapses into the second — which is the same reason [Wifi] has two.
+     */
+    val Endpoint: ImageVector by lazy {
+        icon(
+            1.7f,
+            stroked = listOf(
+                rrect(4f, 5f, 9f, 14f, 2f),
+                "M15.5 9.5a4 4 0 0 1 0 5",
+                "M18.5 7a7.5 7.5 0 0 1 0 10",
+            ),
+        )
+    }
+
     /** Runtimes: a chip with pins — the engines are the silicon-facing part. */
     val Runtime: ImageVector by lazy {
         icon(
