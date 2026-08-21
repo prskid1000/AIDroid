@@ -1015,6 +1015,7 @@ Two protocols, five modalities. The gaps are part of the contract.
 | Speech | `POST /v1/audio/speech` | server tool | Kokoro / OmniVoice |
 | Transcribe / translate | `POST /v1/audio/transcriptions`, `/translations` | server tool | whisper.cpp |
 | Models, health | `GET /v1/models`, `/v1/models/{id}`, `/health` | same, by header sniff | — |
+| Certificate | `GET /certificate` — the PEM, unauthenticated | same | — |
 | Embeddings | `501`, naming the reason | — | — |
 
 **The Anthropic Messages API is chat-only.** There is no `/v1/images` in that
@@ -1038,8 +1039,31 @@ on one access point.
   the Android app ships no CLI, so there is no public HTTPS address and no
   setting that would produce one. The screen says so rather than implying a
   missing toggle.
-- No TLS. Tailnet traffic is already encrypted end to end; a client demanding
-  `https://` will not work, and the address shown is `http://`.
+- **TLS is off by default and available.** Tailnet traffic is already encrypted
+  end to end, so plain HTTP over the tailnet is not the hole it looks like — but
+  a client that will only speak `https://` is a real client, and refusing it was
+  refusing the whole feature. `proxy.tls` serves TLS with a certificate this
+  device signs for itself: there is no authority that will issue one for an
+  address only a tailnet can reach, and Tailscale's own `tailscale cert` needs
+  the CLI the Android app does not ship. The certificate carries a real SAN list
+  (bind address, every local address, the MagicDNS name where one resolves,
+  loopback) and `CA:TRUE`, so a client can be *given* it — `curl --cacert`,
+  `NODE_EXTRA_CA_CERTS` — rather than only told to skip the check. The screen
+  shows its SHA-256 so the reader can tell they were handed the right one.
+  Ktor's CIO engine cannot terminate TLS, so `TlsFront` does, in front of a
+  plaintext server bound to loopback on a port nobody is told.
+- **Nobody copies a certificate by hand.** The Proxy screen sends it through the
+  Android share sheet — Tailscale's app exports a Taildrop target, so it lands in
+  the other machine's Downloads — and the server serves it at `GET /certificate`,
+  unauthenticated, because it is a public key and requiring the token to fetch
+  the thing you need before you can connect is a lock with its key inside the
+  box. Fetching it with verification off is not the leap it looks like on a
+  tailnet: WireGuard has already authenticated the machine that answered, which
+  is the same guarantee `tailscale cert` leans on.
+- **`tailscale cert` is not available to us, for the same reason Funnel is not.**
+  It needs tailscaled's LocalAPI or the CLI; the Android app exports exactly
+  three components — `MainActivity`, `ShareActivity` (Taildrop) and `IPNReceiver`
+  (connect/disconnect) — and none of them will issue a certificate.
 - The MagicDNS name is found by reverse lookup where MagicDNS is on, and is
   never guessed. The raw address always works.
 

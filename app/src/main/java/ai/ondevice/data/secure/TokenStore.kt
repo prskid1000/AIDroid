@@ -94,6 +94,27 @@ class TokenStore(context: Context) {
         if (it.length <= 11) "•".repeat(it.length) else "${it.take(6)}…${it.takeLast(4)}"
     }
 
+    // — the password on the proxy's TLS keystore —
+    //
+    // A PKCS12 file cannot be written without one, so this exists because the
+    // format insists rather than because it is protecting much: the keystore
+    // sits inside the app's own directory beside everything else. It is here
+    // and not in the file's name or a constant for the one case that does
+    // matter — a backup or an extraction that carries the private key off, and
+    // with it the ability to be this server to anything that trusted it.
+
+    var proxyKeystorePassword: String?
+        get() = prefs.getString(KEY_PROXY_KEYSTORE, null)?.takeIf { it.isNotBlank() }
+        set(value) {
+            prefs.edit().apply {
+                if (value.isNullOrBlank()) {
+                    remove(KEY_PROXY_KEYSTORE)
+                } else {
+                    putString(KEY_PROXY_KEYSTORE, value)
+                }
+            }.apply()
+        }
+
     /** Called when a server is forgotten, and when its authorisation is revoked. */
     fun clearOauthTokens(serverId: String) {
         prefs.edit()
@@ -110,5 +131,6 @@ class TokenStore(context: Context) {
         const val KEY_MCP_REFRESH = "mcp_refresh:"
         const val KEY_MCP_EXPIRY = "mcp_expiry:"
         const val KEY_PROXY_TOKEN = "proxy_token"
+        const val KEY_PROXY_KEYSTORE = "proxy_keystore"
     }
 }

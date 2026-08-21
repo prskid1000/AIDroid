@@ -8,4 +8,7 @@
     <external-files-path name="attachments" path="attachments/" />
     <external-files-path name="exports" path="exports/" />
     <cache-path name="downloads" path="downloads/" />
+    <!-- The proxy's own certificate, staged so it can be sent to the machine
+         that has to trust it. A public key, and it leaves only when asked. -->
+    <cache-path name="certificates" path="certificates/" />
 </paths>

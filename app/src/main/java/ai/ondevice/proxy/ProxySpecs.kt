@@ -45,6 +45,16 @@ object ProxySpecs {
             help = "Ports below 1024 are not available to an app.",
             requiresReload = true,
         ),
+        bool(
+            TLS, false,
+            label = "HTTPS",
+            help = "Serves TLS with a certificate this device signs for itself — there is no " +
+                "authority that will issue one for an address only your tailnet can reach. A " +
+                "client has to be given that certificate, and the card below sends it. Off " +
+                "means plain HTTP, which over a tailnet is already encrypted between " +
+                "machines by WireGuard.",
+            requiresReload = true,
+        ),
 
         // — protocols —
 
@@ -236,6 +246,7 @@ object ProxySpecs {
     const val ENABLED = "proxy.enabled"
     const val BIND = "proxy.bind"
     const val PORT = "proxy.port"
+    const val TLS = "proxy.tls"
     const val PROTOCOL_ANTHROPIC = "proxy.protocol_anthropic"
     const val PROTOCOL_OPENAI = "proxy.protocol_openai"
     const val SERVE_IMAGES = "proxy.serve_images"

@@ -166,6 +166,7 @@ class ProxyConfig(
     val enabled: Boolean get() = bool(ProxySpecs.ENABLED)
     val port: Int get() = int(ProxySpecs.PORT)
     val bind: String get() = string(ProxySpecs.BIND)
+    val tls: Boolean get() = bool(ProxySpecs.TLS)
     val anthropicEnabled: Boolean get() = bool(ProxySpecs.PROTOCOL_ANTHROPIC)
     val openAiEnabled: Boolean get() = bool(ProxySpecs.PROTOCOL_OPENAI)
     val servesImages: Boolean get() = bool(ProxySpecs.SERVE_IMAGES)

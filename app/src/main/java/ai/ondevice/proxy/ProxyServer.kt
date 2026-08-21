@@ -68,6 +68,7 @@ class ProxyServer @Inject constructor(
     private val log: RequestLog,
     private val videoJobs: VideoJobs,
     private val results: ai.ondevice.engine.RunResults,
+    private val tls: ProxyTls,
     @ai.ondevice.di.ApplicationScope private val scope: CoroutineScope,
 ) {
 
@@ -89,10 +90,15 @@ class ProxyServer @Inject constructor(
         /** The MagicDNS name, when a reverse lookup found one. */
         val hostname: String? = null,
         val onTailnet: Boolean = false,
+        /** Whether what is on [port] is TLS. Decides the scheme, and nothing else. */
+        val secure: Boolean = false,
+        /** SHA-256 of the certificate being served, when there is one. */
+        val fingerprint: String? = null,
         /** Why it is not listening, when it was asked to be and is not. */
         val refusal: String? = null,
     ) {
-        val url: String? get() = address?.let { "http://${hostname ?: it}:$port" }
+        val url: String?
+            get() = address?.let { "${if (secure) "https" else "http"}://${hostname ?: it}:$port" }
     }
 
     private val _status = MutableStateFlow(Status())
@@ -110,6 +116,9 @@ class ProxyServer @Inject constructor(
     val videoJob: StateFlow<VideoJobs.Job?> get() = videoJobs.current
 
     private var server: EmbeddedServer<*, *>? = null
+
+    /** Holds the advertised address when TLS is on; see [TlsFront]. */
+    private val front = TlsFront()
 
     /**
      * What is allowed to wait for the engine.
@@ -171,7 +180,12 @@ class ProxyServer @Inject constructor(
     private suspend fun start(address: String, config: ProxyConfig) {
         val port = config.port
         val current = _status.value
-        if (server != null && current.listening && current.address == address && current.port == port) {
+        // `secure` belongs in this comparison for the same reason the address
+        // does: it decides what is bound to that port, and without it turning
+        // HTTPS on while listening was a setting that saved and did nothing.
+        if (server != null && current.listening && current.address == address &&
+            current.port == port && current.secure == config.tls
+        ) {
             return
         }
 
@@ -194,39 +208,113 @@ class ProxyServer @Inject constructor(
         admissionDepth = config.queueDepth
         admission = Semaphore(admissionDepth)
 
-        runCatching {
-            embeddedServer(CIO, host = address, port = port) {
+        val secure = config.tls
+        val onTailnet = Reachability.isTailscale(address)
+
+        /*
+         * With TLS the routed server is not the one anybody connects to.
+         *
+         * It binds loopback on port 0 — whatever the kernel gives — and
+         * [TlsFront] takes the address and port that were advertised. Ktor's CIO
+         * engine cannot do TLS itself and the engines that can are a JVM
+         * server's, not a phone's; terminating in front leaves every route,
+         * every stream and every timeout exactly as it was.
+         */
+        val host = if (secure) LOOPBACK else address
+        val bound = if (secure) EPHEMERAL else port
+
+        val started = runCatching {
+            embeddedServer(CIO, host = host, port = bound) {
                 routing { install() }
             }.also { it.start(wait = false) }
-        }.onSuccess { engine ->
-            server = engine
-            val onTailnet = Reachability.isTailscale(address)
+        }.getOrElse { failure ->
             _status.value = Status(
                 enabled = true,
-                listening = true,
-                address = address,
-                port = port,
-                onTailnet = onTailnet,
-            )
-            // The card goes live on the address and gains a name afterwards if
-            // there is one: a reverse lookup has to leave the device and often
-            // returns nothing, and a status that waits for it looks broken.
-            if (onTailnet) {
-                scope.launch {
-                    Reachability.magicDnsName(address)?.let { name ->
-                        _status.update { it.copy(hostname = name) }
-                    }
-                }
-            }
-        }.onFailure { failure ->
-            _status.value = Status(
-                enabled = true,
+                secure = secure,
                 refusal = "Could not listen on $address:$port — ${failure.message}",
             )
+            return
+        }
+
+        var fingerprint: String? = null
+        // The name, before the certificate rather than after it. A certificate
+        // that does not name the host a client dialled is a hostname mismatch,
+        // which every client reports as something closer to an attack than to a
+        // missing entry — so when there is a MagicDNS name it has to be in the
+        // certificate from the start. Bounded, because a reverse lookup goes out
+        // over the tunnel and sometimes never comes back; without a name the
+        // address alone still works.
+        val magicDns = if (secure && onTailnet) {
+            kotlinx.coroutines.withTimeoutOrNull(LOOKUP_MILLIS) {
+                Reachability.magicDnsName(address)
+            }
+        } else {
+            null
+        }
+
+        if (secure) {
+            val failure = runCatching {
+                val upstream = started.engine.resolvedConnectors().firstOrNull()?.port
+                    ?: error("the server did not report which port it took")
+                val material = tls.material(certificateNames(address, magicDns))
+                fingerprint = material.fingerprint
+                front.start(scope, material.sslContext, address, port, upstream)
+            }.exceptionOrNull()
+            if (failure != null) {
+                runCatching { started.stop(GRACE_MILLIS, TIMEOUT_MILLIS) }
+                _status.value = Status(
+                    enabled = true,
+                    secure = true,
+                    refusal = "Could not serve HTTPS on $address:$port — ${failure.message}",
+                )
+                return
+            }
+        }
+
+        server = started
+        _status.value = Status(
+            enabled = true,
+            listening = true,
+            address = address,
+            port = port,
+            hostname = magicDns,
+            onTailnet = onTailnet,
+            secure = secure,
+            fingerprint = fingerprint,
+        )
+        // The card goes live on the address and gains a name afterwards if there
+        // is one: a reverse lookup has to leave the device and often returns
+        // nothing, and a status that waits for it looks broken. Already done
+        // above when TLS is on, where the name has to be known before the
+        // certificate is made.
+        if (onTailnet && magicDns == null) {
+            scope.launch {
+                Reachability.magicDnsName(address)?.let { name ->
+                    _status.update { it.copy(hostname = name) }
+                }
+            }
         }
     }
 
+    /**
+     * Every name this certificate has to be valid for.
+     *
+     * More than the bind address, because the address in the URL is not always
+     * the one a client uses: `adb reverse` arrives on loopback, and a bind of
+     * `all` has no single address to name at all. Names it does not answer on
+     * cost nothing — a SAN list is what the certificate is *allowed* to be, not
+     * a claim about routing.
+     */
+    private fun certificateNames(address: String, magicDns: String?): List<String> = buildList {
+        if (address != ANY) add(address)
+        magicDns?.let { add(it) }
+        addAll(Reachability.localAddresses())
+        add(LOOPBACK)
+        add("localhost")
+    }.distinct()
+
     fun stop() {
+        front.stop()
         runCatching { server?.stop(GRACE_MILLIS, TIMEOUT_MILLIS) }
         server = null
         _status.update { it.copy(listening = false, hostname = null) }
@@ -317,6 +405,16 @@ class ProxyServer @Inject constructor(
         options("/{...}") { call.preflight() }
 
         get("/health") { call.health() }
+
+        // Unauthenticated, deliberately, and the reasoning is the same one that
+        // puts `/health` here rather than behind `serve`: this is a public key.
+        // It is also the thing a client needs *before* it can present a token,
+        // so requiring the token to fetch it would be a lock with its key inside
+        // the box. Fetching it over the tailnet with verification off is not the
+        // leap of faith it looks like either — WireGuard has already
+        // authenticated the machine at the other end, which is the same
+        // guarantee `tailscale cert` would be leaning on.
+        get("/certificate") { call.certificate() }
         get("/v1/models") { call.models() }
         get("/v1/models/{id}") { call.singleModel() }
 
@@ -538,6 +636,31 @@ class ProxyServer @Inject constructor(
     }
 
     /**
+     * The certificate, so nobody has to copy one by hand.
+     *
+     * `curl -k https://…:8080/certificate -o phone.pem` once, then `--cacert
+     * phone.pem` — or `NODE_EXTRA_CA_CERTS`, or `REQUESTS_CA_BUNDLE` — from
+     * then on. The alternative was reading a PEM off a phone screen, and a
+     * feature whose first step is retyping base64 is a feature nobody uses.
+     */
+    private suspend fun ApplicationCall.certificate() {
+        cors()
+        val material = tls.current()
+        if (material == null) {
+            respondText(
+                "This server has no certificate: HTTPS is off, so it is serving plain HTTP " +
+                    "and there is nothing for a client to trust. Turn on HTTPS on the Proxy " +
+                    "screen and ask again.",
+                ContentType.Text.Plain,
+                HttpStatusCode.NotFound,
+            )
+            return
+        }
+        response.header(HttpHeaders.ContentDisposition, "attachment; filename=\"ondevice.pem\"")
+        respondText(material.pem, ContentType.parse("application/x-pem-file"))
+    }
+
+    /**
      * What this device can be asked for.
      *
      * Aliases are listed beside the real ids, because a client pointed here by
@@ -725,6 +848,21 @@ class ProxyServer @Inject constructor(
 
         /** Long enough to let a reconnect settle, short enough to feel immediate. */
         const val RESYNC_DEBOUNCE_MILLIS = 1_500L
+
+        const val LOOPBACK = "127.0.0.1"
+        const val ANY = "0.0.0.0"
+
+        /** Port 0 — the kernel picks, and `resolvedConnectors` says which. */
+        const val EPHEMERAL = 0
+
+        /**
+         * How long a MagicDNS lookup may hold up a TLS start.
+         *
+         * The name is worth waiting a moment for, because it has to be inside
+         * the certificate; it is not worth waiting for a resolver that is not
+         * going to answer, and the address on its own is a working URL.
+         */
+        const val LOOKUP_MILLIS = 2_000L
     }
 }
 

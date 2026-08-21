@@ -99,7 +99,13 @@ fun ProxyScreen(
             Rows(viewModel, listOf(ProxySpecs.REQUIRE_AUTH))
 
             SectionKicker("Network", Modifier.padding(top = 20.dp, bottom = 8.dp))
-            Rows(viewModel, listOf(ProxySpecs.ENABLED, ProxySpecs.BIND, ProxySpecs.PORT))
+            Rows(
+                viewModel,
+                listOf(ProxySpecs.ENABLED, ProxySpecs.BIND, ProxySpecs.PORT, ProxySpecs.TLS),
+            )
+            if (state.config.tls) {
+                CertificateCard(state, viewModel, clipboard, Modifier.padding(top = 8.dp))
+            }
 
             SectionKicker("Protocols", Modifier.padding(top = 20.dp, bottom = 8.dp))
             Rows(viewModel, listOf(ProxySpecs.PROTOCOL_ANTHROPIC, ProxySpecs.PROTOCOL_OPENAI))
@@ -319,7 +325,13 @@ private fun StatusCard(
             )
             NHelp(
                 "Point Claude Code here with ANTHROPIC_BASE_URL, or an OpenAI client with " +
-                    "OPENAI_BASE_URL, and give it the token below.",
+                    "OPENAI_BASE_URL, and give it the token below." +
+                    if (state.status.secure) {
+                        " The certificate is this device's own, so the client also needs to be " +
+                            "given it — see the card under Network."
+                    } else {
+                        ""
+                    },
             )
         }
 
@@ -331,6 +343,100 @@ private fun StatusCard(
             NHelp("Tailscale is connected at $address.")
         }
     }
+}
+
+/**
+ * The certificate, its fingerprint, and the two things anybody does with them.
+ *
+ * The fingerprint is the point of this card. A certificate a device signed for
+ * itself is worth exactly as much as the reader's ability to check they were
+ * handed the right one, and this is the only place that check can start from.
+ */
+@Composable
+private fun CertificateCard(
+    state: ai.ondevice.ui.vm.ProxyState,
+    viewModel: ProxyViewModel,
+    clipboard: androidx.compose.ui.platform.ClipboardManager,
+    modifier: Modifier = Modifier,
+) {
+    val certificate = state.certificate
+    val context = androidx.compose.ui.platform.LocalContext.current
+    NCard(gap = 8.dp, modifier = modifier) {
+        Text(
+            certificate?.fingerprint ?: "No certificate yet",
+            style = NocturneType.MonoXs,
+            color = if (certificate != null) NocturneColors.Accent300 else NocturneColors.TextMuted,
+        )
+        NCardBody(
+            if (certificate == null) {
+                "One is made the first time the server starts with HTTPS on, and kept after " +
+                    "that so the fingerprint a client pinned does not move."
+            } else {
+                "SHA-256, and valid for " + certificate.names.joinToString(", ") + "."
+            },
+        )
+        if (certificate != null) {
+            // Three ways to the same file, and Send is the one to reach for.
+            // Tailscale's Android app exports a Taildrop share target, so this
+            // lands in the other machine's Downloads without a terminal, a
+            // clipboard or a cable in the way.
+            NCardBody(
+                "Send it to the machine that has to trust it — Taildrop puts it straight in " +
+                    "that machine's Downloads. Then point the client at it with " +
+                    "`--cacert ondevice.pem`, `NODE_EXTRA_CA_CERTS` or `REQUESTS_CA_BUNDLE`.",
+            )
+            NHelp(
+                "Or fetch it from the server itself: curl -k " +
+                    (state.status.url ?: "https://…") + "/certificate -o ondevice.pem. " +
+                    "Turning the check off for that one request is not the leap it looks like " +
+                    "on a tailnet — WireGuard has already proved which machine answered.",
+            )
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            certificate?.let {
+                NButton(
+                    "Send",
+                    onClick = { viewModel.stageCertificate()?.let { file -> send(context, file) } },
+                    style = NButtonStyle.Primary,
+                    modifier = Modifier.weight(1f),
+                )
+                NButton(
+                    "Copy",
+                    onClick = { clipboard.setText(AnnotatedString(it.pem)) },
+                    style = NButtonStyle.Secondary,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            NButton(
+                if (certificate == null) "Make one now" else "Replace it",
+                onClick = viewModel::regenerateCertificate,
+                style = if (certificate == null) NButtonStyle.Primary else NButtonStyle.Secondary,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+/**
+ * Hand the certificate to whatever the person picks, Taildrop included.
+ *
+ * `text/plain` rather than `application/x-pem-file`, and that is the whole
+ * reason this is not `shareExport`: a mime nothing declares support for narrows
+ * the chooser to nothing, and the file is text.
+ */
+private fun send(context: android.content.Context, file: java.io.File) {
+    val uri = androidx.core.content.FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.fileprovider",
+        file,
+    )
+    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(android.content.Intent.EXTRA_STREAM, uri)
+        putExtra(android.content.Intent.EXTRA_TITLE, file.name)
+        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(android.content.Intent.createChooser(intent, "Send ${file.name}"))
 }
 
 @Composable

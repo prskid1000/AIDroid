@@ -27,7 +27,7 @@ landed:
 | Room / DataStore / Keystore / Hilt | Real |
 | Residency, thermal and memory-pressure policy (§3.5, §8.3, §8.4) | Real |
 | **Inference engines** (llama.cpp, whisper.cpp, sd.cpp, Kokoro, OmniVoice) | **Real** — JNI, built from source |
-| **HTTP proxy** (SPEC §18) — Anthropic + OpenAI APIs over the tailnet | **Real** — chat, images, audio, video; off by default |
+| **HTTP proxy** (SPEC §18) — Anthropic + OpenAI APIs over the tailnet | **Real** — chat, images, audio, video; HTTPS on a self-signed certificate; off by default |
 
 Building the native layer last was the point: SPEC §14 sequences by risk so the app
 was already standing when the unproven parts landed. The swap cost no change above

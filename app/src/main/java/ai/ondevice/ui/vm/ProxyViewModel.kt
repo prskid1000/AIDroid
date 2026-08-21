@@ -50,7 +50,22 @@ data class ProxyState(
     val models: List<ai.ondevice.data.db.ModelEntity> = emptyList(),
     /** What the loaded voice model can actually say. */
     val voices: List<String> = emptyList(),
+    /** The certificate on disk, when HTTPS has ever been switched on. */
+    val certificate: Certificate? = null,
 ) {
+    /**
+     * The certificate as a screen needs it.
+     *
+     * Not [ProxyTls.Material] itself: that carries an `SSLContext`, which is a
+     * live object with a key in it and has no business being in a state class
+     * that Compose compares for equality.
+     */
+    data class Certificate(
+        val fingerprint: String,
+        val names: List<String>,
+        val pem: String,
+    )
+
     val settings: SparseParams get() = document.settings
 
     val config: ProxyConfig get() = ProxyConfig(document)
@@ -168,6 +183,7 @@ class ProxyViewModel @Inject constructor(
     private val log: RequestLog,
     private val jobs: VideoJobs,
     private val db: ai.ondevice.data.db.OnDeviceDatabase,
+    private val tls: ai.ondevice.proxy.ProxyTls,
     /**
      * Asked what voices exist rather than told.
      *
@@ -216,6 +232,59 @@ class ProxyViewModel @Inject constructor(
             maskedToken = tokens.maskedProxyToken(),
             tailnetAddress = Reachability.tailnetAddress(),
         )
+        refreshCertificate()
+    }
+
+    /**
+     * Read the stored certificate, off the main thread.
+     *
+     * Loading a PKCS12 is a key derivation and a parse — small, and not small
+     * enough to do while a screen is being composed.
+     */
+    private fun refreshCertificate() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val material = runCatching { tls.current() }.getOrNull()
+            val certificate = material?.let {
+                ProxyState.Certificate(
+                    fingerprint = it.fingerprint,
+                    names = it.names,
+                    pem = it.pem,
+                )
+            }
+            _state.value = _state.value.copy(certificate = certificate)
+        }
+    }
+
+    /**
+     * The certificate as a file, ready to be handed to another app.
+     *
+     * Staged in the cache rather than exported anywhere findable: this is not
+     * an artifact, it is one step of pointing a client at this device, and the
+     * step after it is Taildrop dropping it in a laptop's Downloads. Null when
+     * there is no certificate yet, which the caller shows rather than hides.
+     */
+    fun stageCertificate(): java.io.File? {
+        val pem = _state.value.certificate?.pem ?: return null
+        val directory = java.io.File(context.cacheDir, "certificates")
+        return runCatching {
+            directory.mkdirs()
+            java.io.File(directory, "ondevice.pem").apply { writeText(pem) }
+        }.getOrNull()
+    }
+
+    /**
+     * Throw the certificate away and make another on the next start.
+     *
+     * A deliberate act, because it is the one thing that breaks a client that
+     * was told to trust the old one — which is also the reason to want it, when
+     * the key may have been copied off the device.
+     */
+    fun regenerateCertificate() {
+        viewModelScope.launch {
+            tls.forget()
+            runCatching { server.sync() }
+            refreshCertificate()
+        }
     }
 
     // ── settings ────────────────────────────────────────────────────────
@@ -326,6 +395,7 @@ class ProxyViewModel @Inject constructor(
             }
             runCatching { server.sync() }
             _state.value = _state.value.copy(tailnetAddress = Reachability.tailnetAddress())
+            refreshCertificate()
         }
     }
 
@@ -375,6 +445,9 @@ class ProxyViewModel @Inject constructor(
             // idempotent and cheap when nothing that matters has changed.
             runCatching { server.sync() }
             _state.value = _state.value.copy(revealedToken = null)
+            // A start with HTTPS on may have made a certificate, or replaced one
+            // that no longer named this address.
+            refreshCertificate()
         }
     }
 }
