@@ -287,26 +287,18 @@ private fun StatusCard(
             if (state.config.openAiEnabled) NTag("OpenAI", style = NTagStyle.Accent2)
         }
 
+        // Both forms, each copyable, and the second is not a convenience.
+        // Tailscale hands its DNS to applications one at a time on Android, so a
+        // client outside that set reaches 100.x perfectly well and cannot resolve
+        // a `.ts.net` name at all -- measured on this device, where the name
+        // resolved for the shell and did not for the app beside it. Offering only
+        // the name leaves that client with an address it cannot use and no way to
+        // discover the one it can.
         state.status.url?.let { url ->
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    url,
-                    style = NocturneType.MonoValue,
-                    color = NocturneColors.Accent300,
-                    modifier = Modifier.weight(1f),
-                )
-                NIconButton(
-                    NIcons.Copy,
-                    "Copy the address",
-                    onClick = { clipboard.setText(AnnotatedString(url)) },
-                    size = 30.dp,
-                    iconSize = 14.dp,
-                )
-            }
+            ProxyAddressRow(url, clipboard)
+        }
+        state.status.addressUrl?.let { url ->
+            ProxyAddressRow(url, clipboard)
         }
 
         state.status.refusal?.let { NCardBody(it) }
@@ -410,6 +402,33 @@ private fun CertificateCard(
                 modifier = Modifier.weight(1f),
             )
         }
+    }
+}
+
+/** One address the server answers on, with the button that copies it. */
+@Composable
+private fun ProxyAddressRow(
+    url: String,
+    clipboard: androidx.compose.ui.platform.ClipboardManager,
+) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            url,
+            style = NocturneType.MonoValue,
+            color = NocturneColors.Accent300,
+            modifier = Modifier.weight(1f),
+        )
+        NIconButton(
+            NIcons.Copy,
+            "Copy $url",
+            onClick = { clipboard.setText(AnnotatedString(url)) },
+            size = 30.dp,
+            iconSize = 14.dp,
+        )
     }
 }
 

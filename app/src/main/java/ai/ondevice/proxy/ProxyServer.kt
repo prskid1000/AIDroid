@@ -99,6 +99,25 @@ class ProxyServer @Inject constructor(
     ) {
         val url: String?
             get() = address?.let { "${if (secure) "https" else "http"}://${hostname ?: it}:$port" }
+
+        /**
+         * The same server, addressed by number rather than by name.
+         *
+         * **Both are offered because a client that cannot resolve MagicDNS is
+         * ordinary, not broken.** Tailscale hands its DNS to applications one by
+         * one on Android, so a client outside that set reaches 100.x perfectly
+         * well and cannot look up a `.ts.net` name at all — measured on this
+         * device, where a name resolved for the shell and did not for the app
+         * next to it. Such a client needs the address, and the certificate names
+         * it too, so nothing is given up by using it.
+         *
+         * Null when there is no name, because then [url] is already this and two
+         * identical rows to copy from is a worse card than one.
+         */
+        val addressUrl: String?
+            get() = address
+                ?.takeIf { hostname != null }
+                ?.let { "${if (secure) "https" else "http"}://$it:$port" }
     }
 
     private val _status = MutableStateFlow(Status())
