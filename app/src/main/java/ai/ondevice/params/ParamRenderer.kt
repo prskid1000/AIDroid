@@ -94,13 +94,23 @@ fun ParamRow(
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 5.dp, vertical = 0.dp),
                 )
             }
-            Text(
-                summarise(spec, current, overridden = modified),
-                style = NocturneType.MonoValue,
-                color = NocturneColors.Accent300,
-                modifier = Modifier.weight(1f),
-                textAlign = androidx.compose.ui.text.style.TextAlign.End,
-            )
+            // The value, unless the control below is about to say it again.
+            //
+            // A PATH row's dropdown shows the current choice in its closed
+            // state, so this line printed the same name a second time on the
+            // same screen — and this is the copy you cannot tap. Only when the
+            // dropdown is actually drawn: with nothing installed the control
+            // becomes a sentence about that, and then the stored value has
+            // nowhere else to appear.
+            if (!echoedByControl(spec, pathChoices)) {
+                Text(
+                    summarise(spec, current, overridden = modified),
+                    style = NocturneType.MonoValue,
+                    color = NocturneColors.Accent300,
+                    modifier = Modifier.weight(1f),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                )
+            }
         }
 
         if (showKeyLine) {
@@ -227,8 +237,13 @@ private fun ParamControl(
                         onChange(spec.key, if (index <= 0) null else choices[index - 1].path)
                     },
                 )
-                choices.getOrNull(selected - 1)?.let { chosen ->
-                    NHelp(chosen.detail, Modifier.padding(top = 4.dp))
+                // Only when it adds something. A file needs its folder and its
+                // size to be told apart from the one beside it; a model chosen
+                // by name does not, and there the detail was the full
+                // `owner/repo:quant` under a dropdown already showing the name
+                // it belongs to.
+                choices.getOrNull(selected - 1)?.detail?.takeIf { it.isNotBlank() }?.let {
+                    NHelp(it, Modifier.padding(top = 4.dp))
                 }
             }
         }
@@ -410,6 +425,10 @@ private fun ParamControl(
  * answer is "nothing" — not "everything". Offering a T5 encoder to the VAE slot
  * is offering a run that fails inside the runtime.
  */
+/** Whether this row's own control already shows the value the header would. */
+private fun echoedByControl(spec: ParamSpec, pathChoices: List<PathChoice>): Boolean =
+    spec.type == ParamType.PATH && choicesFor(spec, pathChoices).isNotEmpty()
+
 private fun choicesFor(spec: ParamSpec, pathChoices: List<PathChoice>): List<PathChoice> {
     val wanted = ai.ondevice.core.AttachmentRole.entries.firstOrNull { it.paramKey == spec.key }
         ?: return pathChoices

@@ -70,10 +70,9 @@ data class ProxyState(
      * are not interchangeable. An enum draws pills, which is right for
      * `tailnet | loopback | all` and wrong for ten entries spelled
      * `owner/repo:quant` — the current one is lost in the wall. `PATH` already
-     * draws a dropdown, already puts "None" first, and already shows a detail
-     * line underneath; its own comment in the renderer calls it "the same shape
-     * as the chat model picker: choose from what is installed", which is
-     * exactly what this is.
+     * draws a dropdown and already puts "None" first; its own comment in the
+     * renderer calls it "the same shape as the chat model picker: choose from
+     * what is installed", which is exactly what this is.
      *
      * The alternative was a size threshold inside the enum branch. That works,
      * and it would also have turned five existing rows — whisper's `language`,
@@ -113,7 +112,7 @@ data class ProxyState(
         ProxySpecs.DEFAULT_VOICE -> modelChoices { it == Modality.TEXT_TO_SPEECH }
         ProxySpecs.DEFAULT_SPEECH -> modelChoices { it == Modality.SPEECH_TO_TEXT }
         ProxySpecs.TTS_VOICE -> voices.map { voice ->
-            PathChoice(label = voice, detail = "voice id", path = voice)
+            PathChoice(label = voice, detail = "", path = voice)
         }
         else -> emptyList()
     }
@@ -132,6 +131,13 @@ data class ProxyState(
      * both — and where two rows share a name it falls back to the id for those
      * two, so the stored value is never ambiguous even though the list is
      * built from whatever happens to be installed.
+     *
+     * **No detail line.** The id used to sit under the dropdown, which made
+     * three lines saying one thing: the name right-aligned on the label line,
+     * `owner/repo:quant` under the control, and the name again inside it. The
+     * dropdown is the one of the three you can act on, so it is the one that
+     * stayed — and the renderer now omits a blank detail rather than drawing an
+     * empty line where it was.
      */
     private fun modelChoices(wanted: (Modality) -> Boolean): List<PathChoice> {
         val offered = models.filter { it.attachmentRole == null && wanted(it.modality) }
@@ -139,7 +145,7 @@ data class ProxyState(
             val shared = offered.count { it.label == model.label } > 1
             PathChoice(
                 label = model.label,
-                detail = model.id,
+                detail = "",
                 path = if (shared) model.id else model.label,
             )
         }
