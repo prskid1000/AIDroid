@@ -1,14 +1,22 @@
 package ai.ondevice.proxy
 
+import ai.ondevice.data.log.LogFile
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import java.io.File
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /** One thing the proxy did inside a request, worth showing on its own line. */
+@Serializable
 data class InterceptRecord(
     val kind: Kind,
     val name: String,
@@ -39,6 +47,7 @@ data class ProxyActivity(
     val rounds: Int = 0,
 )
 
+@Serializable
 data class RequestRecord(
     val id: String = UUID.randomUUID().toString(),
     val startedAt: Long = System.currentTimeMillis(),
@@ -77,8 +86,8 @@ data class RequestRecord(
      * Kept because the intercept list says *what* the proxy did and these say
      * *why* — a tool the model would not call, a system prompt that was not
      * what you thought, a history the client re-sent with something extra in
-     * it. Telecode writes the same pair to disk under `proxy_full_*.json`; this
-     * keeps them in memory, so they last a session and no longer.
+     * it. Telecode writes the same pair to disk under `proxy_full_*.json`; these
+     * go to disk too, once the request has finished — see [RequestLog].
      *
      * Redacted and capped on the way in: see [RequestLog.forDisplay].
      */
@@ -92,14 +101,23 @@ data class RequestRecord(
 }
 
 /**
- * The last few hundred requests, in memory, and nowhere else.
+ * The last few hundred requests, and the file they are written to.
  *
- * Nowhere else on purpose. This is the only place the answer to "why was that
- * one slow" exists — which round searched for what, which tool ran, what was
- * blocked — and it is also a record of every prompt's shape. A ring in RAM
- * gives the first without keeping the second past the life of the process.
- * Telecode's equivalent clears its disk dumps on startup for the same reason;
- * this one never writes them unless `proxy.debug` says to.
+ * This is the only place the answer to "why was that one slow" exists — which
+ * round searched for what, which tool ran, what was blocked — and it is also a
+ * record of every prompt's shape. It was a ring in RAM and nothing else, which
+ * kept the second of those from outliving the process; it also meant the
+ * process being killed, which is the thing most worth understanding, wiped the
+ * evidence of what led up to it. So it is now written down, deliberately and
+ * with the bodies, because a row without its request body answers "what ran"
+ * and not "why did that come back".
+ *
+ * **A finished request is what gets written.** One line per request, appended
+ * once, at the end: a record is touched on every intercept and every token, and
+ * re-encoding twenty kilobytes of body per token would cost more than the
+ * answer. It also means an in-flight request does not survive a kill, which is
+ * correct — it did not finish, and a restored row claiming otherwise would be
+ * the silent lie in §1.2.
  */
 @Singleton
 class RequestLog @Inject constructor() {
@@ -167,6 +185,7 @@ class RequestLog @Inject constructor() {
         update(id) {
             it.copy(status = status, error = error, finishedAt = System.currentTimeMillis())
         }
+        record(id)?.let { finished -> write(finished) }
     }
 
     /** Set once, by the route, before any work starts. */
@@ -221,7 +240,53 @@ class RequestLog @Inject constructor() {
 
     fun clear() {
         _records.value = emptyList()
+        store?.clear()
         recomputeActivity()
     }
 
+    // ── the file behind the ring ────────────────────────────────────────
+
+    /**
+     * Read what the last session did, and write this one's down.
+     *
+     * Called once, from the application. Restored records are merged behind
+     * whatever this process has already served rather than replacing it, and
+     * de-duplicated by id: a request that somehow finished twice would
+     * otherwise appear twice, and the second line is the more complete one.
+     */
+    fun persistTo(file: File, scope: CoroutineScope) {
+        val log = LogFile(file, CAPACITY)
+        store = log
+        writer = scope
+        scope.launch(Dispatchers.IO) {
+            val restored = log.read().mapNotNull { line ->
+                runCatching { JSON.decodeFromString(RequestRecord.serializer(), line) }.getOrNull()
+            }
+            if (restored.isEmpty()) return@launch
+            _records.update { live ->
+                val seen = live.mapTo(mutableSetOf()) { it.id }
+                // Newest first, which is the order this list is in and the
+                // order the screen reads it in.
+                (live + restored.reversed().filter { seen.add(it.id) }).take(CAPACITY)
+            }
+        }
+    }
+
+    private fun write(record: RequestRecord) {
+        val log = store ?: return
+        val line = runCatching { JSON.encodeToString(RequestRecord.serializer(), record) }
+            .getOrNull() ?: return
+        // Off whatever thread finished the request — that one is a Ktor worker
+        // holding a connection, and a file append is not something to make a
+        // client wait for.
+        writer?.launch(Dispatchers.IO) { log.append(listOf(line)) }
+    }
+
+    @Volatile
+    private var store: LogFile? = null
+
+    @Volatile
+    private var writer: CoroutineScope? = null
+
+    private val JSON = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 }

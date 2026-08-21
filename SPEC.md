@@ -1109,6 +1109,20 @@ than accepted and ignored, because the runtime cannot constrain the model to a
 tool and pretending otherwise returns a well-formed reply that quietly did not
 do what was asked.
 
+### 18.6 What is written down
+
+Both diagnostic logs — the request log behind *Recent requests*, and the engine
+log — are rings in memory backed by a file of the same size, so what the screen
+shows is what survives a restart and there is one answer to "how much is kept".
+This was memory-only, on the argument that a record of every prompt's shape is
+not worth keeping; the case against was that the run most worth understanding is
+the one that ended with the process being killed, and that is exactly the one
+whose evidence went with it. Request bodies are kept too, redacted of base64 and
+capped, because a row without them answers "what ran" and not "why did that come
+back". A request is written once, when it finishes: an in-flight request does
+not survive a kill, which is correct, and re-encoding a body per token would
+cost more than the answer. Clear empties the file as well as the list.
+
 ---
 
 ## Appendix A — implementation notes for the coding agent

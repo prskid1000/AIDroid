@@ -1,8 +1,17 @@
 package ai.ondevice.engine
 
+import ai.ondevice.data.log.LogFile
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import java.io.File
 
 /**
  * What the engines say about themselves, kept where the app can show it.
@@ -15,10 +24,13 @@ import kotlinx.coroutines.flow.asStateFlow
  * problems worth reading it for are the ones that happen on a phone in
  * somebody's pocket forty minutes into a clip.
  *
- * A ring in memory rather than a file: this is diagnosis, not an audit trail,
- * and the prompts that pass through it are not worth keeping past the process
- * that produced them. `proxy.debug` is the separate, deliberate switch for
- * writing anything down.
+ * The ring is backed by a file once [persistTo] has been called, and that is a
+ * change of mind worth recording. It was memory-only on the argument that this
+ * is diagnosis rather than an audit trail — true, and beside the point: the
+ * thing worth diagnosing is usually why the process is no longer there, and the
+ * process going away was what emptied the ring. The file holds exactly what the
+ * ring holds, [CAPACITY] lines, so nothing is kept that the screen would not
+ * have shown anyway, and Clear empties both.
  *
  * Mirrored to `android.util.Log` as well, so `adb logcat` keeps working exactly
  * as it did — nothing here replaces it, and a crash still leaves its trace in
@@ -69,6 +81,7 @@ object EngineLog {
         }
     }
 
+    @Serializable
     data class Entry(
         val at: Long,
         val level: Char,
@@ -108,7 +121,63 @@ object EngineLog {
     }
 
     fun clear() {
-        _entries.value = emptyList()
+        synchronized(this) {
+            _entries.value = emptyList()
+            pending.clear()
+            store?.clear()
+        }
+    }
+
+    // ── the file behind the ring ────────────────────────────────────────
+
+    /**
+     * Read the tail back, and write new lines to it from here on.
+     *
+     * Called once, from the application, with a scope that outlives every
+     * screen. Before it is called this object still works — the lines go into
+     * the ring and into [pending], and the first flush after install writes the
+     * ones from startup that would otherwise have been the only ones lost.
+     *
+     * Flushed on a timer rather than per line. A line costs a `write` syscall
+     * and the engines produce them in bursts — a diffusion step, a token rate,
+     * a whole ggml backend announcing itself — so per-line writing would put a
+     * file append inside the sampling loop. One second is short enough that a
+     * kill takes at most a second of context with it, which is the thing this
+     * file exists to keep.
+     */
+    fun persistTo(file: File, scope: CoroutineScope) {
+        scope.launch(Dispatchers.IO) {
+            val log = LogFile(file, CAPACITY)
+            val restored = log.read().mapNotNull { line ->
+                runCatching { JSON.decodeFromString(Entry.serializer(), line) }.getOrNull()
+            }
+            // The read finishes before [store] is set, and that order is the
+            // whole of the interlock: a flush that ran first would append this
+            // session's buffered lines to the file, the read would find them,
+            // and the merge below would put them into the ring a second time.
+            synchronized(EngineLog) {
+                store = log
+                // Restored first — they are older than anything this process
+                // has said, and the ring is oldest-first.
+                if (restored.isNotEmpty()) {
+                    _entries.value = (restored + _entries.value).takeLast(CAPACITY)
+                }
+            }
+            while (isActive) {
+                delay(FLUSH_MILLIS)
+                flush()
+            }
+        }
+    }
+
+    private fun flush() {
+        val batch = synchronized(this) {
+            if (pending.isEmpty()) return
+            val copy = pending.toList()
+            pending.clear()
+            copy
+        }
+        store?.append(batch)
     }
 
     private inline fun write(level: Char, tag: String, message: String, mirror: () -> Unit) {
@@ -131,8 +200,26 @@ object EngineLog {
         synchronized(this) {
             val next = _entries.value + entry
             _entries.value = if (next.size > CAPACITY) next.takeLast(CAPACITY) else next
+            // Buffered even before there is a file, so the lines written while
+            // the app is still starting are not the ones that go missing. Bounded
+            // by the same number as the ring, because a flush that never came
+            // must not be able to grow without one.
+            runCatching { JSON.encodeToString(Entry.serializer(), entry) }
+                .getOrNull()
+                ?.let { pending += it }
+            if (pending.size > CAPACITY) repeat(pending.size - CAPACITY) { pending.removeFirst() }
         }
     }
+
+    /** Written on the flush after they are added. Guarded by `this`. */
+    private val pending = ArrayDeque<String>()
+
+    @Volatile
+    private var store: LogFile? = null
+
+    private val JSON = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+
+    private const val FLUSH_MILLIS = 1_000L
 
     private const val CAPACITY = 600
     private const val MAX_LINE = 2_000

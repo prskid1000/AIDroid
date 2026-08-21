@@ -32,8 +32,24 @@ class OnDeviceApp : Application() {
 
     @Inject lateinit var prefs: ai.ondevice.data.prefs.AppPrefs
 
+    @Inject lateinit var requests: ai.ondevice.proxy.RequestLog
+
     override fun onCreate() {
         super.onCreate()
+        /*
+         * Both logs get their file before anything else runs.
+         *
+         * First, because the lines worth having are the ones from startup —
+         * a runtime that would not load, a bundle that was the wrong ABI — and
+         * a log installed after the thing it was meant to record is a log of
+         * the quiet part. Neither call touches the disk on this thread — both
+         * read their tail and write theirs on [scope] — and both keep buffering
+         * from the moment the class is first touched, so the lines from before
+         * this ran are not the ones that go missing.
+         */
+        val diagnostics = java.io.File(filesDir, "logs")
+        ai.ondevice.engine.EngineLog.persistTo(java.io.File(diagnostics, "engine.jsonl"), scope)
+        requests.persistTo(java.io.File(diagnostics, "requests.jsonl"), scope)
         scope.launch {
             // A download interrupted by a crash, a force-stop or a reinstall leaves a row saying RUNNING with nothing behind it.
             downloader.resumeInterrupted()

@@ -51,9 +51,10 @@ import java.util.Locale
  *
  * The intercept trace under each row is the point of this screen. It is the
  * only place the answer to "why did that take four minutes" exists: which round
- * searched for what, which tool ran, what was blocked and what was refused. In
- * memory and cleared on restart, deliberately — the trace is worth keeping for
- * a session and the prompts inside it are not worth keeping at all.
+ * searched for what, which tool ran, what was blocked and what was refused.
+ * Written down as each request finishes, so the trace outlives the process —
+ * which matters most in the case where the process did not choose to end. Clear
+ * empties the file as well as the list.
  */
 @Composable
 fun ProxyLogScreen(
@@ -67,7 +68,7 @@ fun ProxyLogScreen(
         toolbar = {
             PushToolbar(
                 title = "Recent requests",
-                subtitle = "${state.requests.size} kept · cleared when the app restarts",
+                subtitle = "${state.requests.size} kept · survives a restart",
                 subtitleMono = false,
                 onBack = onBack,
             )
