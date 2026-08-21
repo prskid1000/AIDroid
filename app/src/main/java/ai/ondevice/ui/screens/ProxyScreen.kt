@@ -360,7 +360,6 @@ private fun CertificateCard(
     modifier: Modifier = Modifier,
 ) {
     val certificate = state.certificate
-    val context = androidx.compose.ui.platform.LocalContext.current
     NCard(gap = 8.dp, modifier = modifier) {
         Text(
             certificate?.fingerprint ?: "No certificate yet",
@@ -376,13 +375,16 @@ private fun CertificateCard(
             },
         )
         if (certificate != null) {
-            // Three ways to the same file, and Send is the one to reach for.
-            // Tailscale's Android app exports a Taildrop share target, so this
-            // lands in the other machine's Downloads without a terminal, a
-            // clipboard or a cable in the way.
+            // Copy, because the client that needs this is usually on this phone.
+            // Vessel takes the certificate as pasted text and imports it into a
+            // container root store, which is the store Chromium reads -- so an
+            // Electron application inside the container trusts this server.
+            //
+            // A share sheet was here and is gone. It solved handing the file to
+            // another machine, and that is not what anyone was doing with it.
             NCardBody(
-                "Send it to the machine that has to trust it — Taildrop puts it straight in " +
-                    "that machine's Downloads. Then point the client at it with " +
+                "Copy it, then paste it into the client that has to trust this server. " +
+                    "In Vessel that is the container Certificates sheet; elsewhere, " +
                     "`--cacert ondevice.pem`, `NODE_EXTRA_CA_CERTS` or `REQUESTS_CA_BUNDLE`.",
             )
             NHelp(
@@ -395,15 +397,9 @@ private fun CertificateCard(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             certificate?.let {
                 NButton(
-                    "Send",
-                    onClick = { viewModel.stageCertificate()?.let { file -> send(context, file) } },
-                    style = NButtonStyle.Primary,
-                    modifier = Modifier.weight(1f),
-                )
-                NButton(
                     "Copy",
                     onClick = { clipboard.setText(AnnotatedString(it.pem)) },
-                    style = NButtonStyle.Secondary,
+                    style = NButtonStyle.Primary,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -415,28 +411,6 @@ private fun CertificateCard(
             )
         }
     }
-}
-
-/**
- * Hand the certificate to whatever the person picks, Taildrop included.
- *
- * `text/plain` rather than `application/x-pem-file`, and that is the whole
- * reason this is not `shareExport`: a mime nothing declares support for narrows
- * the chooser to nothing, and the file is text.
- */
-private fun send(context: android.content.Context, file: java.io.File) {
-    val uri = androidx.core.content.FileProvider.getUriForFile(
-        context,
-        "${context.packageName}.fileprovider",
-        file,
-    )
-    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-        type = "text/plain"
-        putExtra(android.content.Intent.EXTRA_STREAM, uri)
-        putExtra(android.content.Intent.EXTRA_TITLE, file.name)
-        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    }
-    context.startActivity(android.content.Intent.createChooser(intent, "Send ${file.name}"))
 }
 
 @Composable
