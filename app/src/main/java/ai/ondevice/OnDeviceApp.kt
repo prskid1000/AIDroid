@@ -32,10 +32,6 @@ class OnDeviceApp : Application() {
 
     @Inject lateinit var prefs: ai.ondevice.data.prefs.AppPrefs
 
-    /** So the proxy is brought up once per process, not once per screen. */
-    @Volatile
-    private var proxyStarted = false
-
     override fun onCreate() {
         super.onCreate()
         scope.launch {
@@ -82,6 +78,15 @@ class OnDeviceApp : Application() {
      * An activity having started is the platform's own definition of the
      * exemption, so by here it is allowed. Failure is logged rather than
      * swallowed, because the last one cost an afternoon.
+     *
+     * **Asked on every activity start, not once per process.** It used to be
+     * latched by a flag set *before* the attempt, so a single refusal — the
+     * platform's, or a `first()` on a store that was not open yet — was final
+     * for the life of the process, and the only way back was the Proxy screen,
+     * where an edit calls `sync()` by another route. That is exactly the report:
+     * enabled on launch, listening only after you go and look at it. Starting an
+     * already-running service is a no-op, so the cheap fix is to stop
+     * remembering and just ask again.
      */
     private suspend fun startProxyIfEnabled() {
         val enabled = runCatching {
@@ -117,13 +122,9 @@ class OnDeviceApp : Application() {
             object : ActivityLifecycleCallbacks {
                 override fun onActivityStarted(activity: Activity) {
                     foreground.onStart()
-                    // Once, on the first screen to appear. The platform counts
-                    // us as foreground from here, which is what a
-                    // foreground-service start requires.
-                    if (!proxyStarted) {
-                        proxyStarted = true
-                        scope.launch { startProxyIfEnabled() }
-                    }
+                    // The platform counts us as foreground from here, which is
+                    // what a foreground-service start requires.
+                    scope.launch { startProxyIfEnabled() }
                 }
                 override fun onActivityStopped(activity: Activity) = foreground.onStop()
                 override fun onActivityCreated(activity: Activity, state: Bundle?) = Unit

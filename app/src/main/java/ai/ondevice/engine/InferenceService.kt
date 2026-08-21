@@ -99,7 +99,21 @@ class InferenceService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         createChannel()
-        startForeground(NOTIFICATION_ID, buildNotification(null))
+        /*
+         * Guarded, because this is now also reached by a restart nobody asked
+         * for. With `START_STICKY` the system brings this service back after it
+         * kills the process, and a `startForeground` that the platform refuses
+         * throws — in `onCreate`, which would take the whole process down and
+         * turn one lost socket into a crash loop. A refusal here means the
+         * service may not run, and the honest response is to stop rather than
+         * to die: the next activity start asks again, and that one is allowed.
+         */
+        runCatching { startForeground(NOTIFICATION_ID, buildNotification(null)) }
+            .onFailure {
+                EngineLog.w("InferenceService", "not allowed to be foreground: ${it.message}")
+                stopSelf()
+                return
+            }
 
         // What the proxy made, once it has made it.
         //
@@ -210,7 +224,29 @@ class InferenceService : LifecycleService() {
             // finish must not take the lock out from under the second.
             ACTION_RELEASE_WAKELOCK -> if (running.value == 0) releaseWakeLock()
         }
-        return START_NOT_STICKY
+        /*
+         * Sticky, so a system kill is survivable.
+         *
+         * This was `START_NOT_STICKY`, which is the right answer for a service
+         * that exists for the duration of one job — and the wrong one for a
+         * service that also holds a listening socket. The device kills this
+         * process under memory pressure like any other: logcat says
+         * `Process ai.ondevice has died: prcp FGS` with `isKilledByAm=false`,
+         * every other app on the phone dies in the same second, and with
+         * `NOT_STICKY` there is no line after it about restarting anything. The
+         * proxy was then off until somebody next opened the app, which from the
+         * outside is a server that stops on its own after a while.
+         *
+         * Sticky brings the service back with a null intent, `onCreate` runs
+         * `proxy.sync()` again, and the socket is back. When the proxy is *not*
+         * switched on there is nothing to come back for — the watcher in
+         * `onCreate` sees nothing loaded, nothing running and nothing listening
+         * and calls `stopSelf()`, and a service stopped that way is not
+         * restarted again. So this costs one short-lived process after a kill
+         * and buys back the only feature that needs the process to outlive the
+         * screen.
+         */
+        return START_STICKY
     }
 
     private fun acquireWakeLock() {
