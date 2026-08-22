@@ -89,10 +89,16 @@ data class ProxyState(
         val canRestartUnattended: Boolean = true,
         /** Whether the system has been told to stop economising on this app. */
         val exemptFromBattery: Boolean = true,
+        /** Whether the one fallback for a refused restart can reach anybody. */
+        val notificationsAllowed: Boolean = true,
     ) {
-        /** Nothing to say when the platform is already allowing both. */
-        val settled: Boolean get() = canRestartUnattended && exemptFromBattery
+        /** Nothing to say when the platform is already allowing all three. */
+        val settled: Boolean
+            get() = canRestartUnattended && exemptFromBattery && notificationsAllowed
     }
+
+    /** One thing the platform is withholding. Names the Settings page that grants it. */
+    enum class Restriction { ALARMS, BATTERY, NOTIFICATIONS }
 
     val settings: SparseParams get() = document.settings
 
@@ -452,6 +458,7 @@ class ProxyViewModel @Inject constructor(
             resilience = ProxyState.Resilience(
                 canRestartUnattended = watchdog.canRestartUnattended,
                 exemptFromBattery = watchdog.exemptFromBatteryOptimisation,
+                notificationsAllowed = watchdog.notificationsAllowed,
             ),
         )
     }
@@ -463,8 +470,12 @@ class ProxyViewModel @Inject constructor(
      * ask the same question twice. `NEW_TASK` because the context here is the
      * application's, not the activity's.
      */
-    fun openRestrictionSettings(exactAlarms: Boolean): Boolean {
-        val intent = if (exactAlarms) watchdog.exactAlarmSettings() else watchdog.batterySettings()
+    fun openRestrictionSettings(restriction: ProxyState.Restriction): Boolean {
+        val intent = when (restriction) {
+            ProxyState.Restriction.ALARMS -> watchdog.exactAlarmSettings()
+            ProxyState.Restriction.BATTERY -> watchdog.batterySettings()
+            ProxyState.Restriction.NOTIFICATIONS -> watchdog.notificationSettings()
+        }
         intent ?: return false
         return runCatching {
             context.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))

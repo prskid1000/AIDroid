@@ -124,6 +124,27 @@ class ProxyWatchdog @Inject constructor(
                 .isIgnoringBatteryOptimizations(context.packageName)
         }.getOrDefault(false)
 
+    /**
+     * Whether the one fallback this class has can actually be delivered.
+     *
+     * When the platform refuses the restart, a notification and a tap is the
+     * entire remaining plan — and `notify` on an app whose notifications are off
+     * does nothing and reports nothing. That is the failure mode this app is
+     * least able to survive quietly: the server is down, the app knows, and the
+     * knowing cannot reach anybody.
+     */
+    val notificationsAllowed: Boolean
+        get() = runCatching { notifications().areNotificationsEnabled() }.getOrDefault(true)
+
+    /** Where to send somebody to turn notifications back on, or null when they are on. */
+    fun notificationSettings(): Intent? =
+        if (notificationsAllowed) {
+            null
+        } else {
+            Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+        }
+
     /** Where to send somebody to grant exact alarms, or null when it is already granted. */
     fun exactAlarmSettings(): Intent? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !canRestartUnattended) {
@@ -256,7 +277,7 @@ class ProxyWatchdog @Inject constructor(
         }.exceptionOrNull()
 
         if (failure == null) {
-            EngineLog.i("ProxyWatchdog", "woke and asked for the server; it was allowed")
+            noteRoutineCheck()
             runCatching { notifications().cancel(NOTIFICATION_ID) }
         } else {
             // Refused: the alarm woke us and the platform still would not let
@@ -319,6 +340,33 @@ class ProxyWatchdog @Inject constructor(
         }
     }
 
+    /**
+     * Say that the routine check ran, but not ninety-six times a day.
+     *
+     * The check fires every fifteen minutes for as long as the server is on, and
+     * writing a line each time would put about a hundred identical entries a day
+     * into a log that keeps six hundred — so a week of "it was allowed" would
+     * push out the day of real diagnostics somebody actually came looking for.
+     * That is the log destroying its own reason to exist.
+     *
+     * Silence is not the answer either: a watchdog nobody can see working is one
+     * nobody can distinguish from a watchdog that is not. So it says so once an
+     * hour. Held in memory rather than on disk deliberately — a fresh process
+     * has forgotten, and a fresh process is exactly the case worth a line.
+     *
+     * Refusals are never throttled. There are not many, and each one is the
+     * event this whole class exists for.
+     */
+    private fun noteRoutineCheck() {
+        val now = System.currentTimeMillis()
+        if (now - lastRoutineLog < ROUTINE_LOG_MILLIS) return
+        lastRoutineLog = now
+        EngineLog.i("ProxyWatchdog", "woke and asked for the server; it was allowed")
+    }
+
+    @Volatile
+    private var lastRoutineLog = 0L
+
     private fun pending(): PendingIntent = PendingIntent.getBroadcast(
         context,
         REQUEST_CHECK,
@@ -338,6 +386,9 @@ class ProxyWatchdog @Inject constructor(
          * quietly declines to honour. The number it replaces is fourteen hours.
          */
         const val INTERVAL_MILLIS = 15 * 60 * 1000L
+
+        /** How often a check that found nothing wrong is worth a line. See [noteRoutineCheck]. */
+        private const val ROUTINE_LOG_MILLIS = 60 * 60 * 1000L
 
         private const val CHANNEL_ID = "proxy"
         private const val NOTIFICATION_ID = 1004

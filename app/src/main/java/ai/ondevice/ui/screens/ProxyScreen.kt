@@ -470,7 +470,9 @@ private fun ResilienceCard(
                     "so the check can only post a notification and wait for a tap. This is " +
                     "the permission that makes the restart automatic.",
                 action = "Allow alarms",
-                onClick = { viewModel.openRestrictionSettings(exactAlarms = true) },
+                onClick = {
+                    viewModel.openRestrictionSettings(ai.ondevice.ui.vm.ProxyState.Restriction.ALARMS)
+                },
             )
         }
 
@@ -482,14 +484,33 @@ private fun ResilienceCard(
                     "caller sees a timeout rather than a refusal -- the harder of the two to " +
                     "diagnose. Set this app to Unrestricted.",
                 action = "Open battery settings",
-                onClick = { viewModel.openRestrictionSettings(exactAlarms = false) },
+                onClick = {
+                    viewModel.openRestrictionSettings(ai.ondevice.ui.vm.ProxyState.Restriction.BATTERY)
+                },
+            )
+        }
+
+        if (!resilience.notificationsAllowed) {
+            RestrictionRow(
+                title = "Notifications are off",
+                body = "Which leaves nothing to fall back on. When the platform refuses to let " +
+                    "the server start, a notification and a tap is the whole remaining plan -- " +
+                    "and posting one to an app whose notifications are off does nothing and " +
+                    "says nothing. The server would be down, this app would know, and the " +
+                    "knowing could not reach you.",
+                action = "Turn notifications on",
+                onClick = {
+                    viewModel.openRestrictionSettings(
+                        ai.ondevice.ui.vm.ProxyState.Restriction.NOTIFICATIONS,
+                    )
+                },
             )
         }
 
         if (resilience.settled) {
             NHelp(
-                "Both granted. The server comes back by itself after a kill, a reboot and an " +
-                    "app update, and says so in the shade if it ever cannot.",
+                "Nothing is in the way. The server comes back by itself after a kill, a " +
+                    "reboot and an app update, and says so in the shade if it ever cannot.",
             )
         }
     }
