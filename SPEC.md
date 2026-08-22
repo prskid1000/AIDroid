@@ -1123,6 +1123,42 @@ back". A request is written once, when it finishes: an in-flight request does
 not survive a kill, which is correct, and re-encoding a body per token would
 cost more than the answer. Clear empties the file as well as the list.
 
+### 18.7 Staying up
+
+The proxy is only a server if it is answering when nobody is looking at the
+phone, and the thing that decides that is not this app. Three facts set the
+shape, all measured on the target device rather than assumed:
+
+- **A killed process comes back; its foreground standing does not.**
+  `START_STICKY` does bring `InferenceService` back after the system reclaims
+  the process, and the platform then refuses `startForeground` with
+  *`mAllowStartForeground false`* — `default_background_fgs_starts_restriction_enabled`
+  is on. A service that may not go foreground cannot hold a socket, so it stops,
+  correctly. Observed cost of there being nothing after that: fourteen hours off,
+  with the process alive and frozen, and the only cure was opening the app.
+- **So the restart is asked for from outside.** An exact alarm is exempt from
+  the rule forbidding a foreground-service start from the background — the same
+  exemption the workflow scheduler is built on — so a check is armed whenever
+  the proxy is switched on, re-arms itself on every firing, and asks for the
+  service again. It is armed by the service starting, by the service being
+  destroyed, by the task being swiped away, at app start, on boot, and on
+  `MY_PACKAGE_REPLACED`, because none of those know which of them is the last
+  thing to happen.
+- **Refusal is a state, not a bug.** Without `SCHEDULE_EXACT_ALARM` the alarm
+  still fires and still may not start anything, so it posts a notification and a
+  tap instead. Battery optimisation is the other half and cannot be granted from
+  in here at all. Both are shown on the Proxy screen under *Staying up*, with
+  the Settings page that grants each — and the card says nothing when both are
+  already granted, because a permanent row about a permission somebody has
+  already given is how a screen teaches people to stop reading it.
+
+**"Enabled" and "could not read whether it is enabled" are different answers.**
+The stored configuration is one JSON document, and a blank read of it means
+never configured — not off. Folding the blank into `false` is what made the
+watchdog cancel its own alarm and the launch path decline to start: a silent
+failure inside the code written to end silent failures. The read returns three
+values, and the uncertain one keeps watching.
+
 ---
 
 ## Appendix A — implementation notes for the coding agent

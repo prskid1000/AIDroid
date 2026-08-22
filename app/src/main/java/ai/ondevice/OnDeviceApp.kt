@@ -8,7 +8,6 @@ import ai.ondevice.di.ApplicationScope
 import ai.ondevice.engine.RuntimeRegistry
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -30,9 +29,9 @@ class OnDeviceApp : Application() {
 
     @Inject lateinit var scheduler: ai.ondevice.engine.workflow.Scheduler
 
-    @Inject lateinit var prefs: ai.ondevice.data.prefs.AppPrefs
-
     @Inject lateinit var requests: ai.ondevice.proxy.RequestLog
+
+    @Inject lateinit var watchdog: ai.ondevice.proxy.ProxyWatchdog
 
     override fun onCreate() {
         super.onCreate()
@@ -70,6 +69,17 @@ class OnDeviceApp : Application() {
              * it. Re-arming at startup is cheap and makes the row the truth.
              */
             runCatching { scheduler.rearmAll() }
+            /*
+             * And the proxy's own alarm, for the same reason as the two above.
+             *
+             * It is armed by the service too, but the service is exactly the
+             * thing that may not be running: if the last one was refused its
+             * foreground standing and stopped, the alarm it armed is the only
+             * thing left — and a force-stop or a reinstall drops that alarm as
+             * surely as it drops a schedule. This is the one place that runs
+             * whatever else has happened.
+             */
+            runCatching { watchdog.sync() }
         }
         watchForeground()
     }
@@ -105,12 +115,18 @@ class OnDeviceApp : Application() {
      * remembering and just ask again.
      */
     private suspend fun startProxyIfEnabled() {
-        val enabled = runCatching {
-            ai.ondevice.proxy.ProxyConfig(
-                ai.ondevice.proxy.ProxyDocument.parse(prefs.proxyDocument.first()),
-            ).enabled
-        }.getOrDefault(false)
-        if (!enabled) return
+        /*
+         * Asked of the watchdog rather than re-derived here.
+         *
+         * This was the same three lines it holds, with one difference that
+         * turned out to matter: it folded a blank document into `false`, and a
+         * blank document means *never read*, not *switched off* — the comment on
+         * the key in `AppPrefs` says exactly that. A cold read that came back
+         * empty was therefore silently read as consent withheld, and the proxy
+         * did not start. One answer to the question, in one place, with a third
+         * value for "could not tell".
+         */
+        if (watchdog.enabled() != true) return
         runCatching {
             startForegroundService(
                 android.content.Intent(this, ai.ondevice.engine.InferenceService::class.java),

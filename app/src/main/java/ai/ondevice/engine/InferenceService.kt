@@ -60,6 +60,15 @@ class InferenceService : LifecycleService() {
      */
     @Inject lateinit var proxy: ai.ondevice.proxy.ProxyServer
 
+    /**
+     * What brings the socket back when this service does not.
+     *
+     * Injected here rather than left to the app, because this class is the one
+     * that finds out — it is the only place that learns the platform refused to
+     * let it be foreground, and the only place that sees itself being destroyed.
+     */
+    @Inject lateinit var watchdog: ai.ondevice.proxy.ProxyWatchdog
+
     @Inject lateinit var runner: ModelRunner
 
     /**
@@ -111,9 +120,37 @@ class InferenceService : LifecycleService() {
         runCatching { startForeground(NOTIFICATION_ID, buildNotification(null)) }
             .onFailure {
                 EngineLog.w("InferenceService", "not allowed to be foreground: ${it.message}")
+                /*
+                 * Refused, and this is where it used to end.
+                 *
+                 * Measured on this device: the sticky restart happened, this
+                 * line was logged, the service stopped, and the proxy stayed
+                 * down for fourteen hours while the process sat frozen with
+                 * nothing in it. One refusal was final, because the only thing
+                 * that ever asked again was somebody opening the app.
+                 *
+                 * So the refusal now arms the one mechanism that can ask from
+                 * outside a process with no standing. See [ProxyWatchdog].
+                 */
+                refusedForeground = true
+                // Armed here and now, on this thread. It was a `lifecycleScope`
+                // launch, which is a coroutine scope that `stopSelf()` on the
+                // next line cancels — so the single most important call in this
+                // fix was racing the thing that makes it necessary.
+                //
+                // Armed unconditionally, without asking whether the proxy is on:
+                // that answer is a suspending DataStore read, and `check` asks
+                // it anyway and disarms itself when it is no.
+                runCatching { watchdog.arm(RETRY_MILLIS) }
                 stopSelf()
                 return
             }
+
+        // Armed on the way up, not only on the way down. Whatever kills this
+        // service next may not give it the chance to notice — a process killed
+        // outright runs no `onDestroy` — so the check has to already be pending
+        // before anything goes wrong.
+        lifecycleScope.launch { runCatching { watchdog.sync() } }
 
         // What the proxy made, once it has made it.
         //
@@ -265,10 +302,54 @@ class InferenceService : LifecycleService() {
         wakeLock = null
     }
 
+    /**
+     * The app swiped out of recents.
+     *
+     * Not the same event as being stopped, and on this hardware not a harmless
+     * one: the platform is free to kill the process, and the OEM layer takes it
+     * as permission rather than as a suggestion. The service is not stopped
+     * here — a proxy that is switched on has not been switched off by somebody
+     * tidying their recents — but the check is re-armed, because whether this
+     * process is still alive in a minute is now out of our hands.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        armWatchdogIfServing()
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
         releaseWakeLock()
+        // Every way out ends here, including the ones nobody chose: the system
+        // stopping the service, the OEM's battery manager doing it, a crash on
+        // another thread. The only one this cannot cover is a process killed
+        // outright, which is why `onCreate` arms as well.
+        armWatchdogIfServing()
         super.onDestroy()
     }
+
+    /**
+     * Arm from a place that cannot suspend.
+     *
+     * Read off the status flow rather than the stored document, because
+     * `onDestroy` runs after `lifecycleScope` is cancelled and a DataStore read
+     * is suspending. The flow's `enabled` is the same answer one step fresher —
+     * and when the service is stopping *because* the proxy was switched off it
+     * is already false, so this disarms instead, which is what should happen.
+     */
+    private fun armWatchdogIfServing() {
+        // The refusal path already armed, and it is the one case where the test
+        // below gets the wrong answer: `onCreate` returned before `proxy.sync()`
+        // ran, so the status still says disabled, and this would cancel the
+        // retry that the refusal exists to schedule. That is the whole bug,
+        // restored by the code meant to fix it.
+        if (refusedForeground) return
+        runCatching {
+            if (proxy.status.value.enabled) watchdog.arm() else watchdog.disarm()
+        }
+    }
+
+    /** Set when the platform refused foreground standing; see [armWatchdogIfServing]. */
+    private var refusedForeground = false
 
 
 
@@ -455,6 +536,18 @@ class InferenceService : LifecycleService() {
         const val ACTION_ACQUIRE_WAKELOCK = "ai.ondevice.inference.WAKE"
         const val ACTION_RELEASE_WAKELOCK = "ai.ondevice.inference.SLEEP"
         private const val WAKELOCK_TAG = "OnDeviceAI::generation"
+
+        /**
+         * How long to wait before trying again after the platform said no.
+         *
+         * Shorter than the watchdog's own interval, because a refusal is
+         * usually a moment rather than a state — the app was mid-transition,
+         * or the process had just been rebuilt — and the ordinary fifteen
+         * minutes would be a long time to be off for a condition that has
+         * already passed. If it has not passed, the next check is fifteen
+         * minutes behind this one anyway.
+         */
+        private const val RETRY_MILLIS = 60 * 1000L
 
         /** Titles that describe a state rather than work, so they get no spinner. */
         private val RESTING = setOf(

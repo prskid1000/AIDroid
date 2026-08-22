@@ -295,6 +295,30 @@
         </receiver>
 
         <!--
+            Where the proxy's restart check lands.
+
+            Two ways in, and both of them are exemptions from the rule that
+            forbids starting a foreground service from the background — which is
+            the whole reason this component exists rather than a retry loop
+            inside the service. The exact alarm is the periodic check; see
+            ProxyWatchdog, which was written after a sticky restart was refused
+            with `mAllowStartForeground false` and the API stayed down for
+            fourteen hours with nobody told.
+
+            MY_PACKAGE_REPLACED covers the other end of the same gap: installing
+            a new version stops every service in the old process and nothing
+            brings the proxy back, so a sideloaded update took the API down
+            until somebody opened the app.
+        -->
+        <receiver
+            android:name=".proxy.ProxyWatchdogReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!--
             Where a scheduled run begins, and where every armed alarm is rebuilt.
 
             Alarms do not survive a reboot, and a schedule is stored as a

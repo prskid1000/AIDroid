@@ -8,7 +8,6 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -19,7 +18,7 @@ class BootSweepReceiver : BroadcastReceiver() {
 
     @Inject lateinit var storage: ModelStorage
 
-    @Inject lateinit var prefs: ai.ondevice.data.prefs.AppPrefs
+    @Inject lateinit var watchdog: ai.ondevice.proxy.ProxyWatchdog
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
@@ -48,16 +47,17 @@ class BootSweepReceiver : BroadcastReceiver() {
      * Only when it was already switched on. A reboot is not consent.
      */
     private suspend fun restartProxy(context: Context) {
-        val enabled = runCatching {
-            ai.ondevice.proxy.ProxyConfig(
-                ai.ondevice.proxy.ProxyDocument.parse(prefs.proxyDocument.first()),
-            ).enabled
-        }.getOrDefault(false)
-        if (!enabled) return
+        // Asked of the watchdog, which is the one place that knows the
+        // difference between "switched off" and "could not read it" -- a blank
+        // document is the second, and reading it as the first is what kept the
+        // proxy down. Arming afterwards is what covers a boot where the start
+        // itself was refused.
+        if (watchdog.enabled() != true) return
         runCatching {
             context.startForegroundService(
                 Intent(context, ai.ondevice.engine.InferenceService::class.java),
             )
         }
+        watchdog.arm()
     }
 }

@@ -6,6 +6,7 @@
     <string name="results_channel_name">Finished runs</string>
     <string name="handoff_channel_name">Results waiting to be sent</string>
     <string name="schedule_channel_name">Scheduled runs</string>
+    <string name="proxy_channel_name">API server</string>
     <!-- What another app's share sheet calls this app. -->
     <string name="trigger_label">Run a workflow</string>
 </resources>
