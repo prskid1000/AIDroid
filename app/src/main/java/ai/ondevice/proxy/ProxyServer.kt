@@ -332,6 +332,46 @@ class ProxyServer @Inject constructor(
         add("localhost")
     }.distinct()
 
+    /**
+     * Throw the certificate away and make another, now.
+     *
+     * **The stop is the whole fix.** This used to be `tls.forget()` followed by
+     * `sync()`, which reads as obviously right and does nothing at all: `start`
+     * short-circuits when the address, port and scheme have not changed, and
+     * they have not — replacing a certificate changes none of them. So the file
+     * was deleted, the running socket kept serving the old certificate out of
+     * the `SSLContext` it already held, and the card came back saying there was
+     * no certificate at all.
+     *
+     * That is worse than the dead button it looked like. The one thing this
+     * card is *for* is letting somebody check that the fingerprint they were
+     * given is the fingerprint on the wire, and this had the screen and the
+     * socket disagreeing about it. Every later press was a no-op too, because
+     * the guard kept short-circuiting until something else happened to rebind.
+     *
+     * Nothing bound means nothing to rebind, and that branch matters: HTTPS can
+     * be switched on with the server switched off, and the button is on screen
+     * then too. It makes one directly rather than being a second kind of no-op
+     * — and if a later start binds an address this certificate does not name,
+     * `material` reissues it, which is the case that logic already exists for.
+     */
+    suspend fun regenerateCertificate() {
+        tls.forget()
+        if (_status.value.listening) {
+            stop()
+            sync()
+        } else {
+            val address = Reachability.tailnetAddress() ?: LOOPBACK
+            runCatching { tls.material(certificateNames(address, null)) }
+                .onFailure {
+                    ai.ondevice.engine.EngineLog.w(
+                        "ProxyServer",
+                        "could not make a certificate: ${it.message}",
+                    )
+                }
+        }
+    }
+
     fun stop() {
         front.stop()
         runCatching { server?.stop(GRACE_MILLIS, TIMEOUT_MILLIS) }

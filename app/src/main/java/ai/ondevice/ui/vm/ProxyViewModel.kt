@@ -317,8 +317,12 @@ class ProxyViewModel @Inject constructor(
      */
     fun regenerateCertificate() {
         viewModelScope.launch {
-            tls.forget()
-            runCatching { server.sync() }
+            // Asked of the server rather than done here. This was `tls.forget()`
+            // and a `sync()`, and the sync declined to do anything because the
+            // bind had not changed -- so the button deleted the certificate and
+            // made no replacement. The server is the only thing that can both
+            // reissue and rebind onto the result.
+            runCatching { server.regenerateCertificate() }
             refreshCertificate()
         }
     }
