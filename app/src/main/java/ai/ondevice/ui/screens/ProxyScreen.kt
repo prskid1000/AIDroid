@@ -465,7 +465,7 @@ private fun ResilienceCard(
         if (!resilience.canRestartUnattended) {
             RestrictionRow(
                 text = "Alarms & reminders is off, so the restart needs a tap.",
-                action = "Allow",
+                action = "Allow exact alarms",
                 onClick = {
                     viewModel.openRestrictionSettings(ai.ondevice.ui.vm.ProxyState.Restriction.ALARMS)
                 },
@@ -475,7 +475,7 @@ private fun ResilienceCard(
         if (!resilience.exemptFromBattery) {
             RestrictionRow(
                 text = "Battery optimisation is on. Set this app to Unrestricted.",
-                action = "Open",
+                action = "Open battery settings",
                 onClick = {
                     viewModel.openRestrictionSettings(ai.ondevice.ui.vm.ProxyState.Restriction.BATTERY)
                 },
@@ -485,7 +485,7 @@ private fun ResilienceCard(
         if (!resilience.notificationsAllowed) {
             RestrictionRow(
                 text = "Notifications are off, so it cannot tell you when it fails.",
-                action = "Turn on",
+                action = "Turn on notifications",
                 onClick = {
                     viewModel.openRestrictionSettings(
                         ai.ondevice.ui.vm.ProxyState.Restriction.NOTIFICATIONS,
@@ -516,14 +516,14 @@ private fun RestrictionRow(
     action: String,
     onClick: () -> Unit,
 ) {
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        NCardBody(text, Modifier.weight(1f))
-        NButton(action, onClick = onClick, style = NButtonStyle.Secondary)
-    }
+    // The shape `WorkflowEditScreen` already uses for the very same question —
+    // help line, then a full-width Secondary button under it. That screen asks
+    // for the exact-alarm permission too, so this one having invented its own
+    // arrangement was two answers to one problem, and the small trailing button
+    // was the worse of them: a 44dp control against a 12px line sits wrong, and
+    // three of them down a card sit worse.
+    NHelp(text)
+    NButton(action, onClick = onClick, style = NButtonStyle.Secondary, block = true)
 }
 
 /** One address the server answers on, with the button that copies it. */
