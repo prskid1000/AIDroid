@@ -26,7 +26,30 @@ class DownloadService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         createChannel()
-        startForeground(NOTIFICATION_ID, buildNotification(null))
+        /*
+         * Guarded, for the reason written up on `InferenceService.onCreate`.
+         *
+         * This is `START_STICKY`, so the system brings it back after killing
+         * the process — and on this device it then refuses `startForeground`
+         * with `mAllowStartForeground false`, measured. Unguarded that refusal
+         * is an exception thrown in `onCreate`, which takes the process down;
+         * and because the restart is sticky, AMS brings it back to do it again.
+         * A download interrupted by a memory kill became a crash loop, which is
+         * a worse outcome than the download simply not resuming.
+         *
+         * Stopping is the honest answer: the transfer stays in the database as
+         * it was, and `Downloader.resumeInterrupted` picks it up the next time
+         * the app is opened — which is the same path a force-stop already took.
+         */
+        runCatching { startForeground(NOTIFICATION_ID, buildNotification(null)) }
+            .onFailure {
+                ai.ondevice.engine.EngineLog.w(
+                    "DownloadService",
+                    "not allowed to be foreground: ${it.message}",
+                )
+                stopSelf()
+                return
+            }
 
         lifecycleScope.launch {
             downloader.observeJobs().collectLatest { jobs ->
