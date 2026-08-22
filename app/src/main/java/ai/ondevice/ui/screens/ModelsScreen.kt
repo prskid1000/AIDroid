@@ -18,6 +18,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -187,11 +190,45 @@ fun ModelsScreen(
             }
 
             state.groups.forEach { group ->
+                /*
+                 * Shut, until asked.
+                 *
+                 * This screen is every model on the device, and on this one that
+                 * is twenty-six gigabytes across five modalities — a wall you
+                 * scroll through to find out what is even here. Closed, the
+                 * whole library is five lines and each says how many are inside,
+                 * which is the answer to "what have I got" that the list itself
+                 * was burying.
+                 *
+                 * `rememberSaveable`, keyed by modality, so a rotation or a trip
+                 * to a model and back does not shut everything the reader just
+                 * opened. Keyed rather than positional because the groups
+                 * themselves come and go as things are installed, and an index
+                 * would hand one group's state to whichever group took its slot.
+                 */
+                var open by rememberSaveable(key = "models.group.${group.modality.name}") {
+                    mutableStateOf(false)
+                }
                 ai.ondevice.ui.components.SectionKicker(
                     "${group.modality.label} · ${group.models.size}",
-                    Modifier.padding(bottom = 9.dp),
+                    // Padding inside the clickable, so the finger gets a row
+                    // rather than a 16dp line of 10px capitals. A section
+                    // kicker was never a control before this; making it one
+                    // without giving it a target would be a header that
+                    // ignores most taps at it.
+                    Modifier
+                        .nClickableFlat { open = !open }
+                        .padding(top = 8.dp, bottom = 10.dp),
+                    trailing = {
+                        Icon(
+                            if (open) NIcons.ChevronDown else NIcons.ChevronLeft,
+                            contentDescription = null,
+                            tint = NocturneColors.TextMuted,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    },
                 )
-                group.models.forEach { model ->
+                if (open) group.models.forEach { model ->
                     val loaded = model.id == state.loadedModelId
                     NCard(
                         Modifier
