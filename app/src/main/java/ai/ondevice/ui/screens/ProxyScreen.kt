@@ -107,6 +107,9 @@ fun ProxyScreen(
                 CertificateCard(state, viewModel, clipboard, Modifier.padding(top = 8.dp))
             }
 
+            SectionKicker("Staying up", Modifier.padding(top = 20.dp, bottom = 8.dp))
+            ResilienceCard(state, viewModel)
+
             SectionKicker("Protocols", Modifier.padding(top = 20.dp, bottom = 8.dp))
             Rows(viewModel, listOf(ProxySpecs.PROTOCOL_ANTHROPIC, ProxySpecs.PROTOCOL_OPENAI))
 
@@ -403,6 +406,106 @@ private fun CertificateCard(
             )
         }
     }
+}
+
+/**
+ * What this device will let the proxy do while nobody is looking.
+ *
+ * **This card exists because its absence was the bug.** The API went quiet
+ * overnight and there was nothing anywhere on the phone that said why: the
+ * process had been killed, the restart had been refused foreground standing,
+ * and the service had stopped itself with only a line in a log nobody reads.
+ * Every part of that is now either fixed or said out loud, and the two things
+ * that cannot be fixed from inside the app are these.
+ *
+ * It says nothing at all when the platform is already allowing both, which is
+ * the point: a permanent row nagging about a permission that is granted is how
+ * a screen teaches people to stop reading it.
+ */
+@Composable
+private fun ResilienceCard(
+    state: ai.ondevice.ui.vm.ProxyState,
+    viewModel: ProxyViewModel,
+) {
+    val resilience = state.resilience
+
+    // Re-read on every return to this screen. Both answers are changed out in
+    // Settings, so the value this was built with is stale the moment somebody
+    // acts on it -- and a card still saying "not allowed" after you allowed it
+    // is worse than one that never mentioned it.
+    androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.refreshResilience() }
+
+    NCard(gap = 9.dp) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            NDot(
+                color = if (resilience.settled) NocturneColors.Accent else NocturneColors.Neutral500,
+                size = 6.dp,
+            )
+            Text(
+                if (resilience.settled) {
+                    "Allowed to come back on its own"
+                } else {
+                    "This device can stop it for good"
+                },
+                style = NocturneType.Row,
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        NCardBody(
+            "The system kills this app when it wants memory back, and it is right to. " +
+                "What matters is what happens next: a check runs every fifteen minutes and " +
+                "starts the server again. Android only lets that check do its job with the " +
+                "two permissions below.",
+        )
+
+        if (!resilience.canRestartUnattended) {
+            RestrictionRow(
+                title = "Alarms & reminders is off",
+                body = "Without it this app may be woken but not allowed to start the server, " +
+                    "so the check can only post a notification and wait for a tap. This is " +
+                    "the permission that makes the restart automatic.",
+                action = "Allow alarms",
+                onClick = { viewModel.openRestrictionSettings(exactAlarms = true) },
+            )
+        }
+
+        if (!resilience.exemptFromBattery) {
+            RestrictionRow(
+                title = "Battery optimisation is on",
+                body = "Which is what lets this phone freeze the app in the background. A " +
+                    "frozen server accepts the connection and then answers nobody, and a " +
+                    "caller sees a timeout rather than a refusal -- the harder of the two to " +
+                    "diagnose. Set this app to Unrestricted.",
+                action = "Open battery settings",
+                onClick = { viewModel.openRestrictionSettings(exactAlarms = false) },
+            )
+        }
+
+        if (resilience.settled) {
+            NHelp(
+                "Both granted. The server comes back by itself after a kill, a reboot and an " +
+                    "app update, and says so in the shade if it ever cannot.",
+            )
+        }
+    }
+}
+
+/** One thing the platform is withholding, and the one tap that grants it. */
+@Composable
+private fun RestrictionRow(
+    title: String,
+    body: String,
+    action: String,
+    onClick: () -> Unit,
+) {
+    Text(title, style = NocturneType.Row, color = NocturneColors.Neutral300)
+    NCardBody(body)
+    NButton(action, onClick = onClick, style = NButtonStyle.Secondary)
 }
 
 /** One address the server answers on, with the button that copies it. */

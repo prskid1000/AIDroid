@@ -52,6 +52,15 @@ data class ProxyState(
     val voices: List<String> = emptyList(),
     /** The certificate on disk, when HTTPS has ever been switched on. */
     val certificate: Certificate? = null,
+    /**
+     * What this device will let the proxy do while nobody is looking.
+     *
+     * On the screen because it is the difference between a server and a server
+     * that works, and because neither half of it is something this app can
+     * grant itself. It was invisible, and what that looked like was an API that
+     * went quiet overnight with no explanation anywhere on the phone.
+     */
+    val resilience: Resilience = Resilience(),
 ) {
     /**
      * The certificate as a screen needs it.
@@ -65,6 +74,25 @@ data class ProxyState(
         val names: List<String>,
         val pem: String,
     )
+
+    /**
+     * The two permissions that decide whether the proxy survives being left alone.
+     *
+     * Neither is a setting this app owns, and that is exactly why they belong
+     * on this screen: without them the failure is a server that answers for as
+     * long as you are looking at it. Read fresh each time rather than held,
+     * because both are changed in Settings — outside this process — and a
+     * cached "granted" would be the most misleading value on the card.
+     */
+    data class Resilience(
+        /** Whether an exact alarm may restart the proxy with nobody present. */
+        val canRestartUnattended: Boolean = true,
+        /** Whether the system has been told to stop economising on this app. */
+        val exemptFromBattery: Boolean = true,
+    ) {
+        /** Nothing to say when the platform is already allowing both. */
+        val settled: Boolean get() = canRestartUnattended && exemptFromBattery
+    }
 
     val settings: SparseParams get() = document.settings
 
@@ -184,6 +212,7 @@ class ProxyViewModel @Inject constructor(
     private val jobs: VideoJobs,
     private val db: ai.ondevice.data.db.OnDeviceDatabase,
     private val tls: ai.ondevice.proxy.ProxyTls,
+    private val watchdog: ai.ondevice.proxy.ProxyWatchdog,
     /**
      * Asked what voices exist rather than told.
      *
@@ -198,6 +227,7 @@ class ProxyViewModel @Inject constructor(
     val state: StateFlow<ProxyState> = _state.asStateFlow()
 
     init {
+        refreshResilience()
         viewModelScope.launch {
             prefs.proxyDocument.collect { raw ->
                 _state.value = _state.value.copy(document = ProxyDocument.parse(raw))
@@ -394,9 +424,11 @@ class ProxyViewModel @Inject constructor(
                 }
             }
             runCatching { server.sync() }
+            runCatching { watchdog.sync() }
             _state.value = _state.value.copy(tailnetAddress = Reachability.tailnetAddress())
             refreshCertificate()
         }
+        refreshResilience()
     }
 
     fun refreshReachability() {
@@ -404,6 +436,39 @@ class ProxyViewModel @Inject constructor(
             _state.value = _state.value.copy(tailnetAddress = Reachability.tailnetAddress())
             runCatching { server.sync() }
         }
+        refreshResilience()
+    }
+
+    /**
+     * Re-read what the platform is currently allowing.
+     *
+     * Called on every entry to the screen and after every trip out to Settings,
+     * because both answers are changed somewhere this process is not and the
+     * screen would otherwise keep showing the state at the moment it was built
+     * — telling somebody who has just granted the permission that they have not.
+     */
+    fun refreshResilience() {
+        _state.value = _state.value.copy(
+            resilience = ProxyState.Resilience(
+                canRestartUnattended = watchdog.canRestartUnattended,
+                exemptFromBattery = watchdog.exemptFromBatteryOptimisation,
+            ),
+        )
+    }
+
+    /**
+     * Open whichever Settings page grants the thing that is missing.
+     *
+     * Returns whether there was anywhere to go, so the caller does not have to
+     * ask the same question twice. `NEW_TASK` because the context here is the
+     * application's, not the activity's.
+     */
+    fun openRestrictionSettings(exactAlarms: Boolean): Boolean {
+        val intent = if (exactAlarms) watchdog.exactAlarmSettings() else watchdog.batterySettings()
+        intent ?: return false
+        return runCatching {
+            context.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.isSuccess
     }
 
     fun clearLog() = log.clear()
@@ -444,6 +509,10 @@ class ProxyViewModel @Inject constructor(
             // screen could not usefully draw. The server's own sync is
             // idempotent and cheap when nothing that matters has changed.
             runCatching { server.sync() }
+            // Arm or disarm the restart check in the same breath. Switching the
+            // proxy off has to take the fifteen-minute wake-up with it, or the
+            // phone keeps waking up for a server nobody asked for.
+            runCatching { watchdog.sync() }
             _state.value = _state.value.copy(revealedToken = null)
             // A start with HTTPS on may have made a certificate, or replaced one
             // that no longer named this address.
