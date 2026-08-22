@@ -456,20 +456,16 @@ private fun ResilienceCard(
             )
         }
 
-        NCardBody(
-            "The system kills this app when it wants memory back, and it is right to. " +
-                "What matters is what happens next: a check runs every fifteen minutes and " +
-                "starts the server again. Android only lets that check do its job with the " +
-                "two permissions below.",
-        )
+        // One line. The paragraph here explained that the system kills this app
+        // for memory and that a check restarts it -- true, and an account of the
+        // machinery rather than of anything to do about it. What is left is the
+        // part a reader can act on; the rest is in SPEC 18.7.
+        NCardBody("A check restarts the server every fifteen minutes if this device stops it.")
 
         if (!resilience.canRestartUnattended) {
             RestrictionRow(
-                title = "Alarms & reminders is off",
-                body = "Without it this app may be woken but not allowed to start the server, " +
-                    "so the check can only post a notification and wait for a tap. This is " +
-                    "the permission that makes the restart automatic.",
-                action = "Allow alarms",
+                text = "Alarms & reminders is off, so the restart needs a tap.",
+                action = "Allow",
                 onClick = {
                     viewModel.openRestrictionSettings(ai.ondevice.ui.vm.ProxyState.Restriction.ALARMS)
                 },
@@ -478,12 +474,8 @@ private fun ResilienceCard(
 
         if (!resilience.exemptFromBattery) {
             RestrictionRow(
-                title = "Battery optimisation is on",
-                body = "Which is what lets this phone freeze the app in the background. A " +
-                    "frozen server accepts the connection and then answers nobody, and a " +
-                    "caller sees a timeout rather than a refusal -- the harder of the two to " +
-                    "diagnose. Set this app to Unrestricted.",
-                action = "Open battery settings",
+                text = "Battery optimisation is on. Set this app to Unrestricted.",
+                action = "Open",
                 onClick = {
                     viewModel.openRestrictionSettings(ai.ondevice.ui.vm.ProxyState.Restriction.BATTERY)
                 },
@@ -492,13 +484,8 @@ private fun ResilienceCard(
 
         if (!resilience.notificationsAllowed) {
             RestrictionRow(
-                title = "Notifications are off",
-                body = "Which leaves nothing to fall back on. When the platform refuses to let " +
-                    "the server start, a notification and a tap is the whole remaining plan -- " +
-                    "and posting one to an app whose notifications are off does nothing and " +
-                    "says nothing. The server would be down, this app would know, and the " +
-                    "knowing could not reach you.",
-                action = "Turn notifications on",
+                text = "Notifications are off, so it cannot tell you when it fails.",
+                action = "Turn on",
                 onClick = {
                     viewModel.openRestrictionSettings(
                         ai.ondevice.ui.vm.ProxyState.Restriction.NOTIFICATIONS,
@@ -506,27 +493,37 @@ private fun ResilienceCard(
                 },
             )
         }
-
-        if (resilience.settled) {
-            NHelp(
-                "Nothing is in the way. The server comes back by itself after a kill, a " +
-                    "reboot and an app update, and says so in the shade if it ever cannot.",
-            )
-        }
     }
 }
 
-/** One thing the platform is withholding, and the one tap that grants it. */
+/**
+ * One thing the platform is withholding, on one line, with the tap that grants it.
+ *
+ * **A row appears only while it is a problem.** Nothing is drawn greyed out or
+ * ticked off: a permission that has already been given has nothing to say, and a
+ * row that stays behind to congratulate the reader is how this card would teach
+ * them to scroll past it. So when all three are granted this whole section is
+ * the heading and one sentence.
+ *
+ * The sentence says what to do and stops. Each of these used to open with a
+ * paragraph explaining the failure it prevents, which is an argument aimed at
+ * somebody who has not had that failure and is reading a settings screen. The
+ * arguments are in SPEC 18.7.
+ */
 @Composable
 private fun RestrictionRow(
-    title: String,
-    body: String,
+    text: String,
     action: String,
     onClick: () -> Unit,
 ) {
-    Text(title, style = NocturneType.Row, color = NocturneColors.Neutral300)
-    NCardBody(body)
-    NButton(action, onClick = onClick, style = NButtonStyle.Secondary)
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        NCardBody(text, Modifier.weight(1f))
+        NButton(action, onClick = onClick, style = NButtonStyle.Secondary)
+    }
 }
 
 /** One address the server answers on, with the button that copies it. */
