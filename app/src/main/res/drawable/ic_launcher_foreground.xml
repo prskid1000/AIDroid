@@ -9,12 +9,12 @@
     <group android:translateX="30" android:translateY="30" android:scaleX="2" android:scaleY="2">
         <path
             android:pathData="M12,3.5l8,4 -8,4 -8,-4z"
-            android:strokeColor="#9184D9"
+            android:strokeColor="#8FBF7F"
             android:strokeWidth="1.7"
             android:strokeLineJoin="round" />
         <path
             android:pathData="M4,12l8,4 8,-4M4,16.5l8,4 8,-4"
-            android:strokeColor="#9184D9"
+            android:strokeColor="#8FBF7F"
             android:strokeWidth="1.7"
             android:strokeLineJoin="round" />
     </group>

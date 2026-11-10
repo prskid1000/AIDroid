@@ -43,13 +43,13 @@ data class NocturneShadow(
 
 @Immutable
 object Elevation {
-    /** `0 0 0 1px #3f424d` */
+    /** `0 0 0 1px #3d433d` */
     val sm = NocturneShadow(NocturneColors.Neutral800, 0.dp, 0f, 0.dp)
 
-    /** `0 0 0 1px #595d6c, 0 6px 18px rgba(0,0,0,0.55)` */
+    /** `0 0 0 1px #565f56, 0 6px 18px rgba(0,0,0,0.55)` */
     val md = NocturneShadow(NocturneColors.Neutral700, 18.dp, 0.55f, 6.dp)
 
-    /** `0 0 0 1px #9397ab, 0 16px 40px rgba(0,0,0,0.65)` */
+    /** `0 0 0 1px #909a90, 0 16px 40px rgba(0,0,0,0.65)` */
     val lg = NocturneShadow(NocturneColors.Neutral500, 40.dp, 0.65f, 16.dp)
 }
 

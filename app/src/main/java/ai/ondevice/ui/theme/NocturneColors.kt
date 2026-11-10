@@ -8,56 +8,56 @@ import androidx.compose.ui.graphics.Color
 object NocturneColors {
 
     // — roles —
-    val Bg = Color(0xFF161826)
-    val Surface = Color(0xFF232532)
-    val Text = Color(0xFFE9E9ED)
+    val Bg = Color(0xFF0C0C0C)
+    val Surface = Color(0xFF1A1D1A)
+    val Text = Color(0xFFDDE3DC)
 
     /** `--color-accent`. */
-    val Accent = Color(0xFF9184D9)
+    val Accent = Color(0xFF8FBF7F)
 
     /** `--color-accent-2`. */
-    val Accent2 = Color(0xFFA7A1DB)
+    val Accent2 = Color(0xFFA8BEA7)
 
-    /** `--color-divider`: `color-mix(in srgb, #e9e9ed 16%, transparent)`. */
+    /** `--color-divider`: `color-mix(in srgb, #dde3dc 16%, transparent)`. */
     val Divider = Text.copy(alpha = 0.16f)
 
     // — neutral ramp —
-    val Neutral100 = Color(0xFFF3F5FE)
-    val Neutral200 = Color(0xFFE4E7F5)
-    val Neutral300 = Color(0xFFCFD3E5)
-    val Neutral400 = Color(0xFFB2B6CA)
-    val Neutral500 = Color(0xFF9397AB)
-    val Neutral600 = Color(0xFF75798C)
-    val Neutral700 = Color(0xFF595D6C)
-    val Neutral800 = Color(0xFF3F424D)
-    val Neutral900 = Color(0xFF292B31)
+    val Neutral100 = Color(0xFFF2F5F1)
+    val Neutral200 = Color(0xFFE2E8E1)
+    val Neutral300 = Color(0xFFCCD4CB)
+    val Neutral400 = Color(0xFFAFB8AE)
+    val Neutral500 = Color(0xFF909A90)
+    val Neutral600 = Color(0xFF727C72)
+    val Neutral700 = Color(0xFF565F56)
+    val Neutral800 = Color(0xFF3D433D)
+    val Neutral900 = Color(0xFF282C28)
 
     // — accent ramp —
-    val Accent100 = Color(0xFFF5F4FF)
-    val Accent200 = Color(0xFFE7E5FE)
-    val Accent300 = Color(0xFFD2CEFD)
-    val Accent400 = Color(0xFFB5ABFC)
-    val Accent500 = Color(0xFF968AE0)
-    val Accent600 = Color(0xFF796CBF)
-    val Accent700 = Color(0xFF5D5294)
-    val Accent800 = Color(0xFF423A6A)
-    val Accent900 = Color(0xFF2B2741)
+    val Accent100 = Color(0xFFF1F7EF)
+    val Accent200 = Color(0xFFE0EDDB)
+    val Accent300 = Color(0xFFC9E0C0)
+    val Accent400 = Color(0xFFA9CF9B)
+    val Accent500 = Color(0xFF8FBF7F)
+    val Accent600 = Color(0xFF779F69)
+    val Accent700 = Color(0xFF5C7C51)
+    val Accent800 = Color(0xFF42583B)
+    val Accent900 = Color(0xFF2A3627)
 
     // — accent-2 ramp (mono: reads the same as accent) —
-    val Accent2100 = Color(0xFFF5F4FF)
-    val Accent2200 = Color(0xFFE7E5FE)
-    val Accent2300 = Color(0xFFD2CEFD)
-    val Accent2400 = Color(0xFFB5AFE8)
-    val Accent2500 = Color(0xFF9690C9)
-    val Accent2600 = Color(0xFF7972A9)
-    val Accent2700 = Color(0xFF5C5783)
-    val Accent2800 = Color(0xFF423E5D)
-    val Accent2900 = Color(0xFF2B293A)
+    val Accent2100 = Color(0xFFF1F7EF)
+    val Accent2200 = Color(0xFFE0EDDB)
+    val Accent2300 = Color(0xFFC9E0C0)
+    val Accent2400 = Color(0xFFB4C8B3)
+    val Accent2500 = Color(0xFF98AE97)
+    val Accent2600 = Color(0xFF7B917A)
+    val Accent2700 = Color(0xFF5E705E)
+    val Accent2800 = Color(0xFF434F43)
+    val Accent2900 = Color(0xFF2B322B)
 
     /** Deck section-divider ground — saturation as presence. */
-    val Section = Color(0xFF262A60)
-    val SectionGlow = Color(0xFF353B80)
-    val SectionGhost = Color(0xFF4C5397)
+    val Section = Color(0xFF233023)
+    val SectionGlow = Color(0xFF324332)
+    val SectionGhost = Color(0xFF4E624E)
 
     // — derived text opacities used throughout the stylesheet —
     /** `.text-muted` / `figcaption`: text at 55%. */
